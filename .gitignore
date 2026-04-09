@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust build
+target/
+
+# Drafting local data
+.drafting/
+.atlas/
+.blueprint/

@@ -576,7 +576,7 @@ my-project/
 **Sync Bus(18-19)**
 
 18. Sync Bus 是平台级一等组件,有独立代码模块、集中的事件类型定义、统一的发布订阅 API、调试和测试支持
-19. Sync Bus v1 底层用 in-process EventEmitter / tokio broadcast channel 实现,但抽象层完整,未来可替换为跨进程或持久化实现而不改任何业务代码
+19. Sync Bus v1 底层用 in-process EventEmitter 实现,但抽象层完整,未来可替换为跨进程或持久化实现而不改任何业务代码
 
 ### 平台级原则
 
@@ -679,22 +679,10 @@ my-project/
 - 通过 Rust 后端的 LSP 客户端转发到前端 Monaco
 - v2 才考虑加其他语言
 
-### 字体
-
-**打包 JetBrains Mono**(Apache 2.0 许可证)作为编辑器和终端的统一字体。
-
-理由:
-- 统一体验,所有用户看到的 Drafting 视觉一致
-- 零配置,装完就有专业编程字体
-- Indie Hacker 审美对齐(Vercel/Linear/Cursor 都用 JetBrains Mono)
-- 包大小约 3MB,可接受
-
-Settings 允许切换到其他字体(系统等宽字体或用户已装的字体),但默认 JetBrains Mono。
-
 ### 仓库结构(参考)
 
 ```
-drafting/                            ← 仓库根
+patchboard/                          ← 仓库根
 ├── package.json                     ← pnpm 根
 ├── pnpm-workspace.yaml
 ├── Cargo.toml                       ← Rust workspace 根
@@ -740,7 +728,17 @@ drafting/                            ← 仓库根
     └── PRODUCT-DESIGN.md            ← 产品设计文档
 ```
 
-注意:这里的 `packages/` 是 **Drafting 平台本身的源代码**,和"用户工程的 packages/"(`@myapp/sockets` 等)是不同概念,前者是产品源码,后者是产品生成的用户代码。两者在不同仓库,不会混淆。
+注意:这里的 `packages/` 是 **Patchboard 平台本身的源代码**,和"用户工程的 packages/"(`@myapp/sockets` 等)是不同概念,前者是产品源码,后者是产品生成的用户代码。两者在不同仓库,不会混淆。
+
+### 开发者前置准备
+
+如果开发者(你)主要写过 Vue 而不是 React,需要在阶段 0 投入约 1 周时间熟悉:
+- React 18 + Hooks 基础
+- TypeScript + React 的最佳实践
+- Zustand 的使用模式
+- shadcn/ui 的复制和定制
+
+这一周不是浪费——是阶段 0 的一部分,可以和工程脚手架并行。Claude 协作能加速这个学习过程。
 
 ---
 
@@ -840,7 +838,6 @@ drafting/                            ← 仓库根
 
 ### 子系统名
 
-- **Drafting**:产品名,工作台
 - **Patchboard**:架构层,Socket/Adapter 的图形化编辑器
 - **Blueprint**:意图层,MD 驱动开发系统
 - **Atlas**:理解层,只读代码探查
@@ -883,7 +880,6 @@ drafting/                            ← 仓库根
 - **Sync Bus**:跨子系统通信的事件总线
 - **Origin**:事件携带的发布者标记,用于循环防护
 - **AI Provider Manager**:多 AI 模型管理和路由
-- **FileIdentity**:编辑器对文件的"身份识别"结果
 
 ---
 
@@ -970,7 +966,7 @@ DisplayMode 三种:Background / NewTab / ExistingTab
 - 图片显示 / sixel 协议
 - 多终端 split pane
 - 终端主题深度定制(只提供 dark/light)
-- 终端字体自定义(用 JetBrains Mono,与编辑器联动)
+- 终端字体自定义(用系统默认等宽字体)
 - 终端录制和回放
 - 跨工程命令历史共享
 - 终端内嵌 AI 解释(留 v1.5+,Warp 风格的特色)
@@ -1056,7 +1052,7 @@ pub enum TerminalEvent {
 7. v1 必做:Programmatic Terminal API(run_command / spawn_task / cancel / promote_to_ui)
 8. v1 必做:Claude Code 和 Codex 的快捷启动 + CLAUDE.md 自动生成
 9. v1 必做:默认 shell 用户可配置
-10. v1 不做:SSH、tmux、命令补全、shell 高级集成、split pane、自定义字体(用 JetBrains Mono)、终端内嵌 AI
+10. v1 不做:SSH、tmux、命令补全、shell 高级集成、split pane、自定义字体、终端内嵌 AI
 
 **UI 集成(11-13)**
 
@@ -1297,7 +1293,7 @@ pub enum GitEvent {
 20. **`BranchCheckedOut` 事件触发 Patchboard、Blueprint、Atlas 全部 reload**
 21. Git 错误不影响项目健康度(Git 不进 Headquarters 的健康判定算法)
 
-**自动化(22-25)**
+**自动化(22-24)**
 
 22. "Commit & Push" 按钮提供,位置不显眼防误点
 23. Git view 不定期主动刷新,只在用户操作时 + 文件监听触发
@@ -1306,7 +1302,18 @@ pub enum GitEvent {
 
 ### v1 工程量预估
 
-**2-3 周**(约 18-26 天)
+**2-3 周**(约 18-26 天),分项:
+
+- git2 集成 + 基础操作:3-4 天
+- 分支管理:1-2 天
+- Stash:1 天
+- Conflict 检测和编辑器解决 UI:2-3 天
+- AI 辅助 commit message:1-2 天
+- Git view 完整 UI:3-4 天
+- 编辑器内 gutter 装饰和 inline blame:2-3 天
+- Headquarters 集成:1 天
+- 性能优化:2-3 天
+- 测试和打磨:2-3 天
 
 ---
 
@@ -1353,6 +1360,22 @@ AI Provider Manager
 - 用户用自己的 API key,Drafting 不自带
 - API key 存在系统 keychain(macOS Keychain / Windows Credential Manager / Linux libsecret)
 - Drafting 自己的存储不保存任何 key
+
+### Provider Adapter 接口
+
+```rust
+#[async_trait]
+pub trait ProviderAdapter {
+    fn id(&self) -> &str;
+    async fn list_models(&self) -> Result<Vec<ModelInfo>>;
+    async fn stream_chat(&self, request: ChatRequest, cancel: CancellationToken)
+        -> Result<BoxStream<'static, Result<StreamEvent>>>;
+    fn count_tokens(&self, text: &str, model: &str) -> Result<usize>;
+    async fn health_check(&self) -> Result<()>;
+}
+```
+
+所有 provider 都通过 `stream_chat` 单一接口对外,Anthropic 和 OpenAI 的差异在 adapter 内部翻译。
 
 ### Task Router
 
@@ -1486,6 +1509,35 @@ ai_provider_manager.run_task(TaskId::BlueprintCheck, input).await?;
 - Settings 可调
 - 超出时优先砍可选 context,告知用户
 
+**缓存命中追踪**:
+- Anthropic prompt caching 命中标记为 cached input,单价更低
+- Drafting 自己的 Blueprint check 缓存命中**不算入成本**(没调 AI)
+- UI 显示缓存命中率
+
+### 配置 UI(Settings)
+
+**Provider 配置区**:
+- 添加 Provider(必须通过健康检查才能保存)
+- API key / endpoint 配置
+- 测试连接 / 移除
+
+**任务路由区**:
+- 每个任务的当前模型
+- 切换模型下拉
+- 温度、max_tokens 等参数
+- 测试 / 恢复默认
+
+**月度预算区**:
+- 当前已用 / 预算
+- 按任务/provider 的成本分布
+- 预算阈值配置
+
+**隐私设置区**:
+- 默认隐私级别
+- 内容扫描模式(强 / 掩码 / 询问 / 关)
+- 自定义文件路径黑名单
+- 审计日志查看
+
 ### 没配 API key 时
 
 新装 Drafting 的用户首次使用 AI 功能:
@@ -1511,19 +1563,50 @@ Settings 里有"全局 AI 开关",关闭后:
 
 ```rust
 pub enum AiProviderEvent {
+    // 配置
     ProviderAdded { provider_id }
     ProviderRemoved { provider_id }
     TaskRouteChanged { task_id, new_provider, new_model }
+    
+    // 流
     StreamStarted { stream_id, task, provider, model }
     StreamProgress { stream_id, tokens_received }  // 高频,不广播
     StreamCompleted { stream_id, input_tokens, output_tokens, cost_usd }
     StreamCancelled { stream_id }
     StreamFailed { stream_id, error }
+    
+    // 成本
     BudgetWarning { used_usd, limit_usd, percent }
     BudgetExceeded { used_usd, limit_usd }
+    
+    // 隐私
     PrivacyViolationBlocked { task, reason, file }
 }
 ```
+
+### AI 调用的"足迹"显示
+
+任何 AI 流式响应的 UI 上,角落里有 ℹ️ 图标,hover 显示:
+
+```
+Provider: Anthropic
+Model: claude-opus-4-6
+Task: blueprint.check
+Tokens: 8234 / 567
+Cost: $0.045
+Time: 12.3s
+[查看详细 prompt]
+```
+
+点击"查看详细 prompt"看完整内容。这是建立用户信任的关键。
+
+### v1 不做
+
+- Drafting 自带 API key(留 v2+ SaaS 模式)
+- 用户自定义 system prompt(留 v1.5 高级用户)
+- 任务定义的扩展系统(留 v2 扩展系统统一处理)
+- AI 调用的 A/B 对比
+- 完整的 prompt engineering UI
 
 ### AI Provider Manager v1 硬约束清单
 
@@ -1572,7 +1655,7 @@ pub enum AiProviderEvent {
 26. 长连接 5 分钟无输出超时
 27. 全局并发上限 5,同任务类型 1(Settings 可调)
 
-**Cost Tracker(28-32)**
+**Cost Tracker(28-30)**
 
 28. 每次调用记录 token 和成本,写审计日志
 29. 内置模型单价表,用户可覆盖
@@ -1590,7 +1673,16 @@ pub enum AiProviderEvent {
 
 ### v1 工程量预估
 
-**3-4 周**(约 24-32 天)
+**3-4 周**(约 24-32 天):
+
+- Provider Adapters(Anthropic / OpenAI / Ollama / OpenAI 兼容):4-5 天
+- Task Router + 任务定义 + Settings UI:3-4 天
+- Context Builder(各任务的策略):4-5 天
+- Privacy Filter(三层防护 + 审计日志):3-4 天
+- Stream Manager(流、cancel、重试):2-3 天
+- Cost Tracker(token 计数、单价表、预算):2-3 天
+- Settings 完整 UI:3-4 天
+- 测试和打磨:3-4 天
 
 ---
 
@@ -1909,9 +2001,26 @@ pub enum EditorEvent {
 
 37. 全局搜索后台异步,显示进度,工程文件数上限 50000(超出警告)
 
+### v1 不做的清单(已列上面)
+
+包括 Vim 模式、自动 format on save、Split editor、多窗口、Notebook、Live Share、远程编辑、Markdown 预览面板、GitLens 风格 Git 集成等。
+
 ### v1 工程量预估
 
-**3-4 周**(约 24-32 天)
+**3-4 周**(约 24-32 天):
+
+- Monaco 集成 + 基础配置:3-4 天
+- LSP 客户端(Rust + 转发):4-5 天
+- typescript-language-server sidecar 打包:2 天
+- 文件身份识别 + 状态栏 + 只读保护:2-3 天
+- AI 补全 ghost text:3-4 天
+- Cmd+K 整段生成:2 天
+- 文件树 + 虚拟列表 + 特殊标记:2-3 天
+- 命令面板:2 天
+- 崩溃恢复 + 自动保存:1-2 天
+- Zen 模式 + 全局搜索:1-2 天
+- 协同(Sync Bus 事件):1-2 天
+- 性能优化和测试:2-3 天
 
 ---
 
@@ -1940,3 +2049,12 @@ pub enum EditorEvent {
 2. 在仓库根目录创建 `CLAUDE.md`,内容是本文档(给 Claude Code 用)
 3. 按 Part 8 的 6 阶段开发节奏,从**阶段 0(奠基)**开始
 4. 第一周:Tauri 2 + React + TypeScript 工程脚手架,Sync Bus 完整实现,IDE 主界面骨架
+
+---
+
+## 文档版本
+
+- 当前版本:v0.1(完成 Patchboard / Blueprint / Atlas / Headquarters / 三系统协同的设计)
+- 待补充:Part 11 列出的四个模块
+- 完成全部设计后,本文档将作为 CLAUDE.md 使用
+
