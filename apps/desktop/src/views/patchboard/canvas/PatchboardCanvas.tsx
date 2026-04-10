@@ -10,6 +10,7 @@ import "@xyflow/react/dist/style.css";
 import { useCanvasState } from "./hooks/useCanvasState";
 import { SocketRefNode } from "./nodes/SocketRefNode";
 import { AdapterNodeComponent } from "./nodes/AdapterNodeComponent";
+import { useThemeStore } from "../../../stores/theme-store";
 
 const nodeTypes = {
   "socket-ref": SocketRefNode,
@@ -19,6 +20,14 @@ const nodeTypes = {
 export function PatchboardCanvas() {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect } =
     useCanvasState();
+  const themeVariant = useThemeStore((s) => s.variant);
+
+  const dotColor =
+    themeVariant === "light"
+      ? "rgba(30, 40, 80, 0.18)"
+      : themeVariant === "soft"
+        ? "rgba(255, 255, 255, 0.1)"
+        : "rgba(255, 255, 255, 0.08)";
 
   return (
     <div className="w-full h-full">
@@ -38,7 +47,7 @@ export function PatchboardCanvas() {
           variant={BackgroundVariant.Dots}
           gap={24}
           size={1}
-          color="rgba(255, 255, 255, 0.08)"
+          color={dotColor}
         />
         <Controls
           showInteractive={false}

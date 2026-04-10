@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import { useEditorStore } from "../../stores/editor-store";
+import { useThemeStore } from "../../stores/theme-store";
 
 // Use local monaco copies (bundled) instead of CDN
 loader.config({
@@ -35,9 +36,18 @@ export function MonacoPanel() {
   const updateTabContent = useEditorStore((s) => s.updateTabContent);
   const saveTab = useEditorStore((s) => s.saveTab);
   const saveAll = useEditorStore((s) => s.saveAll);
+  const themeVariant = useThemeStore((s) => s.variant);
 
   const activeTab = tabs.find((t) => t.path === activeTabPath);
   const editorRef = useRef<any>(null);
+  const monacoRef = useRef<any>(null);
+
+  // Re-apply theme when variant changes
+  useEffect(() => {
+    if (monacoRef.current) {
+      monacoRef.current.editor.setTheme(`drafting-${themeVariant}`);
+    }
+  }, [themeVariant]);
 
   // Keyboard shortcuts: Cmd+S save, Cmd+Alt+S save all
   useEffect(() => {
@@ -74,9 +84,12 @@ export function MonacoPanel() {
         <Editor
           value={activeTab.content}
           language={detectLanguage(activeTab.path)}
-          theme="drafting-glass"
+          theme={`drafting-${themeVariant}`}
           beforeMount={(monaco) => {
-            monaco.editor.defineTheme("drafting-glass", {
+            monacoRef.current = monaco;
+
+            // Dark variant
+            monaco.editor.defineTheme("drafting-dark", {
               base: "vs-dark",
               inherit: true,
               rules: [],
@@ -100,7 +113,59 @@ export function MonacoPanel() {
                 "scrollbarSlider.activeBackground": "#ffffff30",
               },
             });
-            monaco.editor.setTheme("drafting-glass");
+
+            // Light variant
+            monaco.editor.defineTheme("drafting-light", {
+              base: "vs",
+              inherit: true,
+              rules: [],
+              colors: {
+                "editor.background": "#ffffff00",
+                "editor.foreground": "#1a2140",
+                "editor.lineHighlightBackground": "#1a214008",
+                "editor.selectionBackground": "#5b7cff33",
+                "editorCursor.foreground": "#5b7cff",
+                "editorLineNumber.foreground": "#8591ab80",
+                "editorLineNumber.activeForeground": "#4a5577",
+                "editorIndentGuide.background": "#1a214010",
+                "editorIndentGuide.activeBackground": "#1a214022",
+                "editor.selectionHighlightBackground": "#5b7cff1a",
+                "editor.wordHighlightBackground": "#1a21400a",
+                "editorBracketMatch.background": "#5b7cff22",
+                "editorBracketMatch.border": "#5b7cff66",
+                "scrollbarSlider.background": "#1a214018",
+                "scrollbarSlider.hoverBackground": "#1a214028",
+                "scrollbarSlider.activeBackground": "#1a214038",
+              },
+            });
+
+            // Soft variant
+            monaco.editor.defineTheme("drafting-soft", {
+              base: "vs-dark",
+              inherit: true,
+              rules: [],
+              colors: {
+                "editor.background": "#1e203000",
+                "editor.foreground": "#e8e2f0",
+                "editor.lineHighlightBackground": "#ffffff0a",
+                "editor.selectionBackground": "#c9c0e433",
+                "editorCursor.foreground": "#c9c0e4",
+                "editorLineNumber.foreground": "#8a85a066",
+                "editorLineNumber.activeForeground": "#c5bed4",
+                "editorIndentGuide.background": "#ffffff0c",
+                "editorIndentGuide.activeBackground": "#ffffff1a",
+                "editorWhitespace.foreground": "#ffffff14",
+                "editor.selectionHighlightBackground": "#c9c0e41a",
+                "editor.wordHighlightBackground": "#ffffff0f",
+                "editorBracketMatch.background": "#c9c0e422",
+                "editorBracketMatch.border": "#c9c0e466",
+                "scrollbarSlider.background": "#ffffff10",
+                "scrollbarSlider.hoverBackground": "#ffffff20",
+                "scrollbarSlider.activeBackground": "#ffffff30",
+              },
+            });
+
+            monaco.editor.setTheme(`drafting-${themeVariant}`);
           }}
           onChange={(val) => {
             if (val !== undefined) {

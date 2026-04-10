@@ -7,11 +7,15 @@ import {
   GitBranch,
   Terminal,
   Settings,
+  Moon,
+  Sun,
+  Sparkles,
 } from "lucide-react";
 import {
   useNavigationStore,
   type ViewId,
 } from "../stores/navigation-store";
+import { useThemeStore, type ThemeVariant } from "../stores/theme-store";
 
 const topItems: { id: ViewId; icon: typeof Home; label: string }[] = [
   { id: "headquarters", icon: Home, label: "Headquarters" },
@@ -65,6 +69,35 @@ function SidebarButton({ Icon, label, active, onClick }: SidebarButtonProps) {
   );
 }
 
+const themeIcons: Record<ThemeVariant, typeof Moon> = {
+  dark: Moon,
+  light: Sun,
+  soft: Sparkles,
+};
+
+const themeLabels: Record<ThemeVariant, string> = {
+  dark: "Dark (click for Light)",
+  light: "Light (click for Soft)",
+  soft: "Soft (click for Dark)",
+};
+
+function ThemeToggleButton() {
+  const variant = useThemeStore((s) => s.variant);
+  const cycleVariant = useThemeStore((s) => s.cycleVariant);
+  const Icon = themeIcons[variant];
+
+  return (
+    <button
+      onClick={cycleVariant}
+      title={themeLabels[variant]}
+      className="relative w-10 h-10 flex items-center justify-center rounded-xl text-text-muted hover:text-text-secondary transition-all duration-200"
+    >
+      <span className="absolute inset-0 rounded-xl opacity-0 hover:opacity-100 bg-white/5 transition-opacity" />
+      <Icon size={18} className="relative z-10" />
+    </button>
+  );
+}
+
 export function Sidebar() {
   const { activeView, setActiveView } = useNavigationStore();
 
@@ -82,13 +115,16 @@ export function Sidebar() {
           />
         ))}
       </div>
-      <SidebarButton
-        id="settings"
-        Icon={Settings}
-        label="Settings"
-        active={activeView === "settings"}
-        onClick={() => setActiveView("settings")}
-      />
+      <div className="flex flex-col items-center gap-1">
+        <ThemeToggleButton />
+        <SidebarButton
+          id="settings"
+          Icon={Settings}
+          label="Settings"
+          active={activeView === "settings"}
+          onClick={() => setActiveView("settings")}
+        />
+      </div>
     </div>
   );
 }
