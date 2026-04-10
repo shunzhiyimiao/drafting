@@ -25,9 +25,13 @@ export function PatchboardCanvas() {
   const dotColor =
     themeVariant === "light"
       ? "rgba(30, 40, 80, 0.18)"
-      : themeVariant === "soft"
-        ? "rgba(255, 255, 255, 0.1)"
-        : "rgba(255, 255, 255, 0.08)";
+      : themeVariant === "blossom"
+        ? "rgba(170, 40, 80, 0.2)"
+        : themeVariant === "mist"
+          ? "rgba(40, 55, 140, 0.2)"
+          : themeVariant === "soft"
+            ? "rgba(255, 255, 255, 0.1)"
+            : "rgba(255, 255, 255, 0.08)";
 
   return (
     <div className="w-full h-full">

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import {
   Home,
   FileText,
@@ -7,15 +8,19 @@ import {
   GitBranch,
   Terminal,
   Settings,
-  Moon,
-  Sun,
-  Sparkles,
+  Palette,
+  Check,
 } from "lucide-react";
 import {
   useNavigationStore,
   type ViewId,
 } from "../stores/navigation-store";
-import { useThemeStore, type ThemeVariant } from "../stores/theme-store";
+import {
+  useThemeStore,
+  THEME_ORDER,
+  THEME_META,
+  type ThemeVariant,
+} from "../stores/theme-store";
 
 const topItems: { id: ViewId; icon: typeof Home; label: string }[] = [
   { id: "headquarters", icon: Home, label: "Headquarters" },
@@ -41,9 +46,7 @@ function SidebarButton({ Icon, label, active, onClick }: SidebarButtonProps) {
       onClick={onClick}
       title={label}
       className={`relative w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 ${
-        active
-          ? "text-accent"
-          : "text-text-muted hover:text-text-secondary"
+        active ? "text-accent" : "text-text-muted hover:text-text-secondary"
       }`}
     >
       {active && (
@@ -52,10 +55,10 @@ function SidebarButton({ Icon, label, active, onClick }: SidebarButtonProps) {
             className="absolute inset-0 rounded-xl"
             style={{
               background:
-                "linear-gradient(135deg, rgba(168, 198, 255, 0.25), rgba(168, 198, 255, 0.08))",
+                "linear-gradient(135deg, rgba(var(--color-accent-rgb), 0.25), rgba(var(--color-accent-rgb), 0.08))",
               boxShadow:
-                "inset 0 1px 0 rgba(255,255,255,0.2), 0 0 20px rgba(168, 198, 255, 0.25)",
-              border: "1px solid rgba(168, 198, 255, 0.35)",
+                "inset 0 1px 0 rgba(255,255,255,0.2), 0 0 20px rgba(var(--color-accent-rgb), 0.25)",
+              border: "1px solid rgba(var(--color-accent-rgb), 0.35)",
             }}
           />
           <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-full bg-accent" />
@@ -69,32 +72,132 @@ function SidebarButton({ Icon, label, active, onClick }: SidebarButtonProps) {
   );
 }
 
-const themeIcons: Record<ThemeVariant, typeof Moon> = {
-  dark: Moon,
-  light: Sun,
-  soft: Sparkles,
-};
-
-const themeLabels: Record<ThemeVariant, string> = {
-  dark: "Dark (click for Light)",
-  light: "Light (click for Soft)",
-  soft: "Soft (click for Dark)",
-};
-
-function ThemeToggleButton() {
+function ThemePicker() {
   const variant = useThemeStore((s) => s.variant);
-  const cycleVariant = useThemeStore((s) => s.cycleVariant);
-  const Icon = themeIcons[variant];
+  const setVariant = useThemeStore((s) => s.setVariant);
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click / Escape
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        btnRef.current?.contains(target) ||
+        popoverRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setOpen(false);
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
 
   return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={() => setOpen((o) => !o)}
+        title="Theme"
+        className={`relative w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 ${
+          open
+            ? "text-accent"
+            : "text-text-muted hover:text-text-secondary"
+        }`}
+      >
+        <span className="absolute inset-0 rounded-xl opacity-0 hover:opacity-100 bg-white/5 transition-opacity" />
+        <Palette size={18} className="relative z-10" />
+      </button>
+
+      {open && (
+        <div
+          ref={popoverRef}
+          className="glass-thick fixed z-50 rounded-2xl p-2 flex flex-col gap-0.5 min-w-[220px]"
+          style={{
+            left: "60px",
+            bottom: "56px",
+          }}
+        >
+          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-muted">
+            Theme
+          </div>
+          {THEME_ORDER.map((id) => (
+            <ThemeOption
+              key={id}
+              id={id}
+              active={variant === id}
+              onSelect={() => {
+                setVariant(id);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function ThemeOption({
+  id,
+  active,
+  onSelect,
+}: {
+  id: ThemeVariant;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const meta = THEME_META[id];
+  return (
     <button
-      onClick={cycleVariant}
-      title={themeLabels[variant]}
-      className="relative w-10 h-10 flex items-center justify-center rounded-xl text-text-muted hover:text-text-secondary transition-all duration-200"
+      onClick={onSelect}
+      className={`flex items-center gap-3 px-2.5 py-2 rounded-lg text-left transition-colors ${
+        active
+          ? "bg-white/10 text-text-primary"
+          : "text-text-secondary hover:bg-white/5"
+      }`}
     >
-      <span className="absolute inset-0 rounded-xl opacity-0 hover:opacity-100 bg-white/5 transition-opacity" />
-      <Icon size={18} className="relative z-10" />
+      <SwatchPreview variant={id} />
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium">{meta.label}</div>
+        <div className="text-[10px] text-text-muted truncate">
+          {meta.description}
+        </div>
+      </div>
+      {active && <Check size={14} className="text-accent shrink-0" />}
     </button>
+  );
+}
+
+/** Tiny gradient preview disc for each variant */
+function SwatchPreview({ variant }: { variant: ThemeVariant }) {
+  const backgrounds: Record<ThemeVariant, string> = {
+    dark: "linear-gradient(135deg, #6366f1 0%, #ec4899 50%, #0ea5e9 100%)",
+    light: "linear-gradient(135deg, #ffc8dc, #bedcff, #c8f0dc, #e6c8ff)",
+    soft: "linear-gradient(135deg, #b4c8e6, #dcbed2, #bedcd2, #c8b4dc)",
+    blossom: "linear-gradient(135deg, #ffdee7, #ffc8dc, #ffebf0)",
+    mist: "linear-gradient(135deg, #c5cef9, #b4c3f5, #d2dcfc)",
+  };
+  return (
+    <span
+      className="w-7 h-7 rounded-full shrink-0"
+      style={{
+        background: backgrounds[variant],
+        border: "1px solid rgba(255, 255, 255, 0.2)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15)",
+      }}
+    />
   );
 }
 
@@ -116,7 +219,7 @@ export function Sidebar() {
         ))}
       </div>
       <div className="flex flex-col items-center gap-1">
-        <ThemeToggleButton />
+        <ThemePicker />
         <SidebarButton
           id="settings"
           Icon={Settings}

@@ -165,6 +165,56 @@ export function MonacoPanel() {
               },
             });
 
+            // Blossom variant (rose pink)
+            monaco.editor.defineTheme("drafting-blossom", {
+              base: "vs",
+              inherit: true,
+              rules: [],
+              colors: {
+                "editor.background": "#ffdee700",
+                "editor.foreground": "#4a1929",
+                "editor.lineHighlightBackground": "#4a192908",
+                "editor.selectionBackground": "#d6477233",
+                "editorCursor.foreground": "#d64772",
+                "editorLineNumber.foreground": "#a8607a80",
+                "editorLineNumber.activeForeground": "#7c3248",
+                "editorIndentGuide.background": "#4a192910",
+                "editorIndentGuide.activeBackground": "#4a192922",
+                "editor.selectionHighlightBackground": "#d647721a",
+                "editor.wordHighlightBackground": "#4a19290a",
+                "editorBracketMatch.background": "#d6477222",
+                "editorBracketMatch.border": "#d6477266",
+                "scrollbarSlider.background": "#4a192918",
+                "scrollbarSlider.hoverBackground": "#4a192928",
+                "scrollbarSlider.activeBackground": "#4a192938",
+              },
+            });
+
+            // Mist variant (lavender blue)
+            monaco.editor.defineTheme("drafting-mist", {
+              base: "vs",
+              inherit: true,
+              rules: [],
+              colors: {
+                "editor.background": "#c5cef900",
+                "editor.foreground": "#1a2457",
+                "editor.lineHighlightBackground": "#1a245708",
+                "editor.selectionBackground": "#4a60d833",
+                "editorCursor.foreground": "#4a60d8",
+                "editorLineNumber.foreground": "#6b75a880",
+                "editorLineNumber.activeForeground": "#3a4780",
+                "editorIndentGuide.background": "#1a245710",
+                "editorIndentGuide.activeBackground": "#1a245722",
+                "editor.selectionHighlightBackground": "#4a60d81a",
+                "editor.wordHighlightBackground": "#1a24570a",
+                "editorBracketMatch.background": "#4a60d822",
+                "editorBracketMatch.border": "#4a60d866",
+                "scrollbarSlider.background": "#1a245718",
+                "scrollbarSlider.hoverBackground": "#1a245728",
+                "scrollbarSlider.activeBackground": "#1a245738",
+              },
+            });
+
             monaco.editor.setTheme(`drafting-${themeVariant}`);
           }}
           onChange={(val) => {

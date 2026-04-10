@@ -156,6 +156,116 @@
   --selection-bg: rgba(91, 124, 255, 0.2);
 }
 
+/* --- Blossom: rose pink #FFDEE7 --- */
+[data-theme="blossom"] {
+  --app-gradient:
+    radial-gradient(at 15% 10%, rgba(255, 222, 231, 0.85) 0%, transparent 55%),
+    radial-gradient(at 85% 15%, rgba(255, 200, 220, 0.6) 0%, transparent 55%),
+    radial-gradient(at 50% 85%, rgba(255, 235, 240, 0.75) 0%, transparent 60%),
+    radial-gradient(at 85% 80%, rgba(255, 210, 225, 0.55) 0%, transparent 55%);
+  --app-bg: #ffdee7;
+  --app-sheen: radial-gradient(
+    ellipse 90% 60% at 50% -10%,
+    rgba(255, 255, 255, 0.6),
+    transparent
+  );
+
+  --surface-1: rgba(255, 255, 255, 0.48);
+  --surface-2: rgba(255, 255, 255, 0.62);
+  --surface-3: rgba(255, 255, 255, 0.78);
+  --surface-hover: rgba(255, 255, 255, 0.85);
+  --surface-active: rgba(214, 71, 114, 0.18);
+  --surface-sidebar: rgba(255, 255, 255, 0.55);
+
+  --border-1: rgba(170, 40, 80, 0.08);
+  --border-2: rgba(170, 40, 80, 0.14);
+  --border-3: rgba(170, 40, 80, 0.2);
+
+  --glass-inset-top: rgba(255, 255, 255, 0.85);
+  --glass-inset-bottom: rgba(170, 40, 80, 0.05);
+  --glass-shadow: rgba(170, 40, 80, 0.12);
+
+  --fg-primary: #4a1929;
+  --fg-secondary: #7c3248;
+  --fg-muted: #a8607a;
+
+  --color-accent: #d64772;
+  --color-accent-hover: #c43a64;
+  --color-accent-rgb: 214, 71, 114;
+  --color-success: #3aa878;
+  --color-warning: #d08820;
+  --color-error: #c42f5a;
+  --color-info: #3a8ab0;
+
+  --shadow-panel:
+    0 8px 28px 0 rgba(170, 40, 80, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  --shadow-thick:
+    0 16px 48px 0 rgba(170, 40, 80, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    inset 0 -1px 0 rgba(170, 40, 80, 0.05);
+
+  --scrollbar-thumb: rgba(170, 40, 80, 0.18);
+  --scrollbar-thumb-hover: rgba(170, 40, 80, 0.32);
+
+  --selection-bg: rgba(214, 71, 114, 0.22);
+}
+
+/* --- Mist: lavender blue #C5CEF9 --- */
+[data-theme="mist"] {
+  --app-gradient:
+    radial-gradient(at 10% 10%, rgba(197, 206, 249, 0.85) 0%, transparent 55%),
+    radial-gradient(at 90% 20%, rgba(180, 195, 245, 0.6) 0%, transparent 55%),
+    radial-gradient(at 50% 90%, rgba(210, 220, 252, 0.75) 0%, transparent 60%),
+    radial-gradient(at 85% 75%, rgba(190, 200, 245, 0.55) 0%, transparent 55%);
+  --app-bg: #c5cef9;
+  --app-sheen: radial-gradient(
+    ellipse 90% 60% at 50% -10%,
+    rgba(255, 255, 255, 0.55),
+    transparent
+  );
+
+  --surface-1: rgba(255, 255, 255, 0.48);
+  --surface-2: rgba(255, 255, 255, 0.62);
+  --surface-3: rgba(255, 255, 255, 0.78);
+  --surface-hover: rgba(255, 255, 255, 0.85);
+  --surface-active: rgba(74, 96, 216, 0.2);
+  --surface-sidebar: rgba(255, 255, 255, 0.55);
+
+  --border-1: rgba(40, 55, 140, 0.08);
+  --border-2: rgba(40, 55, 140, 0.14);
+  --border-3: rgba(40, 55, 140, 0.2);
+
+  --glass-inset-top: rgba(255, 255, 255, 0.85);
+  --glass-inset-bottom: rgba(40, 55, 140, 0.05);
+  --glass-shadow: rgba(40, 55, 140, 0.12);
+
+  --fg-primary: #1a2457;
+  --fg-secondary: #3a4780;
+  --fg-muted: #6b75a8;
+
+  --color-accent: #4a60d8;
+  --color-accent-hover: #3a50c8;
+  --color-accent-rgb: 74, 96, 216;
+  --color-success: #2fa876;
+  --color-warning: #c78020;
+  --color-error: #c4466e;
+  --color-info: #3a7ab0;
+
+  --shadow-panel:
+    0 8px 28px 0 rgba(40, 55, 140, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  --shadow-thick:
+    0 16px 48px 0 rgba(40, 55, 140, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    inset 0 -1px 0 rgba(40, 55, 140, 0.05);
+
+  --scrollbar-thumb: rgba(40, 55, 140, 0.18);
+  --scrollbar-thumb-hover: rgba(40, 55, 140, 0.32);
+
+  --selection-bg: rgba(74, 96, 216, 0.22);
+}
+
 /* --- Soft: muted pastel glow --- */
 [data-theme="soft"] {
   --app-gradient:

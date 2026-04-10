@@ -1,11 +1,49 @@
 import { create } from "zustand";
 
-export type ThemeVariant = "dark" | "light" | "soft";
+export type ThemeVariant = "dark" | "light" | "soft" | "blossom" | "mist";
+
+export const THEME_ORDER: ThemeVariant[] = [
+  "dark",
+  "light",
+  "soft",
+  "blossom",
+  "mist",
+];
+
+export const THEME_META: Record<
+  ThemeVariant,
+  { label: string; description: string; swatch: string }
+> = {
+  dark: {
+    label: "Dark",
+    description: "Deep indigo / pink / cyan liquid glass",
+    swatch: "#0a0b13",
+  },
+  light: {
+    label: "Light",
+    description: "Bright pastel, high contrast",
+    swatch: "#f5f7fb",
+  },
+  soft: {
+    label: "Soft",
+    description: "Muted lavender glow",
+    swatch: "#1e2030",
+  },
+  blossom: {
+    label: "Blossom",
+    description: "Rose pink #FFDEE7",
+    swatch: "#FFDEE7",
+  },
+  mist: {
+    label: "Mist",
+    description: "Lavender blue #C5CEF9",
+    swatch: "#C5CEF9",
+  },
+};
 
 interface ThemeState {
   variant: ThemeVariant;
   setVariant: (variant: ThemeVariant) => void;
-  cycleVariant: () => void;
 }
 
 const STORAGE_KEY = "drafting.theme";
@@ -13,8 +51,8 @@ const STORAGE_KEY = "drafting.theme";
 function loadInitial(): ThemeVariant {
   if (typeof window === "undefined") return "dark";
   const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === "light" || stored === "soft" || stored === "dark") {
-    return stored;
+  if (stored && THEME_ORDER.includes(stored as ThemeVariant)) {
+    return stored as ThemeVariant;
   }
   return "dark";
 }
@@ -36,17 +74,10 @@ function apply(variant: ThemeVariant) {
 const initial = loadInitial();
 apply(initial);
 
-export const useThemeStore = create<ThemeState>((set, get) => ({
+export const useThemeStore = create<ThemeState>((set) => ({
   variant: initial,
   setVariant: (variant) => {
     apply(variant);
     set({ variant });
-  },
-  cycleVariant: () => {
-    const order: ThemeVariant[] = ["dark", "light", "soft"];
-    const current = get().variant;
-    const next = order[(order.indexOf(current) + 1) % order.length];
-    apply(next);
-    set({ variant: next });
   },
 }));
