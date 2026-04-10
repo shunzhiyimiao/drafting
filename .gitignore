@@ -30,3 +30,7 @@ target/
 .drafting/
 .atlas/
 .blueprint/
+
+# Runtime-created data in dev working directory (Tauri runs from src-tauri/)
+/apps/desktop/src-tauri/blueprints/
+/apps/desktop/src-tauri/.patchboard/
