@@ -1,6 +1,7 @@
 mod sync_bus;
 mod patchboard;
 mod blueprint;
+mod editor;
 mod atlas;
 mod git;
 mod terminal;
@@ -183,6 +184,11 @@ pub fn run() {
             blueprint::commands::blueprint_request_check,
             blueprint::commands::blueprint_get_check_results,
             blueprint::commands::blueprint_rebuild_index,
+            editor::commands::editor_list_dir,
+            editor::commands::editor_read_file,
+            editor::commands::editor_write_file,
+            editor::commands::editor_search,
+            editor::commands::editor_get_identity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

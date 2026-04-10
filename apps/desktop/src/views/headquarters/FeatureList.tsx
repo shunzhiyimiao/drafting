@@ -1,23 +1,37 @@
+import { useMemo, useState } from "react";
 import { FileText } from "lucide-react";
-import { useEffect } from "react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { useNavigationStore } from "../../stores/navigation-store";
+import {
+  useHeadquartersStore,
+  type FeatureSort,
+  type FeatureFilter,
+} from "../../stores/headquarters-store";
 import type { BlueprintIndexEntry } from "../../types/blueprint-types";
 
+const priorityWeight: Record<string, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+};
+
 export function FeatureList() {
-  const initialized = useBlueprintStore((s) => s.initialized);
-  const initialize = useBlueprintStore((s) => s.initialize);
   const index = useBlueprintStore((s) => s.index);
   const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
   const setActiveView = useNavigationStore((s) => s.setActiveView);
+  const featureSort = useHeadquartersStore((s) => s.featureSort);
+  const featureFilter = useHeadquartersStore((s) => s.featureFilter);
+  const setFeatureSort = useHeadquartersStore((s) => s.setFeatureSort);
+  const setFeatureFilter = useHeadquartersStore((s) => s.setFeatureFilter);
 
-  useEffect(() => {
-    if (!initialized) {
-      initialize(".");
-    }
-  }, [initialized, initialize]);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  const features = (index?.blueprints ?? []).filter((b) => b.type === "feature");
+  const features = useMemo(() => {
+    const all = (index?.blueprints ?? []).filter((b) => b.type === "feature");
+    const filtered = applyFilter(all, featureFilter);
+    return applySort(filtered, featureSort);
+  }, [index, featureFilter, featureSort]);
 
   const handleOpen = async (e: BlueprintIndexEntry) => {
     await loadBlueprint(e.blueprintId);
@@ -30,9 +44,18 @@ export function FeatureList() {
         <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
           Features
         </h2>
-        <span className="text-xs text-text-muted">
-          {features.length} {features.length === 1 ? "feature" : "features"}
-        </span>
+        <div className="flex items-center gap-2">
+          <FilterMenu
+            filter={featureFilter}
+            onChange={setFeatureFilter}
+            open={menuOpen}
+            setOpen={setMenuOpen}
+          />
+          <SortMenu sort={featureSort} onChange={setFeatureSort} />
+          <span className="text-xs text-text-muted">
+            {features.length} {features.length === 1 ? "feature" : "features"}
+          </span>
+        </div>
       </div>
       {features.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
@@ -64,7 +87,7 @@ export function FeatureList() {
                     <PriorityBadge priority={f.priority} />
                   </div>
                 </div>
-                {f.criteriaTotal > 0 && (
+                {f.criteriaTotal > 0 ? (
                   <div className="flex items-center gap-2">
                     <div className="flex-1 h-1 bg-bg-hover rounded-full overflow-hidden">
                       <div
@@ -76,6 +99,8 @@ export function FeatureList() {
                       {f.criteriaDone}/{f.criteriaTotal}
                     </span>
                   </div>
+                ) : (
+                  <span className="text-[10px] text-warning">No criteria</span>
                 )}
               </button>
             );
@@ -83,6 +108,107 @@ export function FeatureList() {
         </div>
       )}
     </div>
+  );
+}
+
+function applyFilter(
+  features: BlueprintIndexEntry[],
+  filter: FeatureFilter,
+): BlueprintIndexEntry[] {
+  switch (filter) {
+    case "in-progress":
+      return features.filter((f) => f.status === "in-progress");
+    case "empty":
+      return features.filter((f) => f.criteriaTotal === 0);
+    case "completed":
+      return features.filter((f) => f.status === "completed");
+    case "stalled":
+      return features.filter((f) => {
+        const days = (Date.now() - f.updatedAt) / (1000 * 60 * 60 * 24);
+        return f.status === "in-progress" && days > 7;
+      });
+    case "with-alerts":
+      return features.filter((f) => f.criteriaTotal === 0);
+    default:
+      return features;
+  }
+}
+
+function applySort(
+  features: BlueprintIndexEntry[],
+  sort: FeatureSort,
+): BlueprintIndexEntry[] {
+  const copy = [...features];
+  switch (sort) {
+    case "priority":
+      copy.sort(
+        (a, b) =>
+          (priorityWeight[b.priority] ?? 0) -
+          (priorityWeight[a.priority] ?? 0),
+      );
+      break;
+    case "progress":
+      copy.sort((a, b) => {
+        const pa =
+          a.criteriaTotal > 0 ? a.criteriaDone / a.criteriaTotal : 0;
+        const pb =
+          b.criteriaTotal > 0 ? b.criteriaDone / b.criteriaTotal : 0;
+        return pb - pa;
+      });
+      break;
+    case "updated":
+      copy.sort((a, b) => b.updatedAt - a.updatedAt);
+      break;
+    case "name":
+      copy.sort((a, b) => a.displayName.localeCompare(b.displayName));
+      break;
+  }
+  return copy;
+}
+
+function SortMenu({
+  sort,
+  onChange,
+}: {
+  sort: FeatureSort;
+  onChange: (s: FeatureSort) => void;
+}) {
+  return (
+    <select
+      value={sort}
+      onChange={(e) => onChange(e.target.value as FeatureSort)}
+      className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted hover:text-text-secondary focus:outline-none"
+    >
+      <option value="priority">Priority</option>
+      <option value="progress">Progress</option>
+      <option value="updated">Updated</option>
+      <option value="name">Name</option>
+    </select>
+  );
+}
+
+function FilterMenu({
+  filter,
+  onChange,
+}: {
+  filter: FeatureFilter;
+  onChange: (f: FeatureFilter) => void;
+  open: boolean;
+  setOpen: (o: boolean) => void;
+}) {
+  return (
+    <select
+      value={filter}
+      onChange={(e) => onChange(e.target.value as FeatureFilter)}
+      className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted hover:text-text-secondary focus:outline-none"
+    >
+      <option value="all">All</option>
+      <option value="in-progress">In Progress</option>
+      <option value="with-alerts">With Alerts</option>
+      <option value="stalled">Stalled</option>
+      <option value="empty">Empty</option>
+      <option value="completed">Completed</option>
+    </select>
   );
 }
 

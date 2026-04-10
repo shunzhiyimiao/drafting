@@ -1,17 +1,19 @@
-import { Code } from "lucide-react";
+import { FileTree } from "./FileTree";
+import { EditorTabs } from "./EditorTabs";
+import { MonacoPanel } from "./MonacoPanel";
+import { StatusBar } from "./StatusBar";
 
 export function EditorView() {
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center p-8">
-      <Code size={48} className="text-text-muted mb-4" />
-      <h2 className="text-lg font-medium text-text-primary mb-2">Editor</h2>
-      <p className="text-sm text-text-muted max-w-md">
-        Monaco-based code editor with LSP integration, AI completions, and
-        deep Patchboard/Blueprint awareness.
-      </p>
-      <span className="mt-4 px-3 py-1 text-xs rounded-full bg-bg-hover text-text-muted">
-        Coming in Phase 3
-      </span>
+    <div className="flex h-full">
+      <div className="w-56 bg-bg-secondary border-r border-border shrink-0">
+        <FileTree />
+      </div>
+      <div className="flex-1 flex flex-col min-w-0">
+        <EditorTabs />
+        <MonacoPanel />
+        <StatusBar />
+      </div>
     </div>
   );
 }
