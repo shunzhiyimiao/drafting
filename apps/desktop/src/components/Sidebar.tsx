@@ -200,9 +200,6 @@ function ThemeOption({
       <SwatchPreview variant={id} />
       <div className="flex-1 min-w-0">
         <div className="text-xs font-medium">{meta.label}</div>
-        <div className="text-[10px] text-text-muted truncate">
-          {meta.description}
-        </div>
       </div>
       {active && <Check size={14} className="text-accent shrink-0" />}
     </button>
