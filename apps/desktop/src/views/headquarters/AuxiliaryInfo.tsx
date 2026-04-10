@@ -1,6 +1,9 @@
 import { Activity, Cpu, Zap } from "lucide-react";
+import { useNavigationStore } from "../../stores/navigation-store";
 
 export function AuxiliaryInfo() {
+  const setActiveView = useNavigationStore((s) => s.setActiveView);
+
   return (
     <div className="grid grid-cols-3 gap-4">
       {/* Recent Activity */}
@@ -34,13 +37,22 @@ export function AuxiliaryInfo() {
           </h3>
         </div>
         <div className="flex flex-col gap-1">
-          <button className="text-xs text-accent hover:text-accent-hover text-left">
+          <button
+            onClick={() => setActiveView("blueprint")}
+            className="text-xs text-accent hover:text-accent-hover text-left"
+          >
             New Blueprint
           </button>
-          <button className="text-xs text-accent hover:text-accent-hover text-left">
+          <button
+            onClick={() => setActiveView("patchboard")}
+            className="text-xs text-accent hover:text-accent-hover text-left"
+          >
             Open Patchboard
           </button>
-          <button className="text-xs text-accent hover:text-accent-hover text-left">
+          <button
+            onClick={() => setActiveView("settings")}
+            className="text-xs text-accent hover:text-accent-hover text-left"
+          >
             Configure AI
           </button>
         </div>

@@ -1,1 +1,7 @@
-// blueprint module - placeholder
+pub mod commands;
+pub mod error;
+pub mod parser;
+pub mod storage;
+pub mod templates;
+pub mod types;
+pub mod validation;

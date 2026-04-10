@@ -167,6 +167,22 @@ pub fn run() {
             patchboard::commands::patchboard_delete_canvas,
             patchboard::commands::patchboard_validate_canvas,
             patchboard_generate_code,
+            blueprint::commands::blueprint_init,
+            blueprint::commands::blueprint_list,
+            blueprint::commands::blueprint_get,
+            blueprint::commands::blueprint_get_raw,
+            blueprint::commands::blueprint_create,
+            blueprint::commands::blueprint_create_from_template,
+            blueprint::commands::blueprint_update,
+            blueprint::commands::blueprint_update_structured,
+            blueprint::commands::blueprint_delete,
+            blueprint::commands::blueprint_toggle_criterion,
+            blueprint::commands::blueprint_list_templates,
+            blueprint::commands::blueprint_preview_template,
+            blueprint::commands::blueprint_lightweight_check,
+            blueprint::commands::blueprint_request_check,
+            blueprint::commands::blueprint_get_check_results,
+            blueprint::commands::blueprint_rebuild_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

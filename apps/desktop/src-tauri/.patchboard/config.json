@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "scopeName": "@myapp",
+  "socketsPackage": "packages/sockets",
+  "adaptersPackage": "packages/adapters",
+  "wiringPackage": "packages/wiring"
+}
