@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Home,
   FileText,
@@ -76,8 +77,32 @@ function ThemePicker() {
   const variant = useThemeStore((s) => s.variant);
   const setVariant = useThemeStore((s) => s.setVariant);
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(
+    null,
+  );
   const btnRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Position the popover to the right of the button. Computed against
+  // viewport because the popover is rendered in a portal on <body>
+  // to escape the sidebar's backdrop-filter containing block.
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const update = () => {
+      const rect = btnRef.current!.getBoundingClientRect();
+      setPos({
+        left: rect.right + 8,
+        bottom: window.innerHeight - rect.bottom,
+      });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open]);
 
   // Close on outside click / Escape
   useEffect(() => {
@@ -103,6 +128,38 @@ function ThemePicker() {
     };
   }, [open]);
 
+  const popover =
+    open && pos
+      ? createPortal(
+          <div
+            ref={popoverRef}
+            className="glass-thick rounded-2xl p-2 flex flex-col gap-0.5 min-w-[240px]"
+            style={{
+              position: "fixed",
+              left: pos.left,
+              bottom: pos.bottom,
+              zIndex: 9999,
+            }}
+          >
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-muted">
+              Theme
+            </div>
+            {THEME_ORDER.map((id) => (
+              <ThemeOption
+                key={id}
+                id={id}
+                active={variant === id}
+                onSelect={() => {
+                  setVariant(id);
+                  setOpen(false);
+                }}
+              />
+            ))}
+          </div>,
+          document.body,
+        )
+      : null;
+
   return (
     <>
       <button
@@ -110,40 +167,13 @@ function ThemePicker() {
         onClick={() => setOpen((o) => !o)}
         title="Theme"
         className={`relative w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 ${
-          open
-            ? "text-accent"
-            : "text-text-muted hover:text-text-secondary"
+          open ? "text-accent" : "text-text-muted hover:text-text-secondary"
         }`}
       >
         <span className="absolute inset-0 rounded-xl opacity-0 hover:opacity-100 bg-white/5 transition-opacity" />
         <Palette size={18} className="relative z-10" />
       </button>
-
-      {open && (
-        <div
-          ref={popoverRef}
-          className="glass-thick fixed z-50 rounded-2xl p-2 flex flex-col gap-0.5 min-w-[220px]"
-          style={{
-            left: "60px",
-            bottom: "56px",
-          }}
-        >
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-muted">
-            Theme
-          </div>
-          {THEME_ORDER.map((id) => (
-            <ThemeOption
-              key={id}
-              id={id}
-              active={variant === id}
-              onSelect={() => {
-                setVariant(id);
-                setOpen(false);
-              }}
-            />
-          ))}
-        </div>
-      )}
+      {popover}
     </>
   );
 }
