@@ -11,6 +11,7 @@ mod codegen_proxy;
 use tauri::Manager;
 use sync_bus::SyncBus;
 use codegen_proxy::CodegenProxy;
+use terminal::manager::TerminalManager;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -141,11 +142,13 @@ pub fn run() {
 
     let sync_bus = SyncBus::new();
     let codegen_proxy = CodegenProxy::new();
+    let terminal_manager = TerminalManager::new();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(sync_bus)
         .manage(codegen_proxy)
+        .manage(terminal_manager)
         .setup(|app| {
             let handle = app.handle().clone();
             let bus = app.state::<SyncBus>();
@@ -189,6 +192,21 @@ pub fn run() {
             editor::commands::editor_write_file,
             editor::commands::editor_search,
             editor::commands::editor_get_identity,
+            atlas::commands::atlas_parse_file,
+            terminal::commands::terminal_create_session,
+            terminal::commands::terminal_write,
+            terminal::commands::terminal_resize,
+            terminal::commands::terminal_close,
+            terminal::commands::terminal_list,
+            git::commands::git_status,
+            git::commands::git_branches,
+            git::commands::git_log,
+            git::commands::git_diff_file,
+            git::commands::git_stage_file,
+            git::commands::git_unstage_file,
+            git::commands::git_commit,
+            git::commands::git_checkout_branch,
+            git::commands::git_create_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
