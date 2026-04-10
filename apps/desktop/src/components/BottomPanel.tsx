@@ -18,12 +18,12 @@ export function BottomPanel() {
 
   return (
     <div
-      className={`bg-bg-secondary border-t border-border flex flex-col ${
+      className={`glass-thin border-t border-white/5 flex flex-col ${
         bottomPanelCollapsed ? "" : "h-48"
       }`}
     >
       <div className="flex items-center justify-between px-3 h-8 shrink-0">
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1">
           {tabs.map(({ id, label }) => (
             <button
               key={id}
@@ -33,10 +33,10 @@ export function BottomPanel() {
                 }
                 setBottomPanelTab(id);
               }}
-              className={`px-3 py-1 text-xs rounded-sm transition-colors ${
+              className={`px-3 py-1 text-xs rounded-md transition-all ${
                 bottomPanelActiveTab === id && !bottomPanelCollapsed
-                  ? "text-text-primary bg-bg-hover"
-                  : "text-text-muted hover:text-text-secondary"
+                  ? "text-text-primary bg-white/8 border border-white/10"
+                  : "text-text-muted hover:text-text-secondary hover:bg-white/5"
               }`}
             >
               {label}

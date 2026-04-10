@@ -7,7 +7,7 @@ export function AuxiliaryInfo() {
   return (
     <div className="grid grid-cols-3 gap-4">
       {/* Recent Activity */}
-      <div className="bg-bg-secondary rounded-lg border border-border p-3">
+      <div className="glass-panel p-3.5">
         <div className="flex items-center gap-2 mb-2">
           <Activity size={14} className="text-text-muted" />
           <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
@@ -18,7 +18,7 @@ export function AuxiliaryInfo() {
       </div>
 
       {/* AI Config */}
-      <div className="bg-bg-secondary rounded-lg border border-border p-3">
+      <div className="glass-panel p-3.5">
         <div className="flex items-center gap-2 mb-2">
           <Cpu size={14} className="text-text-muted" />
           <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
@@ -29,7 +29,7 @@ export function AuxiliaryInfo() {
       </div>
 
       {/* Quick Actions */}
-      <div className="bg-bg-secondary rounded-lg border border-border p-3">
+      <div className="glass-panel p-3.5">
         <div className="flex items-center gap-2 mb-2">
           <Zap size={14} className="text-text-muted" />
           <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wider">

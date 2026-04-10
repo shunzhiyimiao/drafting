@@ -8,7 +8,7 @@ export function RightPanel() {
     return (
       <button
         onClick={toggleRightPanel}
-        className="w-8 bg-bg-secondary border-l border-border flex items-start justify-center pt-2 shrink-0 text-text-muted hover:text-text-secondary"
+        className="glass-thin w-8 flex items-start justify-center pt-2 shrink-0 text-text-muted hover:text-text-secondary border-l"
         title="Show Files"
       >
         <PanelRightOpen size={16} />
@@ -17,8 +17,8 @@ export function RightPanel() {
   }
 
   return (
-    <div className="w-56 bg-bg-secondary border-l border-border flex flex-col shrink-0">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+    <div className="glass-thin w-56 flex flex-col shrink-0 border-l border-white/5">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
         <div className="flex items-center gap-2 text-text-secondary text-xs font-medium uppercase tracking-wider">
           <FolderTree size={14} />
           Files

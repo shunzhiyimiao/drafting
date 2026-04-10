@@ -26,8 +26,8 @@ export function AlertsTodos() {
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      <div className="bg-bg-secondary rounded-lg border border-border flex-1 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+      <div className="glass-panel flex-1 flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5">
           <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
             Alerts
           </h2>
@@ -42,8 +42,8 @@ export function AlertsTodos() {
         <AlertsBody alerts={alerts} mode={alertDisplayMode} />
       </div>
 
-      <div className="bg-bg-secondary rounded-lg border border-border flex-1 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+      <div className="glass-panel flex-1 flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5">
           <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
             Todo
           </h2>

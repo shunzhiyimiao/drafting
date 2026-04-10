@@ -14,8 +14,16 @@ export function SmartSuggestion() {
   };
 
   return (
-    <div className="flex items-center gap-3 bg-bg-secondary rounded-lg px-4 py-3 border border-border">
-      <Icon size={16} className={`${iconColor} shrink-0`} />
+    <div className="glass-panel flex items-center gap-3 px-5 py-3.5">
+      <div
+        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+        style={{
+          background: "rgba(255, 255, 255, 0.06)",
+          border: "1px solid rgba(255, 255, 255, 0.08)",
+        }}
+      >
+        <Icon size={16} className={iconColor} />
+      </div>
       <div className="flex-1">
         <p className="text-sm text-text-primary">{suggestion.message}</p>
         <p className="text-[10px] text-text-muted mt-0.5">
@@ -24,7 +32,7 @@ export function SmartSuggestion() {
       </div>
       <button
         onClick={handleAction}
-        className="px-3 py-1 text-xs rounded-md bg-accent text-bg-primary font-medium hover:bg-accent-hover transition-colors"
+        className="glass-button-primary px-3.5 py-1.5 text-xs rounded-lg font-medium transition-all"
       >
         {suggestion.actionLabel}
       </button>

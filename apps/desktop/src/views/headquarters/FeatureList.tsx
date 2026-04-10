@@ -39,8 +39,8 @@ export function FeatureList() {
   };
 
   return (
-    <div className="bg-bg-secondary rounded-lg border border-border h-full flex flex-col">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+    <div className="glass-panel h-full flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5">
         <h2 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
           Features
         </h2>
@@ -76,7 +76,8 @@ export function FeatureList() {
               <button
                 key={f.blueprintId}
                 onClick={() => handleOpen(f)}
-                className="text-left p-3 bg-bg-primary border border-border rounded hover:border-accent transition-colors"
+                className="text-left p-3 bg-white/3 border border-white/8 rounded-lg hover:bg-white/6 hover:border-accent/40 transition-all backdrop-blur-md"
+                style={{ backdropFilter: "blur(12px)" }}
               >
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-medium text-text-primary">

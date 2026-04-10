@@ -32,13 +32,13 @@ export function PatchboardCanvas() {
         fitView
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{ animated: true }}
-        style={{ background: "#11111b" }}
+        style={{ background: "transparent" }}
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={20}
+          gap={24}
           size={1}
-          color="#313244"
+          color="rgba(255, 255, 255, 0.08)"
         />
         <Controls
           showInteractive={false}

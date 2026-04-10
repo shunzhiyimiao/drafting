@@ -74,7 +74,34 @@ export function MonacoPanel() {
         <Editor
           value={activeTab.content}
           language={detectLanguage(activeTab.path)}
-          theme="vs-dark"
+          theme="drafting-glass"
+          beforeMount={(monaco) => {
+            monaco.editor.defineTheme("drafting-glass", {
+              base: "vs-dark",
+              inherit: true,
+              rules: [],
+              colors: {
+                "editor.background": "#0a0b1300",
+                "editor.foreground": "#e8ecf5",
+                "editor.lineHighlightBackground": "#ffffff08",
+                "editor.selectionBackground": "#a8c6ff33",
+                "editorCursor.foreground": "#a8c6ff",
+                "editorLineNumber.foreground": "#7d859e66",
+                "editorLineNumber.activeForeground": "#b5bdd4",
+                "editorIndentGuide.background": "#ffffff0a",
+                "editorIndentGuide.activeBackground": "#ffffff1a",
+                "editorWhitespace.foreground": "#ffffff14",
+                "editor.selectionHighlightBackground": "#a8c6ff1a",
+                "editor.wordHighlightBackground": "#ffffff0f",
+                "editorBracketMatch.background": "#a8c6ff22",
+                "editorBracketMatch.border": "#a8c6ff66",
+                "scrollbarSlider.background": "#ffffff10",
+                "scrollbarSlider.hoverBackground": "#ffffff20",
+                "scrollbarSlider.activeBackground": "#ffffff30",
+              },
+            });
+            monaco.editor.setTheme("drafting-glass");
+          }}
           onChange={(val) => {
             if (val !== undefined) {
               updateTabContent(activeTab.path, val);
@@ -93,6 +120,9 @@ export function MonacoPanel() {
             tabSize: 2,
             wordWrap: "on",
             renderWhitespace: "boundary",
+            padding: { top: 12, bottom: 12 },
+            smoothScrolling: true,
+            cursorSmoothCaretAnimation: "on",
           }}
         />
       </div>

@@ -22,13 +22,13 @@ export function ProjectIdentityBar() {
   const h = healthConfig[health];
 
   return (
-    <div className="flex items-center justify-between bg-bg-secondary rounded-lg px-4 py-3 border border-border">
+    <div className="glass-panel flex items-center justify-between px-5 py-3.5">
       <div className="flex items-center gap-4">
-        <h1 className="text-lg font-bold text-text-primary">Drafting</h1>
+        <h1 className="text-lg font-bold text-text-primary tracking-tight">Drafting</h1>
         <ProgressRing progress={overallProgress} />
         <div className="flex items-center gap-3 text-xs text-text-muted">
           <span
-            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-bg-hover ${h.color}`}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm ${h.color}`}
           >
             <span className={`w-1.5 h-1.5 rounded-full ${h.dot}`} />
             {h.label}

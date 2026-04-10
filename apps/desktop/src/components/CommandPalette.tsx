@@ -163,7 +163,7 @@ export function CommandPalette({ open, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="bg-bg-secondary border border-border rounded-lg shadow-xl w-[560px] max-h-[60vh] flex flex-col overflow-hidden"
+        className="glass-thick rounded-2xl w-[560px] max-h-[60vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border">

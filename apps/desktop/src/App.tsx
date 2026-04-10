@@ -9,8 +9,8 @@ import { useNavigationStore, type ViewId } from "./stores/navigation-store";
 
 function TooSmallScreen() {
   return (
-    <div className="flex items-center justify-center h-screen bg-bg-primary p-8 text-center">
-      <div>
+    <div className="flex items-center justify-center h-screen p-8 text-center">
+      <div className="glass-panel p-8">
         <p className="text-lg font-medium text-text-primary mb-2">
           Window too small
         </p>
@@ -109,7 +109,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-bg-primary">
+    <div className="flex h-screen">
       {!sidebarCollapsed && !zenMode && <Sidebar />}
       <div className="flex flex-col flex-1 min-w-0">
         <div className="flex flex-1 min-h-0">
@@ -123,7 +123,7 @@ function App() {
         onClose={() => setCommandPaletteOpen(false)}
       />
       {chordBuffer && (
-        <div className="fixed bottom-4 right-4 bg-bg-secondary border border-border rounded-md px-3 py-1.5 text-xs text-text-secondary shadow-lg">
+        <div className="glass-thick fixed bottom-4 right-4 rounded-lg px-3 py-1.5 text-xs text-text-secondary">
           {chordBuffer === "cmd-k" ? "Cmd+K ..." : "g ..."}
         </div>
       )}
