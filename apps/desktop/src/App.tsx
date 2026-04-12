@@ -4,6 +4,7 @@ import { MainContent } from "./components/MainContent";
 import { RightPanel } from "./components/RightPanel";
 import { BottomPanel } from "./components/BottomPanel";
 import { CommandPalette } from "./components/CommandPalette";
+import { SearchDialog } from "./components/SearchDialog";
 import { useLayoutStore } from "./stores/layout-store";
 import { useNavigationStore, type ViewId } from "./stores/navigation-store";
 
@@ -30,6 +31,7 @@ function App() {
 
   const [windowTooSmall, setWindowTooSmall] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [chordBuffer, setChordBuffer] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,6 +48,13 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "p") {
         e.preventDefault();
         setCommandPaletteOpen(true);
+        return;
+      }
+
+      // Cmd+Shift+F: global search
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearchOpen(true);
         return;
       }
 
@@ -121,6 +130,10 @@ function App() {
       <CommandPalette
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
+      />
+      <SearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
       />
       {chordBuffer && (
         <div className="glass-thick fixed bottom-4 right-4 rounded-lg px-3 py-1.5 text-xs text-text-secondary">

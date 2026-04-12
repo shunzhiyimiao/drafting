@@ -7,6 +7,7 @@ mod git;
 mod terminal;
 mod lsp;
 mod codegen_proxy;
+mod ai_provider;
 
 use tauri::Manager;
 use sync_bus::SyncBus;
@@ -207,6 +208,13 @@ pub fn run() {
             git::commands::git_commit,
             git::commands::git_checkout_branch,
             git::commands::git_create_branch,
+            ai_provider::commands::ai_get_config,
+            ai_provider::commands::ai_save_config,
+            ai_provider::commands::ai_set_api_key,
+            ai_provider::commands::ai_get_task_route,
+            ai_provider::commands::ai_set_task_route,
+            ai_provider::commands::ai_toggle_global,
+            ai_provider::commands::ai_check_provider_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
