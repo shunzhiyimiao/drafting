@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { Plus } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { BlueprintListPanel } from "./BlueprintListPanel";
 import { BlueprintToolbar } from "./BlueprintToolbar";
@@ -75,9 +76,10 @@ export function BlueprintView() {
             </p>
             <button
               onClick={() => setShowTemplatePicker(true)}
-              className="px-4 py-2 text-xs rounded bg-accent text-bg-primary font-medium hover:bg-accent-hover transition-colors"
+              className="w-10 h-10 flex items-center justify-center rounded-xl glass-button-primary"
+              title="Create from Template"
             >
-              Create from Template
+              <Plus size={20} />
             </button>
           </div>
         )}
