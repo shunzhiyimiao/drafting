@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
+import { X, Check } from "lucide-react";
 import { usePatchboardStore } from "../../stores/patchboard-store";
 import { PatchboardCanvas } from "./canvas/PatchboardCanvas";
 import { CanvasToolbar } from "./canvas/toolbar/CanvasToolbar";
@@ -25,12 +26,13 @@ export function PatchboardView() {
 
   const [leftTab, setLeftTab] = useState<LeftTab>("canvases");
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
+  const [showAddAdapter, setShowAddAdapter] = useState(false);
+  const [adapterName, setAdapterName] = useState("");
+  const [selectedSocketIds, setSelectedSocketIds] = useState<Set<string>>(new Set());
+  const [confirmDeleteCanvas, setConfirmDeleteCanvas] = useState(false);
 
-  // Auto-initialize with current working directory
   useEffect(() => {
     if (!initialized) {
-      // In dev mode, use the parent of the Tauri app directory
-      // This would be the user's project root in production
       initialize(".");
     }
   }, [initialized, initialize]);
@@ -44,41 +46,13 @@ export function PatchboardView() {
     return () => clearTimeout(timer);
   }, [activeCanvas, saveActiveCanvas]);
 
-  const handleAddAdapter = useCallback(() => {
-    const name = prompt("Adapter class name:");
-    if (!name) return;
-
-    // Pick sockets to implement
-    const socketOptions = registry?.sockets ?? [];
-    if (socketOptions.length === 0) {
-      alert("Create at least one Socket in the Registry first.");
-      return;
-    }
-
-    const socketList = socketOptions
-      .map((s, i) => `${i + 1}. ${s.displayName} (${s.fullName})`)
-      .join("\n");
-    const input = prompt(
-      `Which Sockets does ${name} implement?\nEnter numbers separated by commas:\n\n${socketList}`,
-    );
-    if (!input) return;
-
-    const indices = input
-      .split(",")
-      .map((s) => parseInt(s.trim()) - 1)
-      .filter((i) => i >= 0 && i < socketOptions.length);
-
-    if (indices.length === 0) {
-      alert("Adapter must implement at least one Socket.");
-      return;
-    }
-
-    const implementsIds = indices.map((i) => socketOptions[i].id);
+  const handleAddAdapterSubmit = useCallback(() => {
+    if (!adapterName.trim() || selectedSocketIds.size === 0) return;
 
     const newAdapter: AdapterNode = {
       id: `adapter-${Date.now()}`,
-      name,
-      implements: implementsIds,
+      name: adapterName.trim(),
+      implements: [...selectedSocketIds],
       constructorParams: [],
       position: { x: 200 + Math.random() * 200, y: 100 + Math.random() * 200 },
     };
@@ -87,7 +61,11 @@ export function PatchboardView() {
       ...canvas,
       adapters: [...canvas.adapters, newAdapter],
     }));
-  }, [registry, updateActiveCanvas]);
+
+    setAdapterName("");
+    setSelectedSocketIds(new Set());
+    setShowAddAdapter(false);
+  }, [adapterName, selectedSocketIds, updateActiveCanvas]);
 
   const handleValidate = useCallback(async () => {
     const result = await validateActiveCanvas();
@@ -121,10 +99,11 @@ export function PatchboardView() {
 
   const handleDeleteCanvas = useCallback(async () => {
     if (!activeCanvasId) return;
-    if (confirm("Delete this canvas?")) {
-      await deleteCanvas(activeCanvasId);
-    }
+    await deleteCanvas(activeCanvasId);
+    setConfirmDeleteCanvas(false);
   }, [activeCanvasId, deleteCanvas]);
+
+  const socketOptions = registry?.sockets ?? [];
 
   return (
     <div className="flex h-full">
@@ -163,10 +142,10 @@ export function PatchboardView() {
           <>
             <CanvasToolbar
               canvasName={activeCanvas.name}
-              onAddAdapter={handleAddAdapter}
+              onAddAdapter={() => setShowAddAdapter(true)}
               onValidate={handleValidate}
               onGenerate={handleGenerate}
-              onDeleteCanvas={handleDeleteCanvas}
+              onDeleteCanvas={() => setConfirmDeleteCanvas(true)}
             />
             {validationMsg && (
               <div className="px-3 py-1.5 text-xs bg-bg-hover border-b border-border text-text-secondary">
@@ -195,6 +174,139 @@ export function PatchboardView() {
         </div>
         <AdapterPanel />
       </div>
+
+      {/* Add Adapter dialog */}
+      {showAddAdapter && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setShowAddAdapter(false)}
+        >
+          <div
+            className="glass-thick rounded-2xl w-[400px] p-5 flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-text-primary">
+                Add Adapter
+              </h3>
+              <button
+                onClick={() => setShowAddAdapter(false)}
+                className="text-text-muted hover:text-text-secondary"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-text-muted">
+                Class Name
+              </label>
+              <input
+                value={adapterName}
+                onChange={(e) => setAdapterName(e.target.value)}
+                placeholder="e.g. PostgresAdapter"
+                autoFocus
+                className="w-full mt-1 px-2 py-1.5 text-xs rounded"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleAddAdapterSubmit();
+                }}
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-text-muted">
+                Implements (select sockets)
+              </label>
+              {socketOptions.length === 0 ? (
+                <p className="text-xs text-text-muted mt-1">
+                  No sockets defined. Create one in Registry first.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-1 mt-1 max-h-48 overflow-auto">
+                  {socketOptions.map((s) => (
+                    <label
+                      key={s.id}
+                      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/5 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedSocketIds.has(s.id)}
+                        onChange={(e) => {
+                          const next = new Set(selectedSocketIds);
+                          if (e.target.checked) {
+                            next.add(s.id);
+                          } else {
+                            next.delete(s.id);
+                          }
+                          setSelectedSocketIds(next);
+                        }}
+                        className="w-3 h-3 accent-accent"
+                      />
+                      <span className="text-xs text-text-primary">
+                        {s.displayName}
+                      </span>
+                      <span className="text-[10px] text-text-muted">
+                        {s.fullName}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowAddAdapter(false)}
+                className="glass-button px-3 py-1.5 text-xs rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddAdapterSubmit}
+                disabled={!adapterName.trim() || selectedSocketIds.size === 0}
+                className="glass-button-primary px-3 py-1.5 text-xs rounded-lg font-medium disabled:opacity-40"
+              >
+                <Check size={12} className="inline mr-1" />
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm delete canvas */}
+      {confirmDeleteCanvas && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setConfirmDeleteCanvas(false)}
+        >
+          <div
+            className="glass-thick rounded-2xl w-[340px] p-5 flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-medium text-text-primary">
+              Delete Canvas?
+            </h3>
+            <p className="text-xs text-text-muted">
+              This will delete "{activeCanvas?.name}" and cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmDeleteCanvas(false)}
+                className="glass-button px-3 py-1.5 text-xs rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteCanvas}
+                className="px-3 py-1.5 text-xs rounded-lg bg-error/80 text-white font-medium hover:bg-error transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
