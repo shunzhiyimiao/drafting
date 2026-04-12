@@ -114,15 +114,15 @@ function getTheme(variant: string) {
   if (variant === "light" || variant === "blossom" || variant === "mist") {
     return {
       background: "rgba(0, 0, 0, 0)",
-      foreground: variant === "blossom" ? "#4a1929" : variant === "mist" ? "#1a2457" : "#1a2140",
-      cursor: variant === "blossom" ? "#d64772" : variant === "mist" ? "#4a60d8" : "#5b7cff",
-      selectionBackground: "rgba(91, 124, 255, 0.3)",
+      foreground: "#e87d2e",
+      cursor: "#e87d2e",
+      selectionBackground: "rgba(232, 125, 46, 0.3)",
     };
   }
   return {
     background: "rgba(0, 0, 0, 0)",
-    foreground: "#e8ecf5",
-    cursor: "#a8c6ff",
-    selectionBackground: "rgba(168, 198, 255, 0.3)",
+    foreground: "#f0a050",
+    cursor: "#f0a050",
+    selectionBackground: "rgba(240, 160, 80, 0.3)",
   };
 }
