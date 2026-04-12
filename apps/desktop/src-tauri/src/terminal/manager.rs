@@ -38,10 +38,20 @@ impl TerminalManager {
         let cwd = input
             .cwd
             .unwrap_or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .and_then(|p| p.to_str().map(|s| s.to_string()))
-                    .unwrap_or_else(|| "/".to_string())
+                // In Tauri dev mode, cwd is apps/desktop/src-tauri/.
+                // Walk up to find the project root (directory containing Cargo.toml workspace).
+                let mut dir = std::env::current_dir().unwrap_or_default();
+                for _ in 0..5 {
+                    if dir.join("pnpm-workspace.yaml").exists() || dir.join("CLAUDE.md").exists() {
+                        return dir.to_string_lossy().to_string();
+                    }
+                    if let Some(parent) = dir.parent() {
+                        dir = parent.to_path_buf();
+                    } else {
+                        break;
+                    }
+                }
+                std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
             });
 
         let pty_system = native_pty_system();
