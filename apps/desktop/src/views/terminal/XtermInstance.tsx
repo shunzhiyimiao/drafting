@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { subscribeOutput } from "../../stores/terminal-store";
 import { writeSession, resizeSession } from "../../lib/terminal-api";
 import { useThemeStore } from "../../stores/theme-store";
+import { useSettingsStore } from "../../stores/settings-store";
 
 interface Props {
   sessionId: string;
@@ -17,17 +18,18 @@ export function XtermInstance({ sessionId, visible }: Props) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const themeVariant = useThemeStore((s) => s.variant);
+  const appearance = useSettingsStore((s) => s.appearance);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
     const term = new Terminal({
-      fontFamily: "JetBrains Mono, ui-monospace, monospace",
-      fontSize: 13,
+      fontFamily: appearance.fontFamily,
+      fontSize: appearance.fontSize,
       lineHeight: 1.3,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: getTheme(themeVariant),
+      theme: getTheme(themeVariant, appearance.terminalFontColor, appearance.terminalFontColorLight),
       scrollback: 10000,
     });
 
@@ -82,7 +84,7 @@ export function XtermInstance({ sessionId, visible }: Props) {
   // Update theme reactively
   useEffect(() => {
     termRef.current?.options &&
-      (termRef.current.options.theme = getTheme(themeVariant));
+      (termRef.current.options.theme = getTheme(themeVariant, appearance.terminalFontColor, appearance.terminalFontColorLight));
   }, [themeVariant]);
 
   // Refit when becoming visible (tab switch)
@@ -110,19 +112,13 @@ export function XtermInstance({ sessionId, visible }: Props) {
   );
 }
 
-function getTheme(variant: string) {
-  if (variant === "light" || variant === "blossom" || variant === "mist") {
-    return {
-      background: "rgba(0, 0, 0, 0)",
-      foreground: "#e87d2e",
-      cursor: "#e87d2e",
-      selectionBackground: "rgba(232, 125, 46, 0.3)",
-    };
-  }
+function getTheme(variant: string, fgDark: string, fgLight: string) {
+  const isLight = variant === "light" || variant === "blossom" || variant === "mist";
+  const fg = isLight ? fgLight : fgDark;
   return {
     background: "rgba(0, 0, 0, 0)",
-    foreground: "#f0a050",
-    cursor: "#f0a050",
-    selectionBackground: "rgba(240, 160, 80, 0.3)",
+    foreground: fg,
+    cursor: fg,
+    selectionBackground: fg + "4d", // ~30% alpha
   };
 }

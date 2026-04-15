@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import { useEditorStore } from "../../stores/editor-store";
 import { useThemeStore } from "../../stores/theme-store";
+import { useSettingsStore } from "../../stores/settings-store";
 
 // Use local monaco copies (bundled) instead of CDN
 loader.config({
@@ -37,6 +38,7 @@ export function MonacoPanel() {
   const saveTab = useEditorStore((s) => s.saveTab);
   const saveAll = useEditorStore((s) => s.saveAll);
   const themeVariant = useThemeStore((s) => s.variant);
+  const appearance = useSettingsStore((s) => s.appearance);
 
   const activeTab = tabs.find((t) => t.path === activeTabPath);
   const editorRef = useRef<any>(null);
@@ -227,13 +229,14 @@ export function MonacoPanel() {
           }}
           options={{
             readOnly: activeTab.identity.readonly,
-            fontFamily: "JetBrains Mono, ui-monospace, monospace",
-            fontSize: 13,
-            minimap: { enabled: false },
+            fontFamily: appearance.fontFamily,
+            fontSize: appearance.fontSize,
+            minimap: { enabled: appearance.editorMinimap },
             scrollBeyondLastLine: false,
             automaticLayout: true,
-            tabSize: 2,
-            wordWrap: "on",
+            tabSize: appearance.editorTabSize,
+            wordWrap: appearance.editorWordWrap ? "on" : "off",
+            lineNumbers: appearance.editorLineNumbers ? "on" : "off",
             renderWhitespace: "boundary",
             padding: { top: 12, bottom: 12 },
             smoothScrolling: true,
