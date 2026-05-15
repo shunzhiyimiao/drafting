@@ -22,15 +22,16 @@ import {
   THEME_META,
   type ThemeVariant,
 } from "../stores/theme-store";
+import { useT } from "../lib/i18n";
 
-const topItems: { id: ViewId; icon: typeof Home; label: string }[] = [
-  { id: "headquarters", icon: Home, label: "Headquarters" },
-  { id: "blueprint", icon: FileText, label: "Blueprint" },
-  { id: "patchboard", icon: CircuitBoard, label: "Patchboard" },
-  { id: "atlas", icon: Map, label: "Atlas" },
-  { id: "editor", icon: Code, label: "Editor" },
-  { id: "git", icon: GitBranch, label: "Git" },
-  { id: "terminal", icon: Terminal, label: "Terminal" },
+const topItems: { id: ViewId; icon: typeof Home; labelKey: string }[] = [
+  { id: "headquarters", icon: Home, labelKey: "nav.headquarters" },
+  { id: "blueprint", icon: FileText, labelKey: "nav.blueprint" },
+  { id: "patchboard", icon: CircuitBoard, labelKey: "nav.patchboard" },
+  { id: "atlas", icon: Map, labelKey: "nav.atlas" },
+  { id: "editor", icon: Code, labelKey: "nav.editor" },
+  { id: "git", icon: GitBranch, labelKey: "nav.git" },
+  { id: "terminal", icon: Terminal, labelKey: "nav.terminal" },
 ];
 
 interface SidebarButtonProps {
@@ -74,6 +75,7 @@ function SidebarButton({ Icon, label, active, onClick }: SidebarButtonProps) {
 }
 
 function ThemePicker() {
+  const t = useT();
   const variant = useThemeStore((s) => s.variant);
   const setVariant = useThemeStore((s) => s.setVariant);
   const [open, setOpen] = useState(false);
@@ -142,7 +144,7 @@ function ThemePicker() {
             }}
           >
             <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-muted">
-              Theme
+              {t("sidebar.theme")}
             </div>
             {THEME_ORDER.map((id) => (
               <ThemeOption
@@ -165,7 +167,7 @@ function ThemePicker() {
       <button
         ref={btnRef}
         onClick={() => setOpen((o) => !o)}
-        title="Theme"
+        title={t("sidebar.theme")}
         className={`relative w-10 h-10 flex items-center justify-center rounded-xl transition-all duration-200 ${
           open ? "text-accent" : "text-text-muted hover:text-text-secondary"
         }`}
@@ -229,17 +231,18 @@ function SwatchPreview({ variant }: { variant: ThemeVariant }) {
 }
 
 export function Sidebar() {
+  const t = useT();
   const { activeView, setActiveView } = useNavigationStore();
 
   return (
     <div className="glass-sidebar flex flex-col items-center w-14 py-3 shrink-0 gap-1">
       <div className="flex flex-col items-center gap-2 flex-1">
-        {topItems.map(({ id, icon: Icon, label }) => (
+        {topItems.map(({ id, icon: Icon, labelKey }) => (
           <SidebarButton
             key={id}
             id={id}
             Icon={Icon}
-            label={label}
+            label={t(labelKey)}
             active={activeView === id}
             onClick={() => setActiveView(id)}
           />
@@ -250,7 +253,7 @@ export function Sidebar() {
         <SidebarButton
           id="settings"
           Icon={Settings}
-          label="Settings"
+          label={t("nav.settings")}
           active={activeView === "settings"}
           onClick={() => setActiveView("settings")}
         />

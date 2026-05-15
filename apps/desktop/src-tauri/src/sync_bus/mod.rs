@@ -15,6 +15,8 @@ use types::{EventEnvelope, Origin};
 /// Subsystems are forbidden from directly importing each other's code.
 ///
 /// Managed as Tauri state — access via `app.state::<SyncBus>()`.
+/// Cheap to `Clone` (Arc inside) so background tasks can hold their own handle.
+#[derive(Clone)]
 pub struct SyncBus {
     inner: Arc<dyn EventBus>,
 }

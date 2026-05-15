@@ -8,8 +8,18 @@ import type {
   CanvasSummary,
   ValidationResult,
   CodeGenResult,
+  WireBridge,
 } from "../types/patchboard-types";
 import * as api from "../lib/patchboard-api";
+
+let bridgeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleBridgeRefresh(fn: () => void) {
+  if (bridgeRefreshTimer) clearTimeout(bridgeRefreshTimer);
+  bridgeRefreshTimer = setTimeout(() => {
+    bridgeRefreshTimer = null;
+    fn();
+  }, 400);
+}
 
 interface PatchboardState {
   // Data
@@ -20,6 +30,7 @@ interface PatchboardState {
   activeCanvasId: string | null;
   activeCanvas: Canvas | null;
   selectedNodeId: string | null;
+  wireBridges: WireBridge[]; // per-wire Type Bridge classification
 
   // Loading
   registryLoading: boolean;
@@ -49,6 +60,7 @@ interface PatchboardState {
   // Validation & Code Generation
   validateActiveCanvas: () => Promise<ValidationResult | null>;
   generateCode: () => Promise<CodeGenResult | null>;
+  refreshWireBridges: () => Promise<void>;
 }
 
 export const usePatchboardStore = create<PatchboardState>((set, get) => ({
@@ -59,6 +71,7 @@ export const usePatchboardStore = create<PatchboardState>((set, get) => ({
   activeCanvasId: null,
   activeCanvas: null,
   selectedNodeId: null,
+  wireBridges: [],
   registryLoading: false,
   canvasLoading: false,
 
@@ -132,7 +145,13 @@ export const usePatchboardStore = create<PatchboardState>((set, get) => ({
     set({ canvasLoading: true });
     try {
       const canvas = await api.getCanvas(projectRoot, canvasId);
-      set({ activeCanvasId: canvasId, activeCanvas: canvas, selectedNodeId: null });
+      set({
+        activeCanvasId: canvasId,
+        activeCanvas: canvas,
+        selectedNodeId: null,
+        wireBridges: [],
+      });
+      await get().refreshWireBridges();
     } finally {
       set({ canvasLoading: false });
     }
@@ -160,6 +179,11 @@ export const usePatchboardStore = create<PatchboardState>((set, get) => ({
     if (!activeCanvas) return;
     const updated = updater(activeCanvas);
     set({ activeCanvas: { ...updated, updatedAt: Date.now() } });
+    // save + classify is a backend round-trip; don't do it on every mouse
+    // drag. 400ms debounce catches "user finished editing".
+    scheduleBridgeRefresh(() => {
+      void get().refreshWireBridges();
+    });
   },
 
   setSelectedNode: (nodeId) => {
@@ -179,5 +203,23 @@ export const usePatchboardStore = create<PatchboardState>((set, get) => ({
     if (!projectRoot || !activeCanvasId || !activeCanvas) return null;
     await api.saveCanvas(projectRoot, activeCanvas);
     return api.generateCode(projectRoot, activeCanvasId);
+  },
+
+  refreshWireBridges: async () => {
+    const { projectRoot, activeCanvasId, activeCanvas } = get();
+    if (!projectRoot || !activeCanvasId || !activeCanvas) {
+      set({ wireBridges: [] });
+      return;
+    }
+    try {
+      // Classify wires against the *current* on-disk canvas; save first so
+      // the backend sees our latest edits.
+      await api.saveCanvas(projectRoot, activeCanvas);
+      const bridges = await api.classifyWires(projectRoot, activeCanvasId);
+      set({ wireBridges: bridges });
+    } catch (err) {
+      console.warn("refreshWireBridges failed", err);
+      set({ wireBridges: [] });
+    }
   },
 }));

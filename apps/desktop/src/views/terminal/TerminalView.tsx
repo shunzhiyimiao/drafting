@@ -5,8 +5,10 @@ import {
   mountTerminalListeners,
 } from "../../stores/terminal-store";
 import { XtermInstance } from "./XtermInstance";
+import { useT } from "../../lib/i18n";
 
 export function TerminalView() {
+  const t = useT();
   const tabs = useTerminalStore((s) => s.tabs);
   const activeTabId = useTerminalStore((s) => s.activeTabId);
   const createTab = useTerminalStore((s) => s.createTab);
@@ -81,21 +83,21 @@ export function TerminalView() {
           <button
             onClick={() => createTab()}
             className="p-1 text-text-muted hover:text-text-secondary"
-            title="New terminal (Cmd+T)"
+            title={t("terminal.newTab")}
           >
             <Plus size={14} />
           </button>
           <button
             onClick={() => handleQuickLaunch("claude", "Claude Code")}
             className="px-2 py-0.5 text-[10px] rounded bg-accent/15 border border-accent/30 text-accent hover:bg-accent/25 transition-colors"
-            title="Launch Claude Code (Cmd+Shift+C)"
+            title={t("terminal.launchClaude")}
           >
             Claude
           </button>
           <button
             onClick={() => handleQuickLaunch("codex", "Codex")}
             className="px-2 py-0.5 text-[10px] rounded bg-success/15 border border-success/30 text-success hover:bg-success/25 transition-colors"
-            title="Launch Codex (Cmd+Shift+X)"
+            title={t("terminal.launchCodex")}
           >
             Codex
           </button>
@@ -106,7 +108,7 @@ export function TerminalView() {
       <div className="flex-1 relative bg-bg-primary">
         {tabs.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-muted text-sm">
-            Starting shell...
+            {t("terminal.starting")}
           </div>
         ) : (
           tabs.map((tab) => (
@@ -117,6 +119,7 @@ export function TerminalView() {
             >
               <XtermInstance
                 sessionId={tab.id}
+                cwd={tab.info.cwd}
                 visible={tab.id === activeTabId}
               />
             </div>

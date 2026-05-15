@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Globe,
   Palette,
@@ -7,11 +7,18 @@ import {
   Info,
   ToggleLeft,
   ToggleRight,
-  Key,
   Check,
   RotateCcw,
+  Plus,
+  Trash2,
+  Copy as CopyIcon,
+  Edit3,
+  Zap,
+  Download,
+  X,
+  AlertCircle,
 } from "lucide-react";
-import { t } from "../../lib/i18n";
+import { useT } from "../../lib/i18n";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useAiStore } from "../../stores/ai-store";
 import {
@@ -19,7 +26,15 @@ import {
   THEME_ORDER,
   THEME_META,
 } from "../../stores/theme-store";
-import type { ProviderId } from "../../types/ai-types";
+import type {
+  AuthScheme,
+  Profile,
+  ProfilePreset,
+  Protocol,
+  TaskRoute,
+} from "../../types/ai-types";
+import { getProjectRoot } from "../../lib/app-bootstrap";
+import { listPresets } from "../../lib/ai-api";
 
 type SettingsTab = "general" | "appearance" | "ai" | "editor" | "about";
 
@@ -33,7 +48,7 @@ const tabDefs: { id: SettingsTab; icon: typeof Globe; labelKey: string }[] = [
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
-  useSettingsStore((s) => s.locale);
+  const t = useT();
 
   return (
     <div className="flex h-full">
@@ -70,6 +85,7 @@ export function SettingsView() {
 }
 
 function GeneralTab() {
+  const t = useT();
   const locale = useSettingsStore((s) => s.locale);
   const setLocale = useSettingsStore((s) => s.setLocale);
 
@@ -99,6 +115,7 @@ function GeneralTab() {
 }
 
 function AppearanceTab() {
+  const t = useT();
   const appearance = useSettingsStore((s) => s.appearance);
   const updateAppearance = useSettingsStore((s) => s.updateAppearance);
   const resetAppearance = useSettingsStore((s) => s.resetAppearance);
@@ -221,15 +238,41 @@ function AppearanceTab() {
 }
 
 function AiTab() {
+  const t = useT();
   const config = useAiStore((s) => s.config);
   const initialize = useAiStore((s) => s.initialize);
-  const setApiKey = useAiStore((s) => s.setApiKey);
   const toggleGlobal = useAiStore((s) => s.toggleGlobal);
   const updateRoute = useAiStore((s) => s.updateRoute);
+  const importFromClaudeCode = useAiStore((s) => s.importFromClaudeCode);
 
-  useEffect(() => { if (!config) initialize("."); }, [config, initialize]);
+  const [presets, setPresets] = useState<ProfilePreset[]>([]);
+  const [editing, setEditing] = useState<Profile | null>(null);
+  const [showPresetPicker, setShowPresetPicker] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!config) getProjectRoot().then((root) => initialize(root));
+  }, [config, initialize]);
+  useEffect(() => {
+    listPresets().then(setPresets).catch(() => {});
+  }, []);
 
   if (!config) return <div className="text-text-muted text-xs">{t("common.loading")}</div>;
+
+  const handleImport = async () => {
+    try {
+      const result = await importFromClaudeCode();
+      const lines = [
+        result.imported.length > 0
+          ? t("settings.ai.importedCount", { n: result.imported.length })
+          : t("settings.ai.importedNone"),
+        ...result.notes,
+      ];
+      setImportNotice(lines.join("\n"));
+    } catch (e: any) {
+      setImportNotice(t("settings.ai.importFailed", { error: e?.message ?? String(e) }));
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -238,95 +281,670 @@ function AiTab() {
       <div className="glass-panel p-4">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-medium text-text-primary">{t("settings.ai.globalToggle")}</div>
-            <div className="text-[10px] text-text-muted mt-0.5">{t("settings.ai.globalToggleDesc")}</div>
+            <div className="text-sm font-medium text-text-primary">
+              {t("settings.ai.globalToggle")}
+            </div>
+            <div className="text-[10px] text-text-muted mt-0.5">
+              {t("settings.ai.globalToggleDesc")}
+            </div>
           </div>
           <button onClick={() => toggleGlobal(!config.globalEnabled)}>
-            {config.globalEnabled ? <ToggleRight size={28} className="text-accent" /> : <ToggleLeft size={28} className="text-text-muted" />}
+            {config.globalEnabled ? (
+              <ToggleRight size={28} className="text-accent" />
+            ) : (
+              <ToggleLeft size={28} className="text-text-muted" />
+            )}
           </button>
         </div>
       </div>
 
       <div className="glass-panel p-4">
-        <label className="text-[10px] uppercase tracking-wider text-text-muted mb-3 block">{t("settings.ai.providers")}</label>
+        <div className="flex items-center justify-between mb-3">
+          <label className="text-[10px] uppercase tracking-wider text-text-muted">
+            {t("settings.ai.profilesHeader")} · {config.profiles.length}
+          </label>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleImport}
+              className="flex items-center gap-1 text-[10px] text-text-muted hover:text-accent"
+              title={t("settings.ai.importFromClaudeTip")}
+            >
+              <Download size={10} />
+              {t("settings.ai.importFromClaude")}
+            </button>
+            <button
+              onClick={() => setShowPresetPicker(true)}
+              className="flex items-center gap-1 text-[10px] text-accent hover:text-accent-hover"
+            >
+              <Plus size={10} />
+              {t("settings.ai.newProfile")}
+            </button>
+          </div>
+        </div>
+        {importNotice && (
+          <div className="mb-3 px-3 py-2 rounded bg-info/10 border border-info/30 text-[10px] text-info whitespace-pre-line flex items-start gap-2">
+            <AlertCircle size={11} className="mt-0.5 shrink-0" />
+            <span className="flex-1">{importNotice}</span>
+            <button onClick={() => setImportNotice(null)}>
+              <X size={11} />
+            </button>
+          </div>
+        )}
         <div className="flex flex-col gap-2">
-          {config.providers.map((p) => (
-            <ProviderRow key={String(p.id)} provider={p} onSetKey={(key) => setApiKey(p.id, key)} />
+          {config.profiles.map((p) => (
+            <ProfileRow key={p.id} profile={p} onEdit={() => setEditing(p)} />
           ))}
         </div>
       </div>
 
       <div className="glass-panel p-4">
-        <label className="text-[10px] uppercase tracking-wider text-text-muted mb-3 block">{t("settings.ai.taskRouting")}</label>
+        <label className="text-[10px] uppercase tracking-wider text-text-muted mb-3 block">
+          {t("settings.ai.taskRouting")}
+        </label>
         <div className="flex flex-col gap-1.5">
           {config.routes.map((route) => (
-            <div key={String(route.taskId)} className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
-              <span className="text-xs text-text-primary">{t(`task.${route.taskId}`)}</span>
-              <div className="flex items-center gap-2">
-                <select value={String(route.providerId)}
-                  onChange={(e) => updateRoute({ ...route, providerId: e.target.value as ProviderId })}
-                  className="text-[10px] px-1.5 py-0.5 rounded">
-                  {config.providers.filter((p) => p.enabled).map((p) => (
-                    <option key={String(p.id)} value={String(p.id)}>{p.displayName}</option>
-                  ))}
-                </select>
-                <select value={route.model}
-                  onChange={(e) => updateRoute({ ...route, model: e.target.value })}
-                  className="text-[10px] px-1.5 py-0.5 rounded">
-                  {(config.providers.find((p) => String(p.id) === String(route.providerId))?.models ?? []).map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            <RouteRow
+              key={route.taskId}
+              route={route}
+              profiles={config.profiles}
+              onChange={updateRoute}
+            />
           ))}
         </div>
       </div>
 
       <div className="glass-panel p-4">
-        <label className="text-[10px] uppercase tracking-wider text-text-muted mb-1 block">{t("settings.ai.usage")}</label>
+        <label className="text-[10px] uppercase tracking-wider text-text-muted mb-1 block">
+          {t("settings.ai.usage")}
+        </label>
         <div className="text-xs text-text-muted">
           {t("settings.ai.currentMonth")}: ${config.currentMonthUsageUsd.toFixed(4)}
-          {config.monthlyBudgetUsd != null && <span> / ${config.monthlyBudgetUsd.toFixed(2)}</span>}
+          {config.monthlyBudgetUsd != null && (
+            <span> / ${config.monthlyBudgetUsd.toFixed(2)}</span>
+          )}
         </div>
       </div>
-    </div>
-  );
-}
 
-function ProviderRow({ provider, onSetKey }: {
-  provider: { id: ProviderId; displayName: string; apiKeySet: boolean; enabled: boolean };
-  onSetKey: (key: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [key, setKey] = useState("");
-  const handleSave = () => { if (key.trim()) { onSetKey(key.trim()); setKey(""); setEditing(false); } };
+      {showPresetPicker && (
+        <PresetPickerDialog
+          presets={presets}
+          onClose={() => setShowPresetPicker(false)}
+          onPick={(preset) => {
+            setShowPresetPicker(false);
+            // Convert preset → blank Profile draft.
+            setEditing({
+              id: "",
+              name: preset.name,
+              protocol: preset.protocol,
+              baseUrl: preset.baseUrl,
+              endpointPath: preset.endpointPath,
+              authScheme: preset.authScheme,
+              apiKeySet: false,
+              enabled: true,
+              models: [...preset.suggestedModels],
+              extraHeaders: {},
+              builtin: false,
+            });
+          }}
+        />
+      )}
 
-  return (
-    <div className="flex items-center justify-between p-2.5 rounded-lg bg-white/3 border border-white/5">
-      <div className="flex items-center gap-2">
-        <span className={`w-2 h-2 rounded-full ${provider.enabled ? "bg-success" : "bg-text-muted"}`} />
-        <span className="text-xs font-medium text-text-primary">{provider.displayName}</span>
-        {provider.apiKeySet && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-success/20 text-success">{t("settings.ai.keySet")}</span>}
-      </div>
-      {editing ? (
-        <div className="flex items-center gap-1">
-          <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-..." type="password" autoFocus
-            className="w-44 px-2 py-1 text-[10px] rounded"
-            onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") setEditing(false); }} />
-          <button onClick={handleSave} className="text-success"><Check size={12} /></button>
-        </div>
-      ) : (
-        <button onClick={() => setEditing(true)} className="flex items-center gap-1 text-[10px] text-accent hover:text-accent-hover">
-          <Key size={10} />
-          {provider.apiKeySet ? t("settings.ai.updateKey") : t("settings.ai.setKey")}
-        </button>
+      {editing && (
+        <ProfileEditorDialog
+          profile={editing}
+          isNew={editing.id === ""}
+          onClose={() => setEditing(null)}
+        />
       )}
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Profile row
+// ---------------------------------------------------------------------------
+
+function ProfileRow({
+  profile,
+  onEdit,
+}: {
+  profile: Profile;
+  onEdit: () => void;
+}) {
+  const t = useT();
+  const updateProfile = useAiStore((s) => s.updateProfile);
+  const deleteProfile = useAiStore((s) => s.deleteProfile);
+  const cloneProfile = useAiStore((s) => s.cloneProfile);
+  const checkProfileHealth = useAiStore((s) => s.checkProfileHealth);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+
+  const protocolLabel = useMemo(() => protocolDisplay(profile.protocol, t), [profile.protocol, t]);
+
+  const handleToggle = async () => {
+    await updateProfile({ ...profile, enabled: !profile.enabled });
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await checkProfileHealth(profile.id);
+      setTestResult({ ok: r.ok, error: r.error ?? undefined });
+    } catch (e: any) {
+      setTestResult({ ok: false, error: String(e?.message ?? e) });
+    } finally {
+      setTesting(false);
+      setTimeout(() => setTestResult(null), 4000);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (profile.builtin) return;
+    if (!confirm(t("settings.ai.confirmDelete", { name: profile.name }))) return;
+    await deleteProfile(profile.id);
+  };
+
+  const handleClone = async () => {
+    await cloneProfile(profile.id);
+  };
+
+  return (
+    <div className="p-2.5 rounded-lg bg-white/3 border border-white/5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <button
+            onClick={handleToggle}
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              profile.enabled ? "bg-success" : "bg-text-muted"
+            }`}
+            title={profile.enabled ? t("settings.ai.toggleEnabled") : t("settings.ai.toggleDisabled")}
+          />
+          <span className="text-xs font-medium text-text-primary truncate">{profile.name}</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-text-muted">
+            {protocolLabel}
+          </span>
+          {profile.builtin && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-info/15 text-info">{t("settings.ai.builtin")}</span>
+          )}
+          {profile.apiKeySet && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-success/20 text-success">
+              {t("settings.ai.keySet")}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <IconBtn title={t("settings.ai.testConnection")} onClick={handleTest} disabled={testing}>
+            <Zap size={11} className={testing ? "text-text-muted animate-pulse" : "text-accent"} />
+          </IconBtn>
+          <IconBtn title={t("settings.ai.editProfile")} onClick={onEdit}>
+            <Edit3 size={11} />
+          </IconBtn>
+          <IconBtn title={t("settings.ai.cloneProfile")} onClick={handleClone}>
+            <CopyIcon size={11} />
+          </IconBtn>
+          {!profile.builtin && (
+            <IconBtn title={t("settings.ai.deleteProfile")} onClick={handleDelete}>
+              <Trash2 size={11} className="text-error" />
+            </IconBtn>
+          )}
+        </div>
+      </div>
+      <div className="text-[10px] text-text-muted mt-1 truncate">{profile.baseUrl}</div>
+      {testResult && (
+        <div
+          className={`mt-2 text-[10px] px-2 py-1 rounded ${
+            testResult.ok
+              ? "bg-success/10 text-success"
+              : "bg-error/10 text-error"
+          }`}
+        >
+          {testResult.ok ? t("settings.ai.testOk") : t("settings.ai.editor.testFailed", { error: testResult.error ?? "failed" })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IconBtn({
+  children,
+  title,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="p-1 rounded hover:bg-white/5 text-text-muted hover:text-text-secondary disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+function protocolDisplay(p: Protocol, t: (key: string) => string): string {
+  switch (p) {
+    case "anthropic":
+      return t("settings.ai.protocol.anthropic");
+    case "openai-compatible":
+      return t("settings.ai.protocol.openai");
+    case "ollama":
+      return t("settings.ai.protocol.ollama");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Route row (per-task profile + model dropdowns)
+// ---------------------------------------------------------------------------
+
+function RouteRow({
+  route,
+  profiles,
+  onChange,
+}: {
+  route: TaskRoute;
+  profiles: Profile[];
+  onChange: (route: TaskRoute) => void;
+}) {
+  const t = useT();
+  const enabled = profiles.filter((p) => p.enabled);
+  const target = profiles.find((p) => p.id === route.profileId);
+  const targetMissing = !target;
+  const modelOptions = target?.models ?? [];
+
+  return (
+    <div className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
+      <span className="text-xs text-text-primary">{t(`task.${route.taskId}`)}</span>
+      <div className="flex items-center gap-2">
+        <select
+          value={route.profileId}
+          onChange={(e) => onChange({ ...route, profileId: e.target.value })}
+          className={`text-[10px] px-1.5 py-0.5 rounded ${
+            targetMissing ? "border border-error" : ""
+          }`}
+        >
+          {targetMissing && (
+            <option value={route.profileId}>{t("settings.ai.profileDeleted")} {route.profileId}</option>
+          )}
+          {enabled.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <input
+          list={`models-${route.taskId}`}
+          value={route.model}
+          onChange={(e) => onChange({ ...route, model: e.target.value })}
+          placeholder={t("settings.ai.modelPlaceholder")}
+          className="text-[10px] px-1.5 py-0.5 rounded w-44"
+        />
+        <datalist id={`models-${route.taskId}`}>
+          {modelOptions.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Preset picker dialog
+// ---------------------------------------------------------------------------
+
+function PresetPickerDialog({
+  presets,
+  onClose,
+  onPick,
+}: {
+  presets: ProfilePreset[];
+  onClose: () => void;
+  onPick: (preset: ProfilePreset) => void;
+}) {
+  const t = useT();
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="glass-thick rounded-2xl w-[560px] max-h-[70vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+          <span className="text-sm font-medium text-text-primary">{t("settings.ai.presets.title")}</span>
+          <button onClick={onClose} className="text-text-muted hover:text-text-secondary">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto p-2">
+          {presets.map((preset) => (
+            <button
+              key={preset.id}
+              onClick={() => onPick(preset)}
+              className="w-full flex items-start gap-3 px-3 py-2.5 rounded text-left hover:bg-white/5"
+            >
+              <Cpu size={14} className="text-accent shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-text-primary">{preset.name}</div>
+                <div className="text-[10px] text-text-muted truncate">
+                  {protocolDisplay(preset.protocol, t)} · {preset.baseUrl || t("settings.ai.presets.needsFill")}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Profile editor dialog (new + edit)
+// ---------------------------------------------------------------------------
+
+function ProfileEditorDialog({
+  profile,
+  isNew,
+  onClose,
+}: {
+  profile: Profile;
+  isNew: boolean;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const [draft, setDraft] = useState<Profile>(profile);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [extraHeadersText, setExtraHeadersText] = useState(
+    Object.entries(profile.extraHeaders)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n"),
+  );
+  const [modelsText, setModelsText] = useState(profile.models.join("\n"));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+
+  const createProfile = useAiStore((s) => s.createProfile);
+  const updateProfile = useAiStore((s) => s.updateProfile);
+  const setProfileApiKey = useAiStore((s) => s.setProfileApiKey);
+  const checkDraftHealth = useAiStore((s) => s.checkDraftHealth);
+
+  const composedDraft = useMemo<Profile>(() => {
+    const headers: Record<string, string> = {};
+    for (const line of extraHeadersText.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const idx = trimmed.indexOf(":");
+      if (idx < 0) continue;
+      const k = trimmed.slice(0, idx).trim();
+      const v = trimmed.slice(idx + 1).trim();
+      if (k) headers[k] = v;
+    }
+    const models = modelsText
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return { ...draft, extraHeaders: headers, models };
+  }, [draft, extraHeadersText, modelsText]);
+
+  const requiresKey = draft.authScheme.kind !== "none";
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      let saved: Profile;
+      if (isNew) {
+        saved = await createProfile(composedDraft);
+      } else {
+        saved = await updateProfile(composedDraft);
+      }
+      if (apiKeyInput.trim()) {
+        await setProfileApiKey(saved.id, apiKeyInput.trim());
+      }
+      onClose();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await checkDraftHealth(
+        composedDraft,
+        apiKeyInput.trim() ? apiKeyInput.trim() : null,
+      );
+      setTestResult({ ok: r.ok, error: r.error ?? undefined });
+    } catch (e: any) {
+      setTestResult({ ok: false, error: String(e?.message ?? e) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="glass-thick rounded-2xl w-[640px] max-h-[85vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+          <span className="text-sm font-medium text-text-primary">
+            {isNew ? t("settings.ai.editor.titleNew") : t("settings.ai.editor.titleEdit", { name: profile.name })}
+          </span>
+          <button onClick={onClose} className="text-text-muted hover:text-text-secondary">
+            <X size={14} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4 flex flex-col gap-3">
+          <Field label={t("settings.ai.editor.name")}>
+            <input
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              className="text-xs px-2 py-1 rounded w-full"
+            />
+          </Field>
+
+          <Field label={t("settings.ai.editor.protocol")}>
+            <select
+              value={draft.protocol}
+              onChange={(e) =>
+                setDraft({ ...draft, protocol: e.target.value as Protocol })
+              }
+              className="text-xs px-2 py-1 rounded w-full"
+              disabled={profile.builtin}
+            >
+              <option value="anthropic">{t("settings.ai.protocol.anthropicOpt")}</option>
+              <option value="openai-compatible">{t("settings.ai.protocol.openaiOpt")}</option>
+              <option value="ollama">{t("settings.ai.protocol.ollamaOpt")}</option>
+            </select>
+          </Field>
+
+          <Field label={t("settings.ai.editor.baseUrl")}>
+            <input
+              value={draft.baseUrl}
+              onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
+              placeholder={t("settings.ai.editor.urlPlaceholder")}
+              className="text-xs px-2 py-1 rounded w-full font-mono"
+            />
+          </Field>
+
+          <Field label={t("settings.ai.editor.endpointPath")}>
+            <input
+              value={draft.endpointPath}
+              onChange={(e) => setDraft({ ...draft, endpointPath: e.target.value })}
+              placeholder={defaultEndpointPath(draft.protocol)}
+              className="text-xs px-2 py-1 rounded w-full font-mono"
+            />
+          </Field>
+
+          <Field label={t("settings.ai.editor.authScheme")}>
+            <AuthSchemeEditor
+              value={draft.authScheme}
+              onChange={(s) => setDraft({ ...draft, authScheme: s })}
+            />
+          </Field>
+
+          {requiresKey && (
+            <Field label={profile.apiKeySet ? t("settings.ai.editor.apiKeyKeep") : t("settings.ai.editor.apiKey")}>
+              <input
+                type="password"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder={profile.apiKeySet ? t("settings.ai.editor.apiKeyExisting") : "sk-..."}
+                className="text-xs px-2 py-1 rounded w-full font-mono"
+              />
+            </Field>
+          )}
+
+          <Field label={t("settings.ai.editor.models")}>
+            <textarea
+              value={modelsText}
+              onChange={(e) => setModelsText(e.target.value)}
+              rows={4}
+              className="text-xs px-2 py-1 rounded w-full font-mono resize-none"
+              placeholder={t("settings.ai.editor.modelsPlaceholder")}
+            />
+          </Field>
+
+          <Field label={t("settings.ai.editor.extraHeaders")}>
+            <textarea
+              value={extraHeadersText}
+              onChange={(e) => setExtraHeadersText(e.target.value)}
+              rows={3}
+              className="text-xs px-2 py-1 rounded w-full font-mono resize-none"
+              placeholder={t("settings.ai.editor.headersPlaceholder")}
+            />
+          </Field>
+
+          {error && (
+            <div className="text-[10px] text-error px-2 py-1 rounded bg-error/10">{error}</div>
+          )}
+          {testResult && (
+            <div
+              className={`text-[10px] px-2 py-1 rounded ${
+                testResult.ok ? "bg-success/10 text-success" : "bg-error/10 text-error"
+              }`}
+            >
+              {testResult.ok ? t("settings.ai.testOk") : t("settings.ai.editor.testFailed", { error: testResult.error ?? "failed" })}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-white/5">
+          <button
+            onClick={handleTest}
+            disabled={testing}
+            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50"
+          >
+            <Zap size={11} />
+            {testing ? t("settings.ai.testing") : t("settings.ai.testConnection")}
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="text-xs px-3 py-1.5 rounded text-text-muted hover:text-text-secondary"
+            >
+              {t("settings.ai.editor.cancel")}
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !draft.name.trim() || !draft.baseUrl.trim()}
+              className="glass-button-primary text-xs px-3 py-1.5 rounded font-medium disabled:opacity-50"
+            >
+              {saving ? t("settings.ai.editor.saving") : t("settings.ai.editor.save")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function defaultEndpointPath(p: Protocol): string {
+  switch (p) {
+    case "anthropic":
+      return "/v1/messages";
+    case "openai-compatible":
+      return "/v1/chat/completions";
+    case "ollama":
+      return "/api/chat";
+  }
+}
+
+function AuthSchemeEditor({
+  value,
+  onChange,
+}: {
+  value: AuthScheme;
+  onChange: (s: AuthScheme) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        value={value.kind}
+        onChange={(e) => {
+          const kind = e.target.value as AuthScheme["kind"];
+          if (kind === "custom-header") onChange({ kind, name: "X-API-Key" });
+          else if (kind === "anthropic-key") onChange({ kind: "anthropic-key" });
+          else if (kind === "bearer") onChange({ kind: "bearer" });
+          else onChange({ kind: "none" });
+        }}
+        className="text-xs px-2 py-1 rounded"
+      >
+        <option value="anthropic-key">{t("settings.ai.auth.anthropic")}</option>
+        <option value="bearer">{t("settings.ai.auth.bearer")}</option>
+        <option value="custom-header">{t("settings.ai.auth.custom")}</option>
+        <option value="none">{t("settings.ai.auth.none")}</option>
+      </select>
+      {value.kind === "custom-header" && (
+        <input
+          value={value.name}
+          onChange={(e) => onChange({ kind: "custom-header", name: e.target.value })}
+          placeholder={t("settings.ai.editor.headerNamePlaceholder")}
+          className="text-xs px-2 py-1 rounded flex-1 font-mono"
+        />
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] uppercase tracking-wider text-text-muted">{label}</label>
+      {children}
+    </div>
+  );
+}
+
 function EditorTab() {
+  const t = useT();
   const appearance = useSettingsStore((s) => s.appearance);
   const updateAppearance = useSettingsStore((s) => s.updateAppearance);
 
@@ -360,6 +978,7 @@ function EditorTab() {
 }
 
 function AboutTab() {
+  const t = useT();
   return (
     <div className="flex flex-col gap-6">
       <SectionTitle>{t("settings.tab.about")}</SectionTitle>

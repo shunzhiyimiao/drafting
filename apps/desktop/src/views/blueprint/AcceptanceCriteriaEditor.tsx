@@ -1,5 +1,6 @@
 import { Plus, X } from "lucide-react";
 import type { AcceptanceCriterion } from "../../types/blueprint-types";
+import { useT } from "../../lib/i18n";
 
 interface Props {
   criteria: AcceptanceCriterion[];
@@ -16,6 +17,7 @@ export function AcceptanceCriteriaEditor({
   onRemove,
   onTextChange,
 }: Props) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-1">
       {criteria.map((c, i) => (
@@ -39,7 +41,7 @@ export function AcceptanceCriteriaEditor({
           <button
             onClick={() => onRemove(i)}
             className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-error transition-opacity"
-            title="Remove"
+            title={t("blueprint.criterionRemove")}
           >
             <X size={12} />
           </button>

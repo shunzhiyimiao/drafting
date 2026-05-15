@@ -1,5 +1,6 @@
 import { Eye, Code, CheckCircle, Trash2 } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
+import { useT } from "../../lib/i18n";
 
 interface Props {
   onCheck: () => void;
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export function BlueprintToolbar({ onCheck, onDelete }: Props) {
+  const t = useT();
   const activeBlueprint = useBlueprintStore((s) => s.activeBlueprint);
   const viewMode = useBlueprintStore((s) => s.viewMode);
   const setViewMode = useBlueprintStore((s) => s.setViewMode);
@@ -52,15 +54,15 @@ export function BlueprintToolbar({ onCheck, onDelete }: Props) {
         <button
           onClick={onCheck}
           className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded transition-colors"
-          title="Check"
+          title={t("blueprint.check")}
         >
           <CheckCircle size={14} />
-          Check
+          {t("blueprint.check")}
         </button>
         <button
           onClick={onDelete}
           className="flex items-center gap-1 px-2 py-1 text-xs text-text-muted hover:text-error hover:bg-bg-hover rounded transition-colors"
-          title="Delete"
+          title={t("blueprint.delete")}
         >
           <Trash2 size={14} />
         </button>

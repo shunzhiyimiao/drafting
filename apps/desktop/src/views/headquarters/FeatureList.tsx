@@ -8,6 +8,7 @@ import {
   type FeatureFilter,
 } from "../../stores/headquarters-store";
 import type { BlueprintIndexEntry } from "../../types/blueprint-types";
+import { useT } from "../../lib/i18n";
 
 const priorityWeight: Record<string, number> = {
   critical: 4,
@@ -174,16 +175,17 @@ function SortMenu({
   sort: FeatureSort;
   onChange: (s: FeatureSort) => void;
 }) {
+  const tt = useT();
   return (
     <select
       value={sort}
       onChange={(e) => onChange(e.target.value as FeatureSort)}
       className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted hover:text-text-secondary focus:outline-none"
     >
-      <option value="priority">Priority</option>
-      <option value="progress">Progress</option>
-      <option value="updated">Updated</option>
-      <option value="name">Name</option>
+      <option value="priority">{tt("hq.sort.priority")}</option>
+      <option value="progress">{tt("hq.sort.progress")}</option>
+      <option value="updated">{tt("hq.sort.updated")}</option>
+      <option value="name">{tt("hq.sort.name")}</option>
     </select>
   );
 }
@@ -197,18 +199,19 @@ function FilterMenu({
   open: boolean;
   setOpen: (o: boolean) => void;
 }) {
+  const tt = useT();
   return (
     <select
       value={filter}
       onChange={(e) => onChange(e.target.value as FeatureFilter)}
       className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted hover:text-text-secondary focus:outline-none"
     >
-      <option value="all">All</option>
-      <option value="in-progress">In Progress</option>
-      <option value="with-alerts">With Alerts</option>
-      <option value="stalled">Stalled</option>
-      <option value="empty">Empty</option>
-      <option value="completed">Completed</option>
+      <option value="all">{tt("hq.filter.all")}</option>
+      <option value="in-progress">{tt("hq.filter.inProgress")}</option>
+      <option value="with-alerts">{tt("hq.filter.withAlerts")}</option>
+      <option value="stalled">{tt("hq.filter.stalled")}</option>
+      <option value="empty">{tt("hq.filter.empty")}</option>
+      <option value="completed">{tt("hq.filter.completed")}</option>
     </select>
   );
 }

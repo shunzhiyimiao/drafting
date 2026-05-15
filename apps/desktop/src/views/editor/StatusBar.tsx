@@ -1,7 +1,9 @@
 import { GitBranch, FileText, Zap } from "lucide-react";
 import { useEditorStore } from "../../stores/editor-store";
+import { useT } from "../../lib/i18n";
 
 export function StatusBar() {
+  const tt = useT();
   const tabs = useEditorStore((s) => s.tabs);
   const activeTabPath = useEditorStore((s) => s.activeTabPath);
   const activeTab = tabs.find((t) => t.path === activeTabPath);
@@ -15,7 +17,7 @@ export function StatusBar() {
             main
           </span>
         </div>
-        <div>Ready</div>
+        <div>{tt("editor.statusReady")}</div>
       </div>
     );
   }

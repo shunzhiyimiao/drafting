@@ -8,6 +8,7 @@ import type {
   CanvasSummary,
   ValidationResult,
   CodeGenResult,
+  WireBridge,
 } from "../types/patchboard-types";
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,13 @@ export async function validateCanvas(
   canvasId: string,
 ): Promise<ValidationResult> {
   return invoke("patchboard_validate_canvas", { projectRoot, canvasId });
+}
+
+export async function classifyWires(
+  projectRoot: string,
+  canvasId: string,
+): Promise<WireBridge[]> {
+  return invoke("patchboard_classify_wires", { projectRoot, canvasId });
 }
 
 // ---------------------------------------------------------------------------

@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { Plus, Check, X } from "lucide-react";
 import { usePatchboardStore } from "../../../../stores/patchboard-store";
+import { useT } from "../../../../lib/i18n";
 
 export function CanvasListPanel() {
+  const t = useT();
   const canvasList = usePatchboardStore((s) => s.canvasList);
   const activeCanvasId = usePatchboardStore((s) => s.activeCanvasId);
   const loadCanvas = usePatchboardStore((s) => s.loadCanvas);
@@ -35,12 +37,12 @@ export function CanvasListPanel() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-          Canvases
+          {t("patchboard.canvases")}
         </span>
         <button
           onClick={() => setCreating(true)}
           className="text-text-muted hover:text-text-secondary"
-          title="New Canvas"
+          title={t("patchboard.newCanvas")}
         >
           <Plus size={14} />
         </button>
@@ -56,20 +58,20 @@ export function CanvasListPanel() {
               if (e.key === "Enter") handleCreate();
               if (e.key === "Escape") handleCancel();
             }}
-            placeholder="Canvas name..."
+            placeholder={t("patchboard.canvasNamePlaceholder")}
             className="flex-1 px-2 py-1 text-xs rounded"
           />
           <button
             onClick={handleCreate}
             className="text-success hover:text-success/80"
-            title="Create"
+            title={t("patchboard.create")}
           >
             <Check size={14} />
           </button>
           <button
             onClick={handleCancel}
             className="text-text-muted hover:text-error"
-            title="Cancel"
+            title={t("patchboard.cancel")}
           >
             <X size={14} />
           </button>
@@ -79,7 +81,7 @@ export function CanvasListPanel() {
       <div className="flex-1 overflow-auto">
         {canvasList.length === 0 && !creating ? (
           <p className="p-3 text-xs text-text-muted">
-            No canvases yet. Create one to start.
+            {t("patchboard.canvases")}
           </p>
         ) : (
           canvasList.map((c) => (

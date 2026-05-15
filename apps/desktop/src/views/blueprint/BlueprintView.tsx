@@ -6,8 +6,11 @@ import { BlueprintToolbar } from "./BlueprintToolbar";
 import { RawMdView } from "./RawMdView";
 import { StructuredView } from "./StructuredView";
 import { TemplatePickerDialog } from "./TemplatePickerDialog";
+import { getProjectRoot } from "../../lib/app-bootstrap";
+import { useT } from "../../lib/i18n";
 
 export function BlueprintView() {
+  const t = useT();
   const initialized = useBlueprintStore((s) => s.initialized);
   const initialize = useBlueprintStore((s) => s.initialize);
   const activeBlueprint = useBlueprintStore((s) => s.activeBlueprint);
@@ -20,7 +23,7 @@ export function BlueprintView() {
 
   useEffect(() => {
     if (!initialized) {
-      initialize(".");
+      getProjectRoot().then((root) => initialize(root));
     }
   }, [initialized, initialize]);
 
@@ -77,7 +80,7 @@ export function BlueprintView() {
             <button
               onClick={() => setShowTemplatePicker(true)}
               className="w-10 h-10 flex items-center justify-center rounded-xl glass-button-primary"
-              title="Create from Template"
+              title={t("blueprint.createFromTemplate")}
             >
               <Plus size={20} />
             </button>

@@ -17,10 +17,21 @@ import type { AdapterNodeData } from "../nodes/AdapterNodeComponent";
  * Converts the Patchboard Canvas data model to react-flow nodes/edges
  * and provides change handlers that update the Zustand store.
  */
+const BRIDGE_STYLE: Record<
+  string,
+  { stroke: string; strokeDasharray?: string }
+> = {
+  lossless: { stroke: "#89b4fa" },
+  risky: { stroke: "#f9e2af", strokeDasharray: "6 4" },
+  structural: { stroke: "#fab387", strokeDasharray: "3 3" },
+  incompatible: { stroke: "#f38ba8", strokeDasharray: "2 2" },
+};
+
 export function useCanvasState() {
   const activeCanvas = usePatchboardStore((s) => s.activeCanvas);
   const updateActiveCanvas = usePatchboardStore((s) => s.updateActiveCanvas);
   const registry = usePatchboardStore((s) => s.registry);
+  const wireBridges = usePatchboardStore((s) => s.wireBridges);
 
   const nodes: Node[] = useMemo(() => {
     if (!activeCanvas) return [];
@@ -76,17 +87,25 @@ export function useCanvasState() {
 
   const edges: Edge[] = useMemo(() => {
     if (!activeCanvas) return [];
-    return activeCanvas.wires.map((wire) => ({
-      id: wire.id,
-      source: wire.fromAdapterId,
-      sourceHandle: wire.fromSocketId,
-      target: wire.toAdapterId,
-      targetHandle: wire.toParamName,
-      type: "default",
-      animated: true,
-      style: { stroke: "#89b4fa" },
-    }));
-  }, [activeCanvas]);
+    const bridgeByWire = new Map(wireBridges.map((b) => [b.wireId, b]));
+    return activeCanvas.wires.map((wire) => {
+      const bridge = bridgeByWire.get(wire.id);
+      const style = BRIDGE_STYLE[bridge?.level ?? "lossless"];
+      return {
+        id: wire.id,
+        source: wire.fromAdapterId,
+        sourceHandle: wire.fromSocketId,
+        target: wire.toAdapterId,
+        targetHandle: wire.toParamName,
+        type: "default",
+        animated: bridge?.level !== "incompatible",
+        style,
+        label: bridge && bridge.level !== "lossless" ? bridge.level : undefined,
+        labelStyle: { fill: style.stroke, fontSize: 10 },
+        data: bridge ? { bridge } : undefined,
+      };
+    });
+  }, [activeCanvas, wireBridges]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {

@@ -136,3 +136,18 @@ export interface CodeGenResult {
   files: string[];
   errors: string[];
 }
+
+// --- Type Bridge ------------------------------------------------------------
+
+export type BridgeLevel =
+  | "lossless"
+  | "risky"
+  | "structural"
+  | "incompatible";
+
+export interface WireBridge {
+  wireId: string;
+  level: BridgeLevel;
+  reason: string;
+  blocking: boolean;
+}

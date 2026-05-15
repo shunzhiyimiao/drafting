@@ -6,6 +6,7 @@ import type {
   MethodParam,
   CreateSocketInput,
 } from "../../../types/patchboard-types";
+import { useT } from "../../../lib/i18n";
 
 interface SocketEditorProps {
   socketId: string | null; // null = create mode
@@ -13,6 +14,7 @@ interface SocketEditorProps {
 }
 
 export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
+  const t = useT();
   const createSocket = usePatchboardStore((s) => s.createSocket);
   const updateSocket = usePatchboardStore((s) => s.updateSocket);
   const getSocket = usePatchboardStore((s) => s.getSocket);
@@ -126,7 +128,7 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
           <input
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
-            placeholder="e.g. auth/IAuthService"
+            placeholder={t("patchboard.fullNamePlaceholder")}
             className="w-full mt-0.5 px-2 py-1 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
           />
         </div>
@@ -138,7 +140,7 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
           <input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="e.g. Auth Service"
+            placeholder={t("patchboard.displayNamePlaceholder")}
             className="w-full mt-0.5 px-2 py-1 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
           />
         </div>
@@ -167,7 +169,7 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
                     onChange={(e) =>
                       updateMethod(mi, { name: e.target.value })
                     }
-                    placeholder="method name"
+                    placeholder={t("patchboard.methodNamePlaceholder")}
                     className="flex-1 px-1.5 py-0.5 text-[11px] bg-transparent border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                   />
                   <span className="text-[10px] text-text-muted">→</span>
@@ -176,7 +178,7 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
                     onChange={(e) =>
                       updateMethod(mi, { returnType: e.target.value })
                     }
-                    placeholder="return type"
+                    placeholder={t("patchboard.returnTypePlaceholder")}
                     className="w-20 px-1.5 py-0.5 text-[11px] bg-transparent border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                   />
                   <button
@@ -195,7 +197,7 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
                         onChange={(e) =>
                           updateParam(mi, pi, { name: e.target.value })
                         }
-                        placeholder="param"
+                        placeholder={t("patchboard.paramPlaceholder")}
                         className="w-16 px-1 py-0.5 text-[10px] bg-transparent border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                       />
                       <span className="text-[10px] text-text-muted">:</span>
@@ -206,7 +208,7 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
                             paramType: e.target.value,
                           })
                         }
-                        placeholder="type"
+                        placeholder={t("patchboard.typePlaceholder")}
                         className="w-16 px-1 py-0.5 text-[10px] bg-transparent border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                       />
                       <button

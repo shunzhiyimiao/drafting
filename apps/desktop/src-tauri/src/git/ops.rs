@@ -269,6 +269,62 @@ pub fn diff_file(project_root: &Path, path: &str) -> Result<FileDiff, String> {
     })
 }
 
+/// Unified text patch of all staged changes (HEAD → index). Used as input for
+/// AI commit message generation.
+///
+/// Returns an empty string when there are no staged changes. The patch is
+/// clamped to [`max_bytes`] bytes so huge refactors don't blow the AI context
+/// window.
+pub fn staged_diff_patch(project_root: &Path, max_bytes: usize) -> Result<String, String> {
+    let repo = open_repo(project_root).map_err(|e| e.to_string())?;
+    let head_tree = repo
+        .head()
+        .ok()
+        .and_then(|h| h.peel_to_tree().ok());
+
+    let mut opts = DiffOptions::new();
+    opts.context_lines(3);
+    let diff = repo
+        .diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))
+        .map_err(|e| e.to_string())?;
+
+    use std::cell::RefCell;
+    let buf: RefCell<String> = RefCell::new(String::new());
+    let truncated = std::cell::Cell::new(false);
+
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        if truncated.get() {
+            return true;
+        }
+        let mut b = buf.borrow_mut();
+        if b.len() >= max_bytes {
+            truncated.set(true);
+            return true;
+        }
+        // line origins: ' ', '+', '-', 'F' (file header), 'H' (hunk header), etc.
+        match line.origin() {
+            '+' | '-' | ' ' => b.push(line.origin()),
+            _ => {}
+        }
+        let content = String::from_utf8_lossy(line.content());
+        let remaining = max_bytes.saturating_sub(b.len());
+        if content.len() > remaining {
+            b.push_str(&content[..remaining]);
+            truncated.set(true);
+        } else {
+            b.push_str(&content);
+        }
+        true
+    })
+    .map_err(|e| e.to_string())?;
+
+    let mut out = buf.into_inner();
+    if truncated.get() {
+        out.push_str("\n... [diff truncated] ...\n");
+    }
+    Ok(out)
+}
+
 pub fn stage_file(project_root: &Path, path: &str) -> Result<(), String> {
     let repo = open_repo(project_root).map_err(|e| e.to_string())?;
     let mut index = repo.index().map_err(|e| e.to_string())?;

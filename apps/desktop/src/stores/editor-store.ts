@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { DirEntry, FileIdentity } from "../types/editor-types";
 import * as api from "../lib/editor-api";
+import { t } from "../lib/i18n";
 
 export interface EditorTab {
   path: string;
@@ -108,7 +109,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { tabs, activeTabPath } = get();
     const tab = tabs.find((t) => t.path === relPath);
     if (tab?.dirty) {
-      if (!confirm(`"${relPath}" has unsaved changes. Close anyway?`)) {
+      if (!confirm(t("terminal.confirmClose", { path: relPath }))) {
         return;
       }
     }

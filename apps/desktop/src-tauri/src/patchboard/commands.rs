@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::patchboard::error::PatchboardError;
+use crate::patchboard::type_bridge::{classify_wires, WireBridge};
 use crate::patchboard::types::*;
 use crate::patchboard::{canvas, registry, validation};
 use crate::sync_bus::events::{PatchboardEvent, SyncBusEvent};
@@ -211,5 +212,30 @@ pub fn patchboard_validate_canvas(
 ) -> Result<ValidationResult, String> {
     let root = std::path::Path::new(&project_root);
     let c = canvas::load_canvas(root, &canvas_id).map_err(|e| e.to_string())?;
-    Ok(validation::validate_canvas(&c))
+    let sockets = load_all_sockets(root);
+    Ok(validation::validate_canvas_with_sockets(&c, &sockets))
+}
+
+/// Classify every wire on a canvas into a BridgeLevel. The frontend uses this
+/// to color wires (green/yellow/red) without needing to re-run full validation.
+#[tauri::command]
+pub fn patchboard_classify_wires(
+    project_root: String,
+    canvas_id: String,
+) -> Result<Vec<WireBridge>, String> {
+    let root = std::path::Path::new(&project_root);
+    let c = canvas::load_canvas(root, &canvas_id).map_err(|e| e.to_string())?;
+    let sockets = load_all_sockets(root);
+    Ok(classify_wires(&c, &sockets))
+}
+
+pub(crate) fn load_all_sockets(root: &std::path::Path) -> Vec<SocketDefinition> {
+    let reg = match registry::load_registry(root) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    reg.sockets
+        .iter()
+        .filter_map(|entry| registry::load_socket(root, &entry.id).ok())
+        .collect()
 }

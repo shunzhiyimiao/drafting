@@ -1,7 +1,9 @@
 import { Trash2, Star } from "lucide-react";
 import { usePatchboardStore } from "../../../../stores/patchboard-store";
+import { useT } from "../../../../lib/i18n";
 
 export function AdapterPanel() {
+  const tt = useT();
   const activeCanvas = usePatchboardStore((s) => s.activeCanvas);
   const selectedNodeId = usePatchboardStore((s) => s.selectedNodeId);
   const updateActiveCanvas = usePatchboardStore((s) => s.updateActiveCanvas);
@@ -90,7 +92,7 @@ export function AdapterPanel() {
           Constructor Params
         </label>
         {adapter.constructorParams.length === 0 ? (
-          <p className="text-[10px] text-text-muted mt-0.5">None</p>
+          <p className="text-[10px] text-text-muted mt-0.5">{tt("common.none")}</p>
         ) : (
           <div className="flex flex-col gap-1 mt-0.5">
             {adapter.constructorParams.map((p) => (

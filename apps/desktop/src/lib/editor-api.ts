@@ -1,8 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AdvancedSearchResult,
   DirEntry,
   FileContent,
   FileIdentity,
+  SearchOptions,
+  SearchProgressPayload,
   SearchResult,
 } from "../types/editor-types";
 
@@ -41,4 +45,25 @@ export async function getFileIdentity(
   relPath: string,
 ): Promise<FileIdentity> {
   return invoke("editor_get_identity", { projectRoot, relPath });
+}
+
+// --- Advanced search --------------------------------------------------------
+
+export async function searchAdvanced(
+  projectRoot: string,
+  options: SearchOptions,
+): Promise<AdvancedSearchResult> {
+  return invoke("editor_search_advanced", { projectRoot, options });
+}
+
+export async function cancelSearch(searchId: string): Promise<boolean> {
+  return invoke("editor_cancel_search", { searchId });
+}
+
+export async function onSearchProgress(
+  cb: (payload: SearchProgressPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<SearchProgressPayload>("editor://search-progress", (e) =>
+    cb(e.payload),
+  );
 }

@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { getBlueprintRaw } from "../../lib/blueprint-api";
+import { useT } from "../../lib/i18n";
 
 export function RawMdView() {
+  const t = useT();
   const projectRoot = useBlueprintStore((s) => s.projectRoot);
   const activeBlueprint = useBlueprintStore((s) => s.activeBlueprint);
   const updateRaw = useBlueprintStore((s) => s.updateRaw);
@@ -37,7 +39,7 @@ export function RawMdView() {
   };
 
   if (loading) {
-    return <div className="p-4 text-text-muted text-xs">Loading...</div>;
+    return <div className="p-4 text-text-muted text-xs">{t("blueprint.loading")}</div>;
   }
 
   return (

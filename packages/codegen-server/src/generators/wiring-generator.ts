@@ -1,19 +1,29 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { SocketDefinition, GenerateWiringParams, AdapterNode } from "../types.js";
+import type {
+  SocketDefinition,
+  GenerateWiringParams,
+  AdapterNode,
+  WireBridge,
+} from "../types.js";
 
 /**
  * Generate wiring factory function from Canvas.
  * TOOL-OWNED: overwrites entirely on each generation.
  */
 export function generateWiring(params: GenerateWiringParams): string[] {
-  const { projectRoot, canvas, sockets, scopeName } = params;
+  const { projectRoot, canvas, sockets, scopeName, bridges } = params;
   const wiringDir = path.join(projectRoot, "packages/wiring/src");
   fs.mkdirSync(wiringDir, { recursive: true });
 
   const socketMap = new Map<string, SocketDefinition>();
   for (const s of sockets) {
     socketMap.set(s.id, s);
+  }
+
+  const bridgeByWire = new Map<string, WireBridge>();
+  for (const b of bridges ?? []) {
+    bridgeByWire.set(b.wireId, b);
   }
 
   // Topological sort of adapters by wire dependencies
@@ -57,23 +67,64 @@ export function generateWiring(params: GenerateWiringParams): string[] {
       varNames.set(adapter.id, varName);
 
       // Build constructor args
-      const args = adapter.constructorParams
-        .map((param) => {
-          if (param.paramType.kind === "socketDep") {
-            // Find the wire that provides this param
-            const wire = canvas.wires.find(
-              (w) => w.toAdapterId === adapter.id && w.toParamName === param.name,
-            );
-            if (wire) {
-              return varNames.get(wire.fromAdapterId) ?? `undefined /* missing wire for ${param.name} */`;
-            }
-            return `undefined /* unwired: ${param.name} */`;
+      const argParts: string[] = [];
+      for (const param of adapter.constructorParams) {
+        if (param.paramType.kind === "socketDep") {
+          const wire = canvas.wires.find(
+            (w) => w.toAdapterId === adapter.id && w.toParamName === param.name,
+          );
+          if (!wire) {
+            argParts.push(`undefined /* unwired: ${param.name} */`);
+            continue;
           }
-          // Primitive params get a placeholder
-          return `undefined as any /* TODO: provide ${param.name}: ${param.paramType.typeName ?? "unknown"} */`;
-        })
-        .join(", ");
+          const source = varNames.get(wire.fromAdapterId);
+          if (!source) {
+            argParts.push(`undefined /* missing source for ${param.name} */`);
+            continue;
+          }
+          const bridge = bridgeByWire.get(wire.id);
+          if (!bridge || bridge.level === "lossless") {
+            argParts.push(source);
+          } else if (bridge.level === "risky") {
+            // L2: insert a cast so the generated code still compiles, but
+            // leave a prominent TODO so the user can verify the conversion.
+            const expectedType =
+              param.paramType.kind === "socketDep"
+                ? socketInterfaceNameById(socketMap, param.paramType.socketId)
+                : "unknown";
+            content += `  // TODO[type-bridge L2]: ${bridge.reason}\n`;
+            argParts.push(`(${source} as unknown as ${expectedType})`);
+          } else {
+            // Shouldn't reach here — blocking wires are rejected before
+            // codegen — but be defensive.
+            argParts.push(
+              `undefined /* BLOCKED[type-bridge]: ${bridge.reason} */`,
+            );
+          }
+          continue;
+        }
+        // Primitive params: if a wire targets this param, the bridge classified
+        // it as risky (socket → primitive). Emit the cast + TODO. Otherwise,
+        // placeholder.
+        const wire = canvas.wires.find(
+          (w) => w.toAdapterId === adapter.id && w.toParamName === param.name,
+        );
+        if (wire) {
+          const source = varNames.get(wire.fromAdapterId);
+          const bridge = bridgeByWire.get(wire.id);
+          const reason = bridge?.reason ?? "socket wired into primitive";
+          content += `  // TODO[type-bridge L2]: ${reason}\n`;
+          argParts.push(
+            `(${source ?? "undefined"} as unknown as ${param.paramType.typeName ?? "any"})`,
+          );
+        } else {
+          argParts.push(
+            `undefined as any /* TODO: provide ${param.name}: ${param.paramType.typeName ?? "unknown"} */`,
+          );
+        }
+      }
 
+      const args = argParts.join(", ");
       content += `  const ${varName} = new ${adapter.name}(${args});\n`;
     }
 
@@ -140,4 +191,13 @@ function sanitizeFileName(name: string): string {
 function getInterfaceName(fullName: string): string {
   const parts = fullName.split("/");
   return parts[parts.length - 1];
+}
+
+function socketInterfaceNameById(
+  socketMap: Map<string, SocketDefinition>,
+  socketId: string | undefined,
+): string {
+  if (!socketId) return "unknown";
+  const s = socketMap.get(socketId);
+  return s ? getInterfaceName(s.fullName) : "unknown";
 }

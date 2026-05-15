@@ -10,7 +10,9 @@ import {
   Lock,
 } from "lucide-react";
 import { useEditorStore } from "../../stores/editor-store";
+import { getProjectRoot } from "../../lib/app-bootstrap";
 import type { DirEntry } from "../../types/editor-types";
+import { useT } from "../../lib/i18n";
 
 interface TreeNodeProps {
   entry: DirEntry;
@@ -105,13 +107,14 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
 }
 
 export function FileTree() {
+  const t = useT();
   const initialized = useEditorStore((s) => s.initialized);
   const initialize = useEditorStore((s) => s.initialize);
   const tree = useEditorStore((s) => s.tree);
 
   useEffect(() => {
     if (!initialized) {
-      initialize(".");
+      getProjectRoot().then((root) => initialize(root));
     }
   }, [initialized, initialize]);
 
@@ -121,12 +124,12 @@ export function FileTree() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
         <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-          Explorer
+          {t("editor.explorer")}
         </span>
       </div>
       <div className="flex-1 overflow-auto py-1">
         {rootEntries.length === 0 ? (
-          <p className="p-3 text-xs text-text-muted">Loading...</p>
+          <p className="p-3 text-xs text-text-muted">{t("editor.loading")}</p>
         ) : (
           rootEntries.map((entry) => (
             <TreeNode key={entry.path} entry={entry} depth={0} />

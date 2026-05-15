@@ -77,11 +77,21 @@ export interface GenerateAdapterSkeletonParams {
   scopeName: string;
 }
 
+export interface WireBridge {
+  wireId: string;
+  level: "lossless" | "risky" | "structural" | "incompatible";
+  reason: string;
+  blocking: boolean;
+}
+
 export interface GenerateWiringParams {
   projectRoot: string;
   canvas: Canvas;
   sockets: SocketDefinition[];
   scopeName: string;
+  /** Optional per-wire type bridge classification. When omitted, all wires
+   *  are treated as lossless. */
+  bridges?: WireBridge[];
 }
 
 export interface JsonRpcRequest {

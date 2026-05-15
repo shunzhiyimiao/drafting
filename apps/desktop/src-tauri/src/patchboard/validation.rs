@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::patchboard::error::{PatchboardError, Result};
+use crate::patchboard::type_bridge::{classify_wires, BridgeLevel, WireBridge};
 use crate::patchboard::types::*;
 
 /// Validate that the wire graph has no cycles using topological sort (Kahn's algorithm).
@@ -64,8 +65,32 @@ pub fn validate_adapter_has_socket(adapter: &AdapterNode) -> Result<()> {
     Ok(())
 }
 
+/// Validate full canvas constraints, including Type Bridge classification of
+/// every wire. `sockets` should contain every socket referenced by any adapter
+/// on the canvas (typically the full registry).
+///
+/// Backwards-compatible overload (for call sites that don't have sockets
+/// handy) is provided below as `validate_canvas`.
+pub fn validate_canvas_with_sockets(
+    canvas: &Canvas,
+    sockets: &[SocketDefinition],
+) -> ValidationResult {
+    let bridges = classify_wires(canvas, sockets);
+    validate_canvas_inner(canvas, Some(&bridges))
+}
+
 /// Validate full canvas constraints. Returns a ValidationResult.
+///
+/// Does not classify wires (missing registry context). Prefer
+/// [`validate_canvas_with_sockets`] for full Type Bridge checking.
 pub fn validate_canvas(canvas: &Canvas) -> ValidationResult {
+    validate_canvas_inner(canvas, None)
+}
+
+fn validate_canvas_inner(
+    canvas: &Canvas,
+    bridges: Option<&[WireBridge]>,
+) -> ValidationResult {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
@@ -125,6 +150,27 @@ pub fn validate_canvas(canvas: &Canvas) -> ValidationResult {
     // Warning: canvas has no entry points
     if canvas.entry_points.is_empty() && !canvas.adapters.is_empty() {
         warnings.push("Canvas has no entry points defined".to_string());
+    }
+
+    // Type Bridge: incompatible wires are hard errors; risky wires are warnings.
+    if let Some(bridges) = bridges {
+        let wire_by_id: HashMap<&str, &Wire> =
+            canvas.wires.iter().map(|w| (w.id.as_str(), w)).collect();
+        for b in bridges {
+            let label = wire_by_id
+                .get(b.wire_id.as_str())
+                .map(|w| format!("wire {} → {}.{}", w.from_adapter_id, w.to_adapter_id, w.to_param_name))
+                .unwrap_or_else(|| format!("wire {}", b.wire_id));
+            match b.level {
+                BridgeLevel::Incompatible | BridgeLevel::Structural => {
+                    errors.push(format!("{label}: {}", b.reason));
+                }
+                BridgeLevel::Risky => {
+                    warnings.push(format!("{label} (risky): {}", b.reason));
+                }
+                BridgeLevel::Lossless => {}
+            }
+        }
     }
 
     ValidationResult {

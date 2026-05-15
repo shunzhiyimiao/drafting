@@ -35,3 +35,34 @@ export interface SearchResult {
   matches: SearchMatch[];
   truncated: boolean;
 }
+
+export interface FileMatches {
+  path: string;
+  matches: SearchMatch[];
+}
+
+export interface SearchOptions {
+  query: string;
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  useRegex?: boolean;
+  includeGlobs?: string[];
+  excludeGlobs?: string[];
+  searchId?: string | null;
+}
+
+export interface SearchProgressPayload {
+  searchId: string;
+  scannedFiles: number;
+  matchedFiles: number;
+  totalMatches: number;
+}
+
+export interface AdvancedSearchResult {
+  totalMatches: number;
+  totalFiles: number;
+  scannedFiles: number;
+  files: FileMatches[];
+  truncated: boolean;
+  cancelled: boolean;
+}

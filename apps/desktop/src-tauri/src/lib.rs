@@ -9,14 +9,42 @@ mod lsp;
 mod codegen_proxy;
 mod ai_provider;
 
+use std::sync::Arc;
+
 use tauri::Manager;
 use sync_bus::SyncBus;
 use codegen_proxy::CodegenProxy;
 use terminal::manager::TerminalManager;
+use terminal::history::HistoryStore;
+use lsp::LspManager;
+use lsp::commands::LspForwarderRegistry;
+use ai_provider::AiRunner;
+use editor::search_advanced::SearchRegistry;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// Resolve the project root the app should operate on. During `tauri dev` the
+/// process cwd is `apps/desktop/src-tauri`, which is NOT what any of our
+/// subsystems want. We climb until we find a directory that smells like the
+/// workspace root (has a `CLAUDE.md`, `pnpm-workspace.yaml`, or `.git`), and
+/// fall back to cwd otherwise.
+#[tauri::command]
+fn app_get_cwd() -> String {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let mut cursor: Option<&std::path::Path> = Some(cwd.as_path());
+    while let Some(dir) = cursor {
+        let has_marker = dir.join("CLAUDE.md").exists()
+            || dir.join("pnpm-workspace.yaml").exists()
+            || dir.join(".git").exists();
+        if has_marker {
+            return dir.to_string_lossy().to_string();
+        }
+        cursor = dir.parent();
+    }
+    cwd.to_string_lossy().to_string()
 }
 
 #[tauri::command]
@@ -52,6 +80,21 @@ async fn patchboard_generate_code(
     } else {
         PatchboardConfig::default()
     };
+
+    // Type Bridge: refuse to generate if any wire is incompatible.
+    let bridges = patchboard::type_bridge::classify_wires(&canvas_data, &sockets);
+    let blocking: Vec<_> = bridges.iter().filter(|b| b.blocking).collect();
+    if !blocking.is_empty() {
+        let msgs: Vec<String> = blocking
+            .iter()
+            .map(|b| format!("{}: {}", b.wire_id, b.reason))
+            .collect();
+        return Ok(CodeGenResult {
+            success: false,
+            files: vec![],
+            errors: msgs,
+        });
+    }
 
     codegen.set_project_root(&project_root).await;
 
@@ -102,6 +145,7 @@ async fn patchboard_generate_code(
 
     // 3. Generate wiring
     let canvas_json = serde_json::to_value(&canvas_data).map_err(|e| e.to_string())?;
+    let bridges_json = serde_json::to_value(&bridges).map_err(|e| e.to_string())?;
     let result = codegen
         .call(
             "generateWiring",
@@ -110,6 +154,7 @@ async fn patchboard_generate_code(
                 "canvas": canvas_json,
                 "sockets": sockets_json,
                 "scopeName": config.scope_name,
+                "bridges": bridges_json,
             }),
         )
         .await?;
@@ -144,12 +189,22 @@ pub fn run() {
     let sync_bus = SyncBus::new();
     let codegen_proxy = CodegenProxy::new();
     let terminal_manager = TerminalManager::new();
+    let terminal_history = HistoryStore::new();
+    let lsp_manager: Arc<LspManager> = Arc::new(LspManager::new());
+    let lsp_forwarder_registry: Arc<LspForwarderRegistry> = Arc::new(LspForwarderRegistry::new());
+    let ai_runner: Arc<AiRunner> = Arc::new(AiRunner::new());
+    let search_registry: Arc<SearchRegistry> = Arc::new(SearchRegistry::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(sync_bus)
         .manage(codegen_proxy)
         .manage(terminal_manager)
+        .manage(terminal_history)
+        .manage(lsp_manager)
+        .manage(lsp_forwarder_registry)
+        .manage(ai_runner)
+        .manage(search_registry)
         .setup(|app| {
             let handle = app.handle().clone();
             let bus = app.state::<SyncBus>();
@@ -159,6 +214,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            app_get_cwd,
             patchboard::commands::patchboard_init,
             patchboard::commands::patchboard_list_sockets,
             patchboard::commands::patchboard_get_socket,
@@ -171,6 +227,7 @@ pub fn run() {
             patchboard::commands::patchboard_save_canvas,
             patchboard::commands::patchboard_delete_canvas,
             patchboard::commands::patchboard_validate_canvas,
+            patchboard::commands::patchboard_classify_wires,
             patchboard_generate_code,
             blueprint::commands::blueprint_init,
             blueprint::commands::blueprint_list,
@@ -192,6 +249,8 @@ pub fn run() {
             editor::commands::editor_read_file,
             editor::commands::editor_write_file,
             editor::commands::editor_search,
+            editor::commands::editor_search_advanced,
+            editor::commands::editor_cancel_search,
             editor::commands::editor_get_identity,
             atlas::commands::atlas_parse_file,
             terminal::commands::terminal_create_session,
@@ -199,10 +258,14 @@ pub fn run() {
             terminal::commands::terminal_resize,
             terminal::commands::terminal_close,
             terminal::commands::terminal_list,
+            terminal::commands::terminal_record_command,
+            terminal::commands::terminal_history_list,
+            terminal::commands::terminal_history_search,
             git::commands::git_status,
             git::commands::git_branches,
             git::commands::git_log,
             git::commands::git_diff_file,
+            git::commands::git_staged_diff_patch,
             git::commands::git_stage_file,
             git::commands::git_unstage_file,
             git::commands::git_commit,
@@ -210,11 +273,28 @@ pub fn run() {
             git::commands::git_create_branch,
             ai_provider::commands::ai_get_config,
             ai_provider::commands::ai_save_config,
-            ai_provider::commands::ai_set_api_key,
+            ai_provider::commands::ai_create_profile,
+            ai_provider::commands::ai_update_profile,
+            ai_provider::commands::ai_delete_profile,
+            ai_provider::commands::ai_clone_profile,
+            ai_provider::commands::ai_set_profile_api_key,
+            ai_provider::commands::ai_clear_profile_api_key,
+            ai_provider::commands::ai_list_presets,
             ai_provider::commands::ai_get_task_route,
             ai_provider::commands::ai_set_task_route,
             ai_provider::commands::ai_toggle_global,
-            ai_provider::commands::ai_check_provider_health,
+            ai_provider::commands::ai_check_profile_health,
+            ai_provider::commands::ai_check_draft_health,
+            ai_provider::commands::ai_import_from_claude_code,
+            ai_provider::commands::ai_stream_chat,
+            ai_provider::commands::ai_cancel_stream,
+            lsp::commands::lsp_did_open,
+            lsp::commands::lsp_did_change,
+            lsp::commands::lsp_did_close,
+            lsp::commands::lsp_completion,
+            lsp::commands::lsp_hover,
+            lsp::commands::lsp_definition,
+            lsp::commands::lsp_references,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

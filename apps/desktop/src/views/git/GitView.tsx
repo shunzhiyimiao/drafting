@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   GitBranch,
-  GitCommit,
   RefreshCw,
   Plus,
   Minus,
@@ -9,8 +8,12 @@ import {
 } from "lucide-react";
 import { useGitStore } from "../../stores/git-store";
 import type { FileStatus } from "../../types/git-types";
+import { CommitBox } from "./CommitBox";
+import { getProjectRoot } from "../../lib/app-bootstrap";
+import { useT } from "../../lib/i18n";
 
 export function GitView() {
+  const t = useT();
   const status = useGitStore((s) => s.status);
   const branches = useGitStore((s) => s.branches);
   const log = useGitStore((s) => s.log);
@@ -25,16 +28,14 @@ export function GitView() {
   const commit = useGitStore((s) => s.commit);
   const checkout = useGitStore((s) => s.checkout);
 
-  const [commitMessage, setCommitMessage] = useState("");
-
   useEffect(() => {
-    initialize(".");
+    getProjectRoot().then((root) => initialize(root));
   }, [initialize]);
 
   if (loading && !status) {
     return (
       <div className="flex items-center justify-center h-full text-text-muted text-sm">
-        Loading Git status...
+        {t("git.loadingStatus")}
       </div>
     );
   }
@@ -44,20 +45,14 @@ export function GitView() {
       <div className="flex flex-col items-center justify-center h-full text-center p-8">
         <GitBranch size={48} className="text-text-muted mb-4" />
         <h2 className="text-lg font-medium text-text-primary mb-2">
-          Not a Git repository
+          {t("git.notARepo")}
         </h2>
         <p className="text-sm text-text-muted max-w-md">
-          The current working directory is not a Git repository.
+          {t("git.notARepoDesc")}
         </p>
       </div>
     );
   }
-
-  const handleCommit = async () => {
-    if (!commitMessage.trim()) return;
-    await commit(commitMessage);
-    setCommitMessage("");
-  };
 
   return (
     <div className="flex h-full gap-2 p-2">
@@ -77,7 +72,7 @@ export function GitView() {
             <button
               onClick={refresh}
               className="text-text-muted hover:text-text-secondary"
-              title="Refresh"
+              title={t("git.refresh")}
             >
               <RefreshCw size={12} />
             </button>
@@ -93,7 +88,7 @@ export function GitView() {
         {/* Staged */}
         {status.staged.length > 0 && (
           <FileSection
-            title="Staged"
+            title={t("git.staged")}
             files={status.staged}
             selectedPath={selectedPath}
             onSelect={selectFile}
@@ -104,7 +99,7 @@ export function GitView() {
 
         {/* Changes */}
         <FileSection
-          title="Changes"
+          title={t("git.changes")}
           files={[...status.modified, ...status.untracked]}
           selectedPath={selectedPath}
           onSelect={selectFile}
@@ -112,24 +107,12 @@ export function GitView() {
           onAction={stage}
         />
 
-        {/* Commit box */}
-        <div className="glass-panel p-3">
-          <textarea
-            value={commitMessage}
-            onChange={(e) => setCommitMessage(e.target.value)}
-            placeholder="Commit message..."
-            rows={3}
-            className="w-full text-xs px-2 py-1.5 rounded resize-none mb-2"
-          />
-          <button
-            onClick={handleCommit}
-            disabled={!commitMessage.trim() || status.staged.length === 0}
-            className="glass-button-primary w-full py-1.5 text-xs rounded-lg font-medium disabled:opacity-40"
-          >
-            <GitCommit size={11} className="inline mr-1" />
-            Commit ({status.staged.length})
-          </button>
-        </div>
+        <CommitBox
+          stagedCount={status.staged.length}
+          onCommit={async (msg) => {
+            await commit(msg);
+          }}
+        />
       </div>
 
       {/* Center: Diff */}
@@ -139,7 +122,7 @@ export function GitView() {
             <DiffView diff={activeDiff} path={selectedPath} />
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-muted text-xs">
-              Select a file to view its diff
+              {t("git.selectForDiff")}
             </div>
           )}
         </div>
@@ -150,12 +133,12 @@ export function GitView() {
         <div className="glass-panel h-full flex flex-col overflow-hidden">
           <div className="px-3 py-2 border-b border-white/5">
             <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-              History
+              {t("git.history")}
             </span>
           </div>
           <div className="flex-1 overflow-auto">
             {log.length === 0 ? (
-              <p className="p-3 text-xs text-text-muted">No commits yet.</p>
+              <p className="p-3 text-xs text-text-muted">{t("git.noCommits")}</p>
             ) : (
               log.map((c) => (
                 <div
@@ -188,6 +171,7 @@ function BranchSelector({
   branches: { name: string; isCurrent: boolean; isRemote: boolean }[];
   onSelect: (name: string) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const locals = branches.filter((b) => !b.isRemote);
   return (
@@ -196,7 +180,7 @@ function BranchSelector({
         onClick={() => setOpen(!open)}
         className="text-xs font-medium text-text-primary hover:text-accent"
       >
-        {current || "(detached)"}
+        {current || t("git.detached")}
       </button>
       {open && locals.length > 0 && (
         <div className="glass-thick absolute top-full left-0 mt-1 rounded-lg p-1 z-20 min-w-[160px]">
@@ -308,6 +292,7 @@ function DiffView({
   diff: import("../../types/git-types").FileDiff | null;
   path: string;
 }) {
+  const t = useT();
   return (
     <>
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5">
@@ -316,7 +301,7 @@ function DiffView({
       </div>
       <div className="flex-1 overflow-auto font-mono text-[11px]">
         {!diff || diff.hunks.length === 0 ? (
-          <p className="p-3 text-text-muted">No diff (binary or untracked)</p>
+          <p className="p-3 text-text-muted">{t("git.binaryOrUntracked")}</p>
         ) : (
           diff.hunks.map((h, hi) => (
             <div key={hi} className="border-b border-white/5">

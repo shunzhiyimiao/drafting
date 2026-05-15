@@ -15,6 +15,8 @@ import { useEditorStore } from "../../stores/editor-store";
 import { useNavigationStore } from "../../stores/navigation-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import type { AtlasSymbol, SymbolKind } from "../../types/atlas-types";
+import { getProjectRoot } from "../../lib/app-bootstrap";
+import { useT } from "../../lib/i18n";
 
 const kindIcons: Record<SymbolKind, typeof Box> = {
   class: Box,
@@ -47,6 +49,7 @@ const kindColors: Record<SymbolKind, string> = {
 };
 
 export function AtlasView() {
+  const t = useT();
   const projectRoot = useAtlasStore((s) => s.projectRoot);
   const initialize = useAtlasStore((s) => s.initialize);
   const activeFilePath = useAtlasStore((s) => s.activeFilePath);
@@ -63,7 +66,7 @@ export function AtlasView() {
 
   useEffect(() => {
     if (!projectRoot) {
-      initialize(".");
+      getProjectRoot().then((root) => initialize(root));
     }
   }, [projectRoot, initialize]);
 
@@ -99,9 +102,9 @@ export function AtlasView() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8">
         <Map size={48} className="text-text-muted mb-4" />
-        <h2 className="text-lg font-medium text-text-primary mb-2">Atlas</h2>
+        <h2 className="text-lg font-medium text-text-primary mb-2">{t("atlas.title")}</h2>
         <p className="text-sm text-text-muted max-w-md mb-4">
-          Open a file in the editor to see its structure.
+          {t("atlas.empty")}
         </p>
         <button
           onClick={() => setActiveView("editor")}
@@ -155,7 +158,7 @@ export function AtlasView() {
               <button
                 onClick={handleOpenAdapter}
                 className="glass-button px-2.5 py-1 text-[10px] rounded-lg flex items-center gap-1 text-accent"
-                title="View in Patchboard"
+                title={t("atlas.viewInPatchboard")}
               >
                 <Zap size={11} />
                 Adapter
@@ -165,7 +168,7 @@ export function AtlasView() {
               <button
                 onClick={handleOpenBlueprint}
                 className="glass-button px-2.5 py-1 text-[10px] rounded-lg flex items-center gap-1 text-success"
-                title="View Blueprint"
+                title={t("atlas.viewBlueprint")}
               >
                 <FileText size={11} />
                 Blueprint

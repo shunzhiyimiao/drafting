@@ -8,10 +8,13 @@ import { CanvasListPanel } from "./canvas/panels/CanvasListPanel";
 import { AdapterPanel } from "./canvas/panels/AdapterPanel";
 import { RegistryPanel } from "./registry/RegistryPanel";
 import type { AdapterNode } from "../../types/patchboard-types";
+import { getProjectRoot } from "../../lib/app-bootstrap";
+import { useT } from "../../lib/i18n";
 
 type LeftTab = "canvases" | "registry";
 
 export function PatchboardView() {
+  const t = useT();
   const {
     initialized,
     initialize,
@@ -33,7 +36,7 @@ export function PatchboardView() {
 
   useEffect(() => {
     if (!initialized) {
-      initialize(".");
+      getProjectRoot().then((root) => initialize(root));
     }
   }, [initialized, initialize]);
 
@@ -204,7 +207,7 @@ export function PatchboardView() {
               <input
                 value={adapterName}
                 onChange={(e) => setAdapterName(e.target.value)}
-                placeholder="e.g. PostgresAdapter"
+                placeholder={t("patchboard.adapterNamePlaceholder")}
                 autoFocus
                 className="w-full mt-1 px-2 py-1.5 text-xs rounded"
                 onKeyDown={(e) => {

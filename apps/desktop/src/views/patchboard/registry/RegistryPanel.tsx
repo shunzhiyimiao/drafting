@@ -4,8 +4,10 @@ import { usePatchboardStore } from "../../../stores/patchboard-store";
 import { SocketEditor } from "./SocketEditor";
 import { LifecycleBadge } from "./LifecycleBadge";
 import type { SocketLifecycle } from "../../../types/patchboard-types";
+import { useT } from "../../../lib/i18n";
 
 export function RegistryPanel() {
+  const t = useT();
   const registry = usePatchboardStore((s) => s.registry);
   const deleteSocket = usePatchboardStore((s) => s.deleteSocket);
   const [editingSocketId, setEditingSocketId] = useState<string | null>(null);
@@ -43,12 +45,12 @@ export function RegistryPanel() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-          Sockets
+          {t("patchboard.sockets")}
         </span>
         <button
           onClick={() => setCreating(true)}
           className="text-text-muted hover:text-text-secondary"
-          title="New Socket"
+          title={t("patchboard.newSocket")}
         >
           <Plus size={14} />
         </button>
@@ -56,7 +58,7 @@ export function RegistryPanel() {
       <div className="flex-1 overflow-auto">
         {(registry?.sockets ?? []).length === 0 ? (
           <p className="p-3 text-xs text-text-muted">
-            No sockets defined. Create one to get started.
+            {t("patchboard.sockets")}
           </p>
         ) : (
           Object.entries(grouped).map(([ns, sockets]) => (
@@ -81,7 +83,7 @@ export function RegistryPanel() {
                     <button
                       onClick={() => setEditingSocketId(s.id)}
                       className="text-text-muted hover:text-text-secondary"
-                      title="Edit"
+                      title={t("common.edit")}
                     >
                       <Edit size={12} />
                     </button>
@@ -89,7 +91,7 @@ export function RegistryPanel() {
                       <button
                         onClick={() => handleDelete(s.id, s.displayName)}
                         className="text-text-muted hover:text-error"
-                        title="Delete"
+                        title={t("common.delete")}
                       >
                         <Trash2 size={12} />
                       </button>

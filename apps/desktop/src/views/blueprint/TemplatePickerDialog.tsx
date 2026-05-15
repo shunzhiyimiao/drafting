@@ -2,12 +2,14 @@ import { useState } from "react";
 import { X, FileText, File } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import type { TemplateInfo } from "../../types/blueprint-types";
+import { useT } from "../../lib/i18n";
 
 interface Props {
   onClose: () => void;
 }
 
 export function TemplatePickerDialog({ onClose }: Props) {
+  const t = useT();
   const templates = useBlueprintStore((s) => s.templates);
   const createFromTemplate = useBlueprintStore((s) => s.createFromTemplate);
 
@@ -81,7 +83,7 @@ export function TemplatePickerDialog({ onClose }: Props) {
                 <input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g. User Authentication"
+                  placeholder={t("blueprint.featureNamePlaceholder")}
                   autoFocus
                   className="w-full mt-1 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                 />

@@ -28,6 +28,13 @@ export async function getDiff(
   return invoke("git_diff_file", { projectRoot, path });
 }
 
+export async function getStagedDiffPatch(
+  projectRoot: string,
+  maxBytes?: number,
+): Promise<string> {
+  return invoke("git_staged_diff_patch", { projectRoot, maxBytes });
+}
+
 export async function stageFile(
   projectRoot: string,
   path: string,

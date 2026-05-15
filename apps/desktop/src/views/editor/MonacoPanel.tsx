@@ -1,8 +1,15 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import { useEditorStore } from "../../stores/editor-store";
 import { useThemeStore } from "../../stores/theme-store";
 import { useSettingsStore } from "../../stores/settings-store";
+import { useT } from "../../lib/i18n";
+import {
+  changeDocument,
+  closeDocument,
+  installLspBridge,
+  openDocument,
+} from "./lsp-bridge";
 
 // Use local monaco copies (bundled) instead of CDN
 loader.config({
@@ -31,7 +38,25 @@ function detectLanguage(path: string): string {
   return languageMap[ext] ?? "plaintext";
 }
 
+const LSP_EXTS = new Set([
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mts",
+  "cts",
+  "mjs",
+  "cjs",
+]);
+
+function isLspEligible(path: string): boolean {
+  const ext = path.split(".").pop() ?? "";
+  return LSP_EXTS.has(ext);
+}
+
 export function MonacoPanel() {
+  const t = useT();
+  const projectRoot = useEditorStore((s) => s.projectRoot);
   const activeTabPath = useEditorStore((s) => s.activeTabPath);
   const tabs = useEditorStore((s) => s.tabs);
   const updateTabContent = useEditorStore((s) => s.updateTabContent);
@@ -43,6 +68,80 @@ export function MonacoPanel() {
   const activeTab = tabs.find((t) => t.path === activeTabPath);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
+
+  const [monacoReady, setMonacoReady] = useState(false);
+  // Tracks which (project, path) pairs have been didOpen-ed so we don't double-open.
+  const openedDocsRef = useRef<Set<string>>(new Set());
+  // Debounce timer for didChange.
+  const changeTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  // Latest known active path / text, for LSP providers (avoid stale closures).
+  const activePathRef = useRef<string | null>(null);
+  const activeTextRef = useRef<string | null>(null);
+  const lspBridgeDisposeRef = useRef<(() => void) | null>(null);
+
+  activePathRef.current = activeTabPath;
+  activeTextRef.current = activeTab?.content ?? null;
+
+  // Install LSP bridge once monaco is ready and projectRoot is known.
+  useEffect(() => {
+    if (!monacoReady || !monacoRef.current || !projectRoot) return;
+    if (lspBridgeDisposeRef.current) return;
+    lspBridgeDisposeRef.current = installLspBridge(monacoRef.current, {
+      projectRoot,
+      getActivePath: () => activePathRef.current,
+      getActiveText: () => activeTextRef.current,
+    });
+    return () => {
+      lspBridgeDisposeRef.current?.();
+      lspBridgeDisposeRef.current = null;
+    };
+  }, [projectRoot, monacoReady]);
+
+  // didOpen when a new LSP-eligible tab becomes active.
+  useEffect(() => {
+    if (!projectRoot || !activeTab) return;
+    if (!isLspEligible(activeTab.path)) return;
+    const key = `${projectRoot}::${activeTab.path}`;
+    if (openedDocsRef.current.has(key)) return;
+    openedDocsRef.current.add(key);
+    void openDocument(projectRoot, activeTab.path, activeTab.content);
+  }, [projectRoot, activeTab?.path]);
+
+  // didChange (debounced) when content changes.
+  useEffect(() => {
+    if (!projectRoot || !activeTab) return;
+    if (!isLspEligible(activeTab.path)) return;
+    const key = `${projectRoot}::${activeTab.path}`;
+    if (!openedDocsRef.current.has(key)) return; // wait until didOpen fired
+
+    const timers = changeTimerRef.current;
+    const existing = timers.get(key);
+    if (existing) clearTimeout(existing);
+    const t = setTimeout(() => {
+      void changeDocument(projectRoot, activeTab.path, activeTab.content);
+      timers.delete(key);
+    }, 300);
+    timers.set(key, t);
+  }, [projectRoot, activeTab?.path, activeTab?.content]);
+
+  // didClose for tabs that disappear.
+  useEffect(() => {
+    if (!projectRoot) return;
+    const liveKeys = new Set(
+      tabs
+        .filter((t) => isLspEligible(t.path))
+        .map((t) => `${projectRoot}::${t.path}`),
+    );
+    for (const key of Array.from(openedDocsRef.current)) {
+      if (!liveKeys.has(key)) {
+        openedDocsRef.current.delete(key);
+        const relPath = key.slice(projectRoot.length + 2);
+        void closeDocument(projectRoot, relPath);
+      }
+    }
+  }, [projectRoot, tabs]);
 
   // Re-apply theme when variant changes
   useEffect(() => {
@@ -70,7 +169,7 @@ export function MonacoPanel() {
   if (!activeTab) {
     return (
       <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
-        Select a file from the file tree to edit.
+        {t("editor.selectFile")}
       </div>
     );
   }
@@ -79,7 +178,7 @@ export function MonacoPanel() {
     <div className="flex-1 flex flex-col min-h-0">
       {activeTab.identity.readonly && (
         <div className="px-3 py-1.5 text-[11px] bg-warning/10 border-b border-warning/30 text-warning">
-          🔒 This file is tool-generated. Edit in Patchboard instead.
+          {t("editor.toolGenerated")}
         </div>
       )}
       <div className="flex-1 min-h-0">
@@ -89,6 +188,7 @@ export function MonacoPanel() {
           theme={`drafting-${themeVariant}`}
           beforeMount={(monaco) => {
             monacoRef.current = monaco;
+            setMonacoReady(true);
 
             // Dark variant
             monaco.editor.defineTheme("drafting-dark", {

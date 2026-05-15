@@ -1,12 +1,14 @@
 import { FileText, File, Plus } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import type { BlueprintIndexEntry } from "../../types/blueprint-types";
+import { useT } from "../../lib/i18n";
 
 interface Props {
   onNewBlueprint: () => void;
 }
 
 export function BlueprintListPanel({ onNewBlueprint }: Props) {
+  const t = useT();
   const index = useBlueprintStore((s) => s.index);
   const activeId = useBlueprintStore((s) => s.activeBlueprintId);
   const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
@@ -25,7 +27,7 @@ export function BlueprintListPanel({ onNewBlueprint }: Props) {
         <button
           onClick={onNewBlueprint}
           className="text-text-muted hover:text-text-secondary"
-          title="New Blueprint"
+          title={t("blueprint.newBlueprint")}
         >
           <Plus size={14} />
         </button>
@@ -40,7 +42,7 @@ export function BlueprintListPanel({ onNewBlueprint }: Props) {
             {features.length > 0 && (
               <Section
                 icon={<FileText size={12} />}
-                title="Features"
+                title={t("blueprint.features")}
                 entries={features}
                 activeId={activeId}
                 onSelect={loadBlueprint}
@@ -49,7 +51,7 @@ export function BlueprintListPanel({ onNewBlueprint }: Props) {
             {files.length > 0 && (
               <Section
                 icon={<File size={12} />}
-                title="Files"
+                title={t("blueprint.files")}
                 entries={files}
                 activeId={activeId}
                 onSelect={loadBlueprint}

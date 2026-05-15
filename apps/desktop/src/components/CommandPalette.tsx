@@ -3,6 +3,7 @@ import { Search, ArrowRight } from "lucide-react";
 import { useNavigationStore } from "../stores/navigation-store";
 import { useLayoutStore } from "../stores/layout-store";
 import { useEditorStore } from "../stores/editor-store";
+import { useT } from "../lib/i18n";
 
 export interface Command {
   id: string;
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export function CommandPalette({ open, onClose }: Props) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
 
@@ -172,7 +174,7 @@ export function CommandPalette({ open, onClose }: Props) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a command or search..."
+            placeholder={t("palette.placeholder")}
             autoFocus
             className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-muted focus:outline-none"
           />

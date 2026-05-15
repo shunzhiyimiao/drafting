@@ -51,3 +51,35 @@ export function onSessionExit(
     callback(event.payload),
   );
 }
+
+// --- Command history --------------------------------------------------------
+
+export interface HistoryEntry {
+  id: string;
+  command: string;
+  cwd: string;
+  timestamp: number;
+}
+
+export async function recordCommand(
+  projectRoot: string,
+  command: string,
+  cwd: string,
+): Promise<HistoryEntry | null> {
+  return invoke("terminal_record_command", { projectRoot, command, cwd });
+}
+
+export async function historyList(
+  projectRoot: string,
+  limit = 200,
+): Promise<HistoryEntry[]> {
+  return invoke("terminal_history_list", { projectRoot, limit });
+}
+
+export async function historySearch(
+  projectRoot: string,
+  query: string,
+  limit = 50,
+): Promise<HistoryEntry[]> {
+  return invoke("terminal_history_search", { projectRoot, query, limit });
+}

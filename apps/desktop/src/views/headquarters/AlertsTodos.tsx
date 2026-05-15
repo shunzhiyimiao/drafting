@@ -7,6 +7,7 @@ import {
   type AlertDisplayMode,
 } from "../../stores/headquarters-store";
 import { useNavigationStore, type ViewId } from "../../stores/navigation-store";
+import { useT } from "../../lib/i18n";
 
 const severityConfig: Record<
   AlertSeverity,
@@ -196,15 +197,16 @@ function AlertModeSelector({
   mode: AlertDisplayMode;
   onChange: (m: AlertDisplayMode) => void;
 }) {
+  const tt = useT();
   return (
     <select
       value={mode}
       onChange={(e) => onChange(e.target.value as AlertDisplayMode)}
       className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted hover:text-text-secondary focus:outline-none"
     >
-      <option value="expanded">Expanded</option>
-      <option value="collapsed">Collapsed</option>
-      <option value="badge">Badge</option>
+      <option value="expanded">{tt("hq.alertMode.expanded")}</option>
+      <option value="collapsed">{tt("hq.alertMode.collapsed")}</option>
+      <option value="badge">{tt("hq.alertMode.badge")}</option>
     </select>
   );
 }

@@ -40,6 +40,17 @@ pub fn git_diff_file(
 }
 
 #[tauri::command]
+pub fn git_staged_diff_patch(
+    project_root: String,
+    max_bytes: Option<usize>,
+) -> Result<String, String> {
+    ops::staged_diff_patch(
+        Path::new(&project_root),
+        max_bytes.unwrap_or(60_000),
+    )
+}
+
+#[tauri::command]
 pub fn git_stage_file(
     project_root: String,
     path: String,

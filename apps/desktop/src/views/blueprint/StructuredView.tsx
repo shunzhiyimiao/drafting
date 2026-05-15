@@ -8,8 +8,10 @@ import type {
   BlueprintPriority,
   AcceptanceCriterion,
 } from "../../types/blueprint-types";
+import { useT } from "../../lib/i18n";
 
 export function StructuredView() {
+  const t = useT();
   const activeBlueprint = useBlueprintStore((s) => s.activeBlueprint);
   const updateStructured = useBlueprintStore((s) => s.updateStructured);
   const toggleCriterion = useBlueprintStore((s) => s.toggleCriterion);
@@ -122,7 +124,7 @@ export function StructuredView() {
                       .filter(Boolean),
                   )
                 }
-                placeholder="comma-separated"
+                placeholder={t("blueprint.tagsPlaceholder")}
                 className="w-full px-2 py-1 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
               />
             </Field>
