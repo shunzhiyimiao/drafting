@@ -31,7 +31,7 @@ serde_yaml = "0.9"
 regex = "1"
 sha2 = "0.10"
 portable-pty = "0.9"
-git2 = { version = "0.19", default-features = false }
+git2 = { version = "0.19", default-features = false, features = ["https", "ssh"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 futures-util = "0.3"
 eventsource-stream = "0.2"

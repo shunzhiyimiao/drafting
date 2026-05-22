@@ -105,8 +105,9 @@ impl CodegenProxy {
             format!("{}/packages/codegen-server/src/index.ts", project_root)
         };
 
-        // Try to find npx/tsx in PATH
-        let child = Command::new("npx")
+        // Try to find npx/tsx in PATH. On Windows, the launcher is `npx.cmd`.
+        let npx_cmd = if cfg!(target_os = "windows") { "npx.cmd" } else { "npx" };
+        let child = Command::new(npx_cmd)
             .arg("tsx")
             .arg(&server_path)
             .stdin(std::process::Stdio::piped())

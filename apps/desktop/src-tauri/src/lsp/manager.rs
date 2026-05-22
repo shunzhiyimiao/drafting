@@ -129,10 +129,8 @@ async fn spawn_server(language: LspLanguage, root: &Path) -> Result<ServerHandle
 ///   3. PATH
 fn locate_tsserver_bin(project_root: &Path) -> Option<String> {
     // 1. Project-local
-    let local = project_root
-        .join("node_modules/.bin/typescript-language-server");
-    if local.exists() {
-        return Some(local.to_string_lossy().to_string());
+    if let Some(p) = resolve_bin(&project_root.join("node_modules/.bin/typescript-language-server")) {
+        return Some(p);
     }
 
     // 2. Drafting workspace fallback (where codegen-server lives).
@@ -154,13 +152,31 @@ fn find_workspace_tsserver() -> Option<String> {
     // CARGO_MANIFEST_DIR = .../apps/desktop/src-tauri ; climb 3 to reach workspace root.
     let mut cursor = manifest_path.to_path_buf();
     for _ in 0..6 {
-        let candidate = cursor
+        let base = cursor
             .join("packages/codegen-server/node_modules/.bin/typescript-language-server");
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().to_string());
+        if let Some(p) = resolve_bin(&base) {
+            return Some(p);
         }
         if !cursor.pop() {
             break;
+        }
+    }
+    None
+}
+
+/// Resolve a binary path, trying platform-specific extensions on Windows
+/// (`.cmd`, `.exe`, `.bat`). On Unix, the bare name is checked as-is.
+fn resolve_bin(base: &Path) -> Option<String> {
+    if base.is_file() {
+        return Some(base.to_string_lossy().to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        for ext in ["cmd", "exe", "bat"] {
+            let candidate = base.with_extension(ext);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
         }
     }
     None

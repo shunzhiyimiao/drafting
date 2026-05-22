@@ -35,11 +35,7 @@ impl TerminalManager {
         input: CreateSessionInput,
     ) -> Result<SessionInfo, String> {
         let shell = input.shell.unwrap_or_else(detect_default_shell);
-        let cwd = input
-            .cwd
-            .unwrap_or_else(|| {
-                std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
-            });
+        let cwd = input.cwd.unwrap_or_else(default_home_dir);
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -239,5 +235,24 @@ pub fn detect_default_shell() -> String {
     #[cfg(not(target_os = "windows"))]
     {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+    }
+}
+
+/// Cross-platform home directory fallback for terminal cwd.
+pub fn default_home_dir() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(p) = std::env::var("USERPROFILE") {
+            return p;
+        }
+        if let (Ok(d), Ok(p)) = (std::env::var("HOMEDRIVE"), std::env::var("HOMEPATH")) {
+            return format!("{}{}", d, p);
+        }
+        "C:\\".to_string()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
     }
 }
