@@ -99,14 +99,14 @@ export function TemplatePickerDialog({ onClose }: Props) {
           <div className="flex items-center justify-between px-4 py-3 border-t border-border">
             <button
               onClick={() => setSelected(null)}
-              className="text-xs text-text-muted hover:text-text-secondary"
+              className="glass-button px-4 py-2 text-sm rounded-lg transition-colors"
             >
-              ← Back to templates
+              ← Back
             </button>
             <button
               onClick={handleCreate}
               disabled={!displayName || loading}
-              className="px-4 py-1.5 text-xs bg-accent text-bg-primary font-medium rounded hover:bg-accent-hover disabled:opacity-50 transition-colors"
+              className="glass-button-primary px-4 py-2 text-sm rounded-lg font-medium disabled:opacity-50 transition-colors"
             >
               {loading ? "Creating..." : "Create Blueprint"}
             </button>

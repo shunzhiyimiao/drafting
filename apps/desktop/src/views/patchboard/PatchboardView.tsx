@@ -260,16 +260,16 @@ export function PatchboardView() {
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowAddAdapter(false)}
-                className="glass-button px-3 py-1.5 text-xs rounded-lg"
+                className="glass-button px-4 py-2 text-sm rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleAddAdapterSubmit}
                 disabled={!adapterName.trim() || selectedSocketIds.size === 0}
-                className="glass-button-primary px-3 py-1.5 text-xs rounded-lg font-medium disabled:opacity-40"
+                className="glass-button-primary px-4 py-2 text-sm rounded-lg font-medium disabled:opacity-50 transition-colors inline-flex items-center gap-1"
               >
-                <Check size={12} className="inline mr-1" />
+                <Check size={14} />
                 Add
               </button>
             </div>
@@ -296,13 +296,13 @@ export function PatchboardView() {
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setConfirmDeleteCanvas(false)}
-                className="glass-button px-3 py-1.5 text-xs rounded-lg"
+                className="glass-button px-4 py-2 text-sm rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDeleteCanvas}
-                className="px-3 py-1.5 text-xs rounded-lg bg-error/80 text-white font-medium hover:bg-error transition-colors"
+                className="glass-button-error px-4 py-2 text-sm rounded-lg font-medium transition-colors"
               >
                 Delete
               </button>

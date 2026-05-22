@@ -77,6 +77,7 @@
   --color-success: #9eead0;
   --color-warning: #ffd88c;
   --color-error: #ff9bb5;
+  --color-error-rgb: 255, 155, 181;
   --color-info: #a0dcec;
 
   /* How strong the underlying blur is */
@@ -140,6 +141,7 @@
   --color-success: #2fa876;
   --color-warning: #d88c00;
   --color-error: #d64772;
+  --color-error-rgb: 214, 71, 114;
   --color-info: #2f8cb0;
 
   --shadow-panel:
@@ -195,6 +197,7 @@
   --color-success: #3aa878;
   --color-warning: #d08820;
   --color-error: #c42f5a;
+  --color-error-rgb: 196, 47, 90;
   --color-info: #3a8ab0;
 
   --shadow-panel:
@@ -250,6 +253,7 @@
   --color-success: #2fa876;
   --color-warning: #c78020;
   --color-error: #c4466e;
+  --color-error-rgb: 196, 70, 110;
   --color-info: #3a7ab0;
 
   --shadow-panel:
@@ -305,6 +309,7 @@
   --color-success: #b5d8c2;
   --color-warning: #e8c8a0;
   --color-error: #e4a8b8;
+  --color-error-rgb: 228, 168, 184;
   --color-info: #b0d0dc;
 
   /* Softer, larger blurs to sell the "柔光" feel */
@@ -475,6 +480,29 @@ body::before {
     135deg,
     rgba(var(--color-accent-rgb), 0.95),
     rgba(var(--color-accent-rgb), 0.7)
+  );
+}
+
+.glass-button-error {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-error-rgb, 239, 68, 68), 0.85),
+    rgba(var(--color-error-rgb, 239, 68, 68), 0.55)
+  );
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  box-shadow:
+    0 4px 16px rgba(var(--color-error-rgb, 239, 68, 68), 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.glass-button-error:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-error-rgb, 239, 68, 68), 0.95),
+    rgba(var(--color-error-rgb, 239, 68, 68), 0.7)
   );
 }
 

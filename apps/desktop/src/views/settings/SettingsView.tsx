@@ -853,22 +853,22 @@ function ProfileEditorDialog({
           <button
             onClick={handleTest}
             disabled={testing}
-            className="flex items-center gap-1 text-xs px-3 py-1.5 rounded bg-white/5 hover:bg-white/10 disabled:opacity-50"
+            className="glass-button px-4 py-2 text-sm rounded-lg disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
           >
-            <Zap size={11} />
+            <Zap size={14} />
             {testing ? t("settings.ai.testing") : t("settings.ai.testConnection")}
           </button>
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="text-xs px-3 py-1.5 rounded text-text-muted hover:text-text-secondary"
+              className="glass-button px-4 py-2 text-sm rounded-lg transition-colors"
             >
               {t("settings.ai.editor.cancel")}
             </button>
             <button
               onClick={handleSave}
               disabled={saving || !draft.name.trim() || !draft.baseUrl.trim()}
-              className="glass-button-primary text-xs px-3 py-1.5 rounded font-medium disabled:opacity-50"
+              className="glass-button-primary px-4 py-2 text-sm rounded-lg font-medium disabled:opacity-50 transition-colors"
             >
               {saving ? t("settings.ai.editor.saving") : t("settings.ai.editor.save")}
             </button>
