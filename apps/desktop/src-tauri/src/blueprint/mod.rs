@@ -1,3 +1,4 @@
+pub mod check;
 pub mod commands;
 pub mod error;
 pub mod parser;

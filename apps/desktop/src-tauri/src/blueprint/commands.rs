@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use tauri::State;
 
+use crate::ai_provider::AiRunner;
 use crate::blueprint::types::*;
-use crate::blueprint::{parser, storage, templates, validation};
+use crate::blueprint::{check, parser, storage, templates, validation};
 use crate::sync_bus::events::{BlueprintEvent, SyncBusEvent};
 use crate::sync_bus::types::Origin;
 use crate::sync_bus::SyncBus;
@@ -282,24 +285,34 @@ pub fn blueprint_lightweight_check(
 }
 
 #[tauri::command]
-pub fn blueprint_request_check(
+pub async fn blueprint_request_check(
     project_root: String,
     blueprint_id: String,
     sync_bus: State<'_, SyncBus>,
+    ai_runner: State<'_, Arc<AiRunner>>,
 ) -> Result<(), String> {
-    // Phase 3 will integrate with AI Provider Manager.
-    // For now, just publish a stub CheckCompleted event with passed=true.
-    let root = std::path::Path::new(&project_root);
-    let _ = storage::load_blueprint(root, &blueprint_id).map_err(|e| e.to_string())?;
+    // Validate that the blueprint exists before kicking off the AI call.
+    let root = std::path::Path::new(&project_root).to_path_buf();
+    let _ = storage::load_blueprint(&root, &blueprint_id).map_err(|e| e.to_string())?;
 
-    sync_bus.publish(
-        bp_origin(),
-        SyncBusEvent::Blueprint(BlueprintEvent::CheckCompleted {
-            feature_id: blueprint_id,
-            passed: true,
-        }),
-    );
-    Ok(())
+    let bus = sync_bus.inner().clone();
+    let runner = ai_runner.inner().clone();
+
+    match check::run_check(root, blueprint_id.clone(), runner, bus.clone()).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            log::error!("blueprint_request_check failed for {blueprint_id}: {e}");
+            // Surface as a failed check so the UI can react instead of silently hanging.
+            bus.publish(
+                bp_origin(),
+                SyncBusEvent::Blueprint(BlueprintEvent::CheckCompleted {
+                    feature_id: blueprint_id,
+                    passed: false,
+                }),
+            );
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
