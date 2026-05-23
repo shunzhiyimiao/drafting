@@ -203,6 +203,67 @@ impl AiRunner {
         self.stream_manager.cancel(stream_id).await
     }
 
+    /// Run a task and collect the full streamed response as a single String.
+    /// Used by one-shot AI features (Blueprint draft, Patchboard suggest,
+    /// commit message generation) that don't need a live stream UI.
+    pub async fn run_task_collect(
+        self: &Arc<Self>,
+        project_root: &Path,
+        task_id: TaskId,
+        request: ChatRequest,
+        sync_bus: SyncBus,
+    ) -> Result<String, String> {
+        use std::sync::Mutex;
+        use tokio::sync::oneshot;
+
+        let buffer = Arc::new(Mutex::new(String::new()));
+        let (done_tx, done_rx) = oneshot::channel::<Result<(), String>>();
+        let done_slot: Arc<Mutex<Option<oneshot::Sender<Result<(), String>>>>> =
+            Arc::new(Mutex::new(Some(done_tx)));
+
+        let buf_cb = buffer.clone();
+        let done_cb = done_slot.clone();
+        let on_event = move |ev: StreamEvent| match ev {
+            StreamEvent::Delta { text, .. } => {
+                if let Ok(mut b) = buf_cb.lock() {
+                    b.push_str(&text);
+                }
+            }
+            StreamEvent::Completed { .. } => {
+                if let Ok(mut slot) = done_cb.lock() {
+                    if let Some(tx) = slot.take() {
+                        let _ = tx.send(Ok(()));
+                    }
+                }
+            }
+            StreamEvent::Failed { error, .. } => {
+                if let Ok(mut slot) = done_cb.lock() {
+                    if let Some(tx) = slot.take() {
+                        let _ = tx.send(Err(error));
+                    }
+                }
+            }
+            StreamEvent::Cancelled { .. } => {
+                if let Ok(mut slot) = done_cb.lock() {
+                    if let Some(tx) = slot.take() {
+                        let _ = tx.send(Err("cancelled".into()));
+                    }
+                }
+            }
+            _ => {}
+        };
+
+        self.run_task(project_root, task_id, request, sync_bus, on_event)
+            .await?;
+        done_rx.await.map_err(|_| "stream channel dropped".to_string())??;
+
+        let out = buffer
+            .lock()
+            .map_err(|_| "buffer poisoned".to_string())?
+            .clone();
+        Ok(out)
+    }
+
     /// Health check by Profile. Used by the Settings "Test connection" button.
     pub async fn health_check_profile(
         &self,

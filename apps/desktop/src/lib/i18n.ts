@@ -163,6 +163,47 @@ const translations: Record<string, Record<Locale, string>> = {
   "task.patchboardSuggestAdapter": { zh: "建议 Adapter", en: "Suggest Adapter" },
   "task.gitCommitMessage": { zh: "提交消息", en: "Commit Message" },
 
+  // -- AI Generate Dialog -----------------------------------------------
+  "ai.generate": { zh: "生成", en: "Generate" },
+  "ai.regenerate": { zh: "重新生成", en: "Regenerate" },
+  "ai.stop": { zh: "停止", en: "Stop" },
+  "ai.accept": { zh: "采纳", en: "Accept" },
+  "ai.preview": { zh: "预览", en: "Preview" },
+  "ai.noProject": { zh: "未选择工程", en: "No project selected" },
+  "ai.emptyInput": { zh: "请先输入描述", en: "Please enter a description first" },
+
+  // -- AI Blueprint -----------------------------------------------------
+  "blueprint.ai.draftTitle": { zh: "AI 起草 Blueprint", en: "AI Draft Blueprint" },
+  "blueprint.ai.draftButton": { zh: "✨ AI 起草", en: "✨ AI Draft" },
+  "blueprint.ai.draftInputLabel": { zh: "特性描述", en: "Feature description" },
+  "blueprint.ai.draftInputPlaceholder": {
+    zh: "用一两句话描述这个特性,AI 会生成完整的 Blueprint 规格",
+    en: "Describe the feature in one or two sentences; AI will draft a full Blueprint",
+  },
+  "blueprint.ai.suggestCriteriaTitle": { zh: "AI 建议 Acceptance Criteria", en: "AI Suggest Acceptance Criteria" },
+  "blueprint.ai.suggestCriteriaButton": { zh: "✨ AI 建议", en: "✨ AI Suggest" },
+  "blueprint.ai.suggestCriteriaInputLabel": { zh: "Goal(目标)", en: "Goal" },
+  "blueprint.ai.suggestCriteriaInputPlaceholder": {
+    zh: "描述特性的目标,AI 会建议 3-5 条验收准则",
+    en: "Describe the goal; AI will suggest 3-5 acceptance criteria",
+  },
+
+  // -- AI Patchboard ----------------------------------------------------
+  "patchboard.ai.suggestSocketTitle": { zh: "AI 建议 Socket", en: "AI Suggest Socket" },
+  "patchboard.ai.suggestSocketButton": { zh: "✨ AI 建议", en: "✨ AI Suggest" },
+  "patchboard.ai.suggestSocketInputLabel": { zh: "能力描述", en: "Capability description" },
+  "patchboard.ai.suggestSocketInputPlaceholder": {
+    zh: "描述这个 Socket 提供什么能力,AI 会建议接口签名",
+    en: "Describe what this Socket should provide; AI will suggest the interface signature",
+  },
+  "patchboard.ai.suggestAdapterTitle": { zh: "AI 建议 Adapter", en: "AI Suggest Adapter" },
+  "patchboard.ai.suggestAdapterButton": { zh: "✨ AI 建议", en: "✨ AI Suggest" },
+  "patchboard.ai.suggestAdapterInputLabel": { zh: "实现描述", en: "Implementation description" },
+  "patchboard.ai.suggestAdapterInputPlaceholder": {
+    zh: "描述这个 Adapter 要做什么(例:用 OpenAI SDK 实现 LlmSocket),AI 会建议设计思路",
+    en: "Describe what this Adapter should do (e.g. implement LlmSocket using OpenAI SDK)",
+  },
+
   // -- Common -----------------------------------------------------------
   "common.save": { zh: "保存", en: "Save" },
   "common.cancel": { zh: "取消", en: "Cancel" },

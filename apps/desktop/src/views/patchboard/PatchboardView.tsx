@@ -1,15 +1,50 @@
 import { useEffect, useCallback, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { X, Check } from "lucide-react";
+import { X, Check, Sparkles } from "lucide-react";
 import { usePatchboardStore } from "../../stores/patchboard-store";
 import { PatchboardCanvas } from "./canvas/PatchboardCanvas";
 import { CanvasToolbar } from "./canvas/toolbar/CanvasToolbar";
 import { CanvasListPanel } from "./canvas/panels/CanvasListPanel";
 import { AdapterPanel } from "./canvas/panels/AdapterPanel";
 import { RegistryPanel } from "./registry/RegistryPanel";
+import { AiGenerateDialog } from "../../components/AiGenerateDialog";
 import type { AdapterNode } from "../../types/patchboard-types";
 import { getProjectRoot } from "../../lib/app-bootstrap";
 import { useT } from "../../lib/i18n";
+
+const ADAPTER_SUGGEST_SYSTEM_PROMPT = `You are designing a TypeScript Adapter class for the Drafting Patchboard architecture.
+
+An Adapter is a concrete implementation of one or more Sockets (interfaces). Given a description of what the Adapter should do and the list of available Sockets, propose:
+1. A descriptive PascalCase class name
+2. Which of the available Sockets this Adapter should implement (by their fullName)
+
+Output ONLY a JSON object matching this schema, no markdown fences, no prose:
+
+{
+  "name": "<PascalCaseClassName>",
+  "implementsSocketFullNames": ["<socket fullName from the provided list>", ...],
+  "designNotes": "<2-3 short sentences on the implementation approach>"
+}
+
+Rules:
+- Class name should hint at the underlying provider/library (e.g. OpenAiLlmProvider, PostgresUserRepo)
+- Only reference Sockets from the provided list (matching their fullName exactly)
+- An Adapter often implements just one Socket, but can implement multiple if they're closely related`;
+
+interface AdapterSuggestion {
+  name?: string;
+  implementsSocketFullNames?: string[];
+  designNotes?: string;
+}
+
+function parseAdapterSuggestion(raw: string): AdapterSuggestion | null {
+  const trimmed = raw.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+  try {
+    return JSON.parse(trimmed) as AdapterSuggestion;
+  } catch {
+    return null;
+  }
+}
 
 type LeftTab = "canvases" | "registry";
 
@@ -30,9 +65,15 @@ export function PatchboardView() {
   const [leftTab, setLeftTab] = useState<LeftTab>("canvases");
   const [validationMsg, setValidationMsg] = useState<string | null>(null);
   const [showAddAdapter, setShowAddAdapter] = useState(false);
+  const [showAdapterAi, setShowAdapterAi] = useState(false);
   const [adapterName, setAdapterName] = useState("");
   const [selectedSocketIds, setSelectedSocketIds] = useState<Set<string>>(new Set());
   const [confirmDeleteCanvas, setConfirmDeleteCanvas] = useState(false);
+  const [projectRoot, setProjectRoot] = useState("");
+
+  useEffect(() => {
+    getProjectRoot().then(setProjectRoot);
+  }, []);
 
   useEffect(() => {
     if (!initialized) {
@@ -192,12 +233,23 @@ export function PatchboardView() {
               <h3 className="text-sm font-medium text-text-primary">
                 Add Adapter
               </h3>
-              <button
-                onClick={() => setShowAddAdapter(false)}
-                className="text-text-muted hover:text-text-secondary"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowAdapterAi(true)}
+                  disabled={!projectRoot || (registry?.sockets.length ?? 0) === 0}
+                  className="text-[10px] text-accent hover:text-accent/80 disabled:opacity-40 inline-flex items-center gap-1"
+                  title={t("patchboard.ai.suggestAdapterTitle")}
+                >
+                  <Sparkles size={11} />
+                  {t("patchboard.ai.suggestAdapterButton")}
+                </button>
+                <button
+                  onClick={() => setShowAddAdapter(false)}
+                  className="text-text-muted hover:text-text-secondary"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             <div>
@@ -309,6 +361,40 @@ export function PatchboardView() {
             </div>
           </div>
         </div>
+      )}
+
+      {showAdapterAi && (
+        <AiGenerateDialog
+          open
+          onClose={() => setShowAdapterAi(false)}
+          title={t("patchboard.ai.suggestAdapterTitle")}
+          taskId="patchboardSuggestAdapter"
+          projectRoot={projectRoot}
+          systemPrompt={ADAPTER_SUGGEST_SYSTEM_PROMPT}
+          userPromptBuilder={(desc) => {
+            const socketList = socketOptions
+              .map((s) => `- ${s.fullName} (${s.displayName})`)
+              .join("\n");
+            return `Description:\n${desc}\n\nAvailable Sockets:\n${socketList || "(none — Adapter must implement at least one Socket, so create a Socket first)"}\n\nOutput the JSON object now.`;
+          }}
+          inputLabel={t("patchboard.ai.suggestAdapterInputLabel")}
+          inputPlaceholder={t("patchboard.ai.suggestAdapterInputPlaceholder")}
+          temperature={0.4}
+          maxTokens={800}
+          onAccept={(text) => {
+            const parsed = parseAdapterSuggestion(text);
+            if (parsed?.name) setAdapterName(parsed.name);
+            if (Array.isArray(parsed?.implementsSocketFullNames)) {
+              const idsToSelect = new Set<string>();
+              for (const fullName of parsed.implementsSocketFullNames) {
+                const match = socketOptions.find((s) => s.fullName === fullName);
+                if (match) idsToSelect.add(match.id);
+              }
+              if (idsToSelect.size > 0) setSelectedSocketIds(idsToSelect);
+            }
+            setShowAdapterAi(false);
+          }}
+        />
       )}
     </div>
   );

@@ -1,12 +1,59 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Sparkles } from "lucide-react";
 import { usePatchboardStore } from "../../../stores/patchboard-store";
+import { useEditorStore } from "../../../stores/editor-store";
+import { AiGenerateDialog } from "../../../components/AiGenerateDialog";
 import type {
   SocketMethod,
   MethodParam,
   CreateSocketInput,
 } from "../../../types/patchboard-types";
 import { useT } from "../../../lib/i18n";
+
+const SOCKET_SUGGEST_SYSTEM_PROMPT = `You are designing a TypeScript Socket (interface) for the Drafting Patchboard architecture system.
+
+A Socket defines a contract that one or more Adapters can implement. Given a capability description, propose a clean interface design.
+
+Output ONLY a JSON object matching this exact schema, no markdown fences, no prose:
+
+{
+  "fullName": "<namespace.PascalCaseName, e.g. llm.LlmProvider>",
+  "displayName": "<human-readable name>",
+  "methods": [
+    {
+      "name": "<camelCase>",
+      "params": [
+        {"name": "<camelCase>", "paramType": "<TS type>", "optional": false}
+      ],
+      "returnType": "<TS type, usually Promise<T>>"
+    }
+  ]
+}
+
+Rules:
+- 1 to 5 methods (focused, single responsibility)
+- Use async-friendly types (Promise<T>) by default
+- TS type strings can include generics like Promise<string[]>
+- Do not invent metadata fields beyond the schema`;
+
+interface SocketSuggestion {
+  fullName?: string;
+  displayName?: string;
+  methods?: SocketMethod[];
+}
+
+function parseSocketSuggestion(raw: string): SocketSuggestion | null {
+  const trimmed = raw.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (typeof parsed === "object" && parsed !== null) {
+      return parsed as SocketSuggestion;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 
 interface SocketEditorProps {
   socketId: string | null; // null = create mode
@@ -23,6 +70,8 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
   const [displayName, setDisplayName] = useState("");
   const [methods, setMethods] = useState<SocketMethod[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showAiSuggest, setShowAiSuggest] = useState(false);
+  const projectRoot = useEditorStore((s) => s.projectRoot ?? "");
 
   useEffect(() => {
     if (socketId) {
@@ -118,6 +167,17 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
         <span className="text-xs font-medium text-text-secondary">
           {socketId ? "Edit Socket" : "New Socket"}
         </span>
+        {!socketId && (
+          <button
+            onClick={() => setShowAiSuggest(true)}
+            disabled={!projectRoot}
+            className="ml-auto text-[10px] text-accent hover:text-accent/80 disabled:opacity-40 inline-flex items-center gap-1"
+            title={t("patchboard.ai.suggestSocketTitle")}
+          >
+            <Sparkles size={11} />
+            {t("patchboard.ai.suggestSocketButton")}
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto p-3 flex flex-col gap-3">
@@ -236,11 +296,52 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
         <button
           onClick={handleSave}
           disabled={loading || !fullName || !displayName}
-          className="w-full px-3 py-1.5 text-xs rounded bg-accent text-bg-primary font-medium hover:bg-accent-hover disabled:opacity-50 transition-colors"
+          className="w-full glass-button-primary px-4 py-2 text-sm rounded-lg font-medium disabled:opacity-50 transition-colors"
         >
           {loading ? "Saving..." : socketId ? "Update" : "Create"}
         </button>
       </div>
+
+      {showAiSuggest && (
+        <AiGenerateDialog
+          open
+          onClose={() => setShowAiSuggest(false)}
+          title={t("patchboard.ai.suggestSocketTitle")}
+          taskId="patchboardSuggestSocket"
+          projectRoot={projectRoot}
+          systemPrompt={SOCKET_SUGGEST_SYSTEM_PROMPT}
+          userPromptBuilder={(desc) =>
+            `Design a Socket for the following capability.\n\nDescription:\n${desc}\n\nOutput the JSON object now.`
+          }
+          inputLabel={t("patchboard.ai.suggestSocketInputLabel")}
+          inputPlaceholder={t("patchboard.ai.suggestSocketInputPlaceholder")}
+          temperature={0.4}
+          maxTokens={1200}
+          onAccept={(text) => {
+            const parsed = parseSocketSuggestion(text);
+            if (parsed) {
+              if (parsed.fullName) setFullName(parsed.fullName);
+              if (parsed.displayName) setDisplayName(parsed.displayName);
+              if (Array.isArray(parsed.methods)) {
+                setMethods(
+                  parsed.methods.map((m) => ({
+                    name: m.name ?? "",
+                    params: Array.isArray(m.params)
+                      ? m.params.map((p: any) => ({
+                          name: p.name ?? "",
+                          paramType: p.paramType ?? "any",
+                          optional: !!p.optional,
+                        }))
+                      : [],
+                    returnType: m.returnType ?? "void",
+                  })),
+                );
+              }
+            }
+            setShowAiSuggest(false);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1,13 +1,14 @@
-import { FileText, File, Plus } from "lucide-react";
+import { FileText, File, Plus, Sparkles } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import type { BlueprintIndexEntry } from "../../types/blueprint-types";
 import { useT } from "../../lib/i18n";
 
 interface Props {
   onNewBlueprint: () => void;
+  onAiDraft: () => void;
 }
 
-export function BlueprintListPanel({ onNewBlueprint }: Props) {
+export function BlueprintListPanel({ onNewBlueprint, onAiDraft }: Props) {
   const t = useT();
   const index = useBlueprintStore((s) => s.index);
   const activeId = useBlueprintStore((s) => s.activeBlueprintId);
@@ -24,13 +25,22 @@ export function BlueprintListPanel({ onNewBlueprint }: Props) {
         <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
           Blueprints
         </span>
-        <button
-          onClick={onNewBlueprint}
-          className="text-text-muted hover:text-text-secondary"
-          title={t("blueprint.newBlueprint")}
-        >
-          <Plus size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onAiDraft}
+            className="text-accent hover:text-accent/80"
+            title={t("blueprint.ai.draftTitle")}
+          >
+            <Sparkles size={14} />
+          </button>
+          <button
+            onClick={onNewBlueprint}
+            className="text-text-muted hover:text-text-secondary"
+            title={t("blueprint.newBlueprint")}
+          >
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-auto">
         {(index?.blueprints ?? []).length === 0 ? (

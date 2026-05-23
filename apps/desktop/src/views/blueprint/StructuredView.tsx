@@ -1,6 +1,9 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
+import { Sparkles } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { AcceptanceCriteriaEditor } from "./AcceptanceCriteriaEditor";
+import { AiGenerateDialog } from "../../components/AiGenerateDialog";
+import { useEditorStore } from "../../stores/editor-store";
 import type {
   Blueprint,
   BlueprintSection,
@@ -10,11 +13,37 @@ import type {
 } from "../../types/blueprint-types";
 import { useT } from "../../lib/i18n";
 
+const CRITERIA_SYSTEM_PROMPT = `You are helping a software engineer write acceptance criteria for a feature.
+
+Given the feature Goal, propose 3 to 5 acceptance criteria. Each must be:
+- Concrete and verifiable (no fuzzy words like "fast", "robust", "user-friendly")
+- A single observable behavior (no compound criteria joined by "and")
+- Testable by an automated test or manual procedure
+
+Output one criterion per line. No numbering, no bullets, no preamble — just the criteria text.`;
+
+function parseCriteriaList(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .trim()
+        // strip leading bullets / numbers / markers
+        .replace(/^[-*•·]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/^\[\s?\]\s*/, "")
+        .trim(),
+    )
+    .filter((line) => line.length > 2);
+}
+
 export function StructuredView() {
   const t = useT();
   const activeBlueprint = useBlueprintStore((s) => s.activeBlueprint);
   const updateStructured = useBlueprintStore((s) => s.updateStructured);
   const toggleCriterion = useBlueprintStore((s) => s.toggleCriterion);
+  const projectRoot = useEditorStore((s) => s.projectRoot ?? "");
+  const [criteriaAiSectionIdx, setCriteriaAiSectionIdx] = useState<number | null>(null);
 
   const saveChanges = useCallback(
     (updated: Blueprint) => {
@@ -146,9 +175,22 @@ export function StructuredView() {
             key={idx}
             className="bg-bg-secondary rounded-lg border border-border p-4"
           >
-            <h3 className="text-sm font-medium text-text-primary mb-3">
-              {section.headingText}
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-text-primary">
+                {section.headingText}
+              </h3>
+              {section.kind.kind === "acceptanceCriteria" && (
+                <button
+                  onClick={() => setCriteriaAiSectionIdx(idx)}
+                  disabled={!projectRoot}
+                  className="text-[10px] text-accent hover:text-accent/80 disabled:opacity-40 inline-flex items-center gap-1"
+                  title={t("blueprint.ai.suggestCriteriaTitle")}
+                >
+                  <Sparkles size={11} />
+                  {t("blueprint.ai.suggestCriteriaButton")}
+                </button>
+              )}
+            </div>
             {section.kind.kind === "acceptanceCriteria" ? (
               <AcceptanceCriteriaEditor
                 criteria={section.criteria}
@@ -187,6 +229,44 @@ export function StructuredView() {
           </div>
         ))}
       </div>
+
+      {criteriaAiSectionIdx !== null && (
+        <AiGenerateDialog
+          open
+          onClose={() => setCriteriaAiSectionIdx(null)}
+          title={t("blueprint.ai.suggestCriteriaTitle")}
+          taskId="blueprintSuggestCriteria"
+          projectRoot={projectRoot}
+          systemPrompt={CRITERIA_SYSTEM_PROMPT}
+          userPromptBuilder={(goal) =>
+            `Feature: ${activeBlueprint.frontMatter.displayName}\n\nGoal:\n${goal}\n\nGenerate the acceptance criteria now.`
+          }
+          inputLabel={t("blueprint.ai.suggestCriteriaInputLabel")}
+          inputPlaceholder={t("blueprint.ai.suggestCriteriaInputPlaceholder")}
+          initialInput={
+            activeBlueprint.sections.find((s) => s.kind.kind === "goal")
+              ?.content ?? ""
+          }
+          temperature={0.4}
+          maxTokens={800}
+          onAccept={(text) => {
+            const items = parseCriteriaList(text);
+            if (items.length === 0) {
+              setCriteriaAiSectionIdx(null);
+              return;
+            }
+            const sectionIdx = criteriaAiSectionIdx;
+            const section = activeBlueprint.sections[sectionIdx];
+            if (!section) return;
+            const newCriteria = [
+              ...section.criteria,
+              ...items.map((text) => ({ text, checked: false })),
+            ];
+            handleCriteriaChange(sectionIdx, newCriteria);
+            setCriteriaAiSectionIdx(null);
+          }}
+        />
+      )}
     </div>
   );
 }
