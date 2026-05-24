@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { ArrowLeft, Plus, Trash2, Sparkles } from "lucide-react";
 import { usePatchboardStore } from "../../../stores/patchboard-store";
-import { useEditorStore } from "../../../stores/editor-store";
 import { AiGenerateDialog } from "../../../components/AiGenerateDialog";
 import type {
   SocketMethod,
@@ -10,15 +9,23 @@ import type {
 } from "../../../types/patchboard-types";
 import { useT } from "../../../lib/i18n";
 
-const SOCKET_SUGGEST_SYSTEM_PROMPT = `You are designing a TypeScript Socket (interface) for the Drafting Patchboard architecture system.
+const SOCKET_SUGGEST_SYSTEM_PROMPT = `You are designing a TypeScript Socket (interface) for the Drafting Patchboard architecture system. A Socket defines a contract that one or more Adapters can implement.
 
-A Socket defines a contract that one or more Adapters can implement. Given a capability description, propose a clean interface design.
+# OUTPUT FORMAT — STRICT
 
-Output ONLY a JSON object matching this exact schema, no markdown fences, no prose:
+Your ENTIRE response MUST be a single JSON object.
+- The VERY FIRST character of your response MUST be \`{\` (left brace).
+- The VERY LAST character of your response MUST be \`}\` (right brace).
+- No markdown, no code fences, no prose, no explanation before or after.
+- No "Here is..." preamble. No trailing notes. Nothing but the JSON object.
+
+If you cannot satisfy these constraints, output the literal string \`{}\` and nothing else.
+
+# JSON SCHEMA
 
 {
   "fullName": "<namespace.PascalCaseName, e.g. llm.LlmProvider>",
-  "displayName": "<human-readable name>",
+  "displayName": "<human-readable name, 4-30 chars>",
   "methods": [
     {
       "name": "<camelCase>",
@@ -30,11 +37,23 @@ Output ONLY a JSON object matching this exact schema, no markdown fences, no pro
   ]
 }
 
-Rules:
-- 1 to 5 methods (focused, single responsibility)
-- Use async-friendly types (Promise<T>) by default
-- TS type strings can include generics like Promise<string[]>
-- Do not invent metadata fields beyond the schema`;
+# CONTENT RULES
+
+- 1 to 5 methods (single responsibility — don't kitchen-sink it).
+- Use async-friendly return types: \`Promise<T>\` by default.
+- TS type strings can include generics like \`Promise<string[]>\`, \`Map<K,V>\`, union types like \`string | null\`.
+- \`fullName\` MUST be \`namespace.PascalCaseName\` (lowercase namespace, PascalCase class name).
+- Do NOT include any keys beyond the schema above. No "description", no "id", no metadata.
+- All quotes MUST be double-quotes ("). All commas MUST be ASCII commas (,). All colons MUST be ASCII colons (:). Never use Chinese or smart-quote punctuation.
+
+# REMINDER
+
+Re-read your response before finishing. Confirm:
+1. First character is \`{\`.
+2. Last character is \`}\`.
+3. The object parses with \`JSON.parse\` in standard JavaScript.
+
+If any check fails, fix it before stopping.`;
 
 interface SocketSuggestion {
   fullName?: string;
@@ -43,14 +62,52 @@ interface SocketSuggestion {
 }
 
 function parseSocketSuggestion(raw: string): SocketSuggestion | null {
-  const trimmed = raw.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (typeof parsed === "object" && parsed !== null) {
-      return parsed as SocketSuggestion;
+  // Try multiple recovery strategies in order, from cheapest to most aggressive.
+  const attempts: string[] = [];
+
+  let s = raw.trim();
+  // 1. Strip ```json / ``` outer fence
+  s = s.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
+  attempts.push(s);
+
+  // 2. Extract the substring from first `{` to last `}` (handles preamble/trailing prose)
+  const first = s.indexOf("{");
+  const last = s.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    attempts.push(s.slice(first, last + 1));
+  }
+
+  // 2b. AI sometimes drops the leading `{`. If the content starts with a
+  //     `"key":` pattern but has a closing `}`, wrap it back.
+  if (/^\s*"[\w-]+"\s*:/.test(s) && s.lastIndexOf("}") > 0) {
+    attempts.push(`{${s.slice(0, s.lastIndexOf("}") + 1)}`);
+  }
+  // 2c. Or symmetric: starts with `{` but no closing `}`.
+  if (s.startsWith("{") && !s.includes("}")) {
+    attempts.push(`${s}}`);
+  }
+
+  // 3. As a last resort, fold Chinese punctuation that's a common LLM slip
+  //    (e.g. fullName:"Foo", → fullName:"Foo",). Only apply to the extracted block.
+  if (first >= 0 && last > first) {
+    const cn = s
+      .slice(first, last + 1)
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/,/g, ",")
+      .replace(/:/g, ":");
+    attempts.push(cn);
+  }
+
+  for (const a of attempts) {
+    try {
+      const parsed = JSON.parse(a);
+      if (typeof parsed === "object" && parsed !== null) {
+        return parsed as SocketSuggestion;
+      }
+    } catch {
+      // try next attempt
     }
-  } catch {
-    return null;
   }
   return null;
 }
@@ -70,8 +127,9 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
   const [displayName, setDisplayName] = useState("");
   const [methods, setMethods] = useState<SocketMethod[]>([]);
   const [loading, setLoading] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showAiSuggest, setShowAiSuggest] = useState(false);
-  const projectRoot = useEditorStore((s) => s.projectRoot ?? "");
+  const projectRoot = usePatchboardStore((s) => s.projectRoot ?? "");
 
   useEffect(() => {
     if (socketId) {
@@ -130,7 +188,15 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
   };
 
   const handleSave = async () => {
-    if (!fullName || !displayName) return;
+    setSaveError(null);
+    if (!fullName.trim()) {
+      setSaveError("Full Name 不能为空(例:llm.LlmProvider)");
+      return;
+    }
+    if (!displayName.trim()) {
+      setSaveError("Display Name 不能为空");
+      return;
+    }
     setLoading(true);
     try {
       if (socketId) {
@@ -150,6 +216,8 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
         await createSocket(input);
       }
       onClose();
+    } catch (e: any) {
+      setSaveError(`保存失败: ${e?.message ?? String(e)}`);
     } finally {
       setLoading(false);
     }
@@ -292,7 +360,10 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
         </div>
       </div>
 
-      <div className="px-3 py-2 border-t border-border">
+      <div className="px-3 py-2 border-t border-border flex flex-col gap-1">
+        {saveError && (
+          <p className="text-[11px] text-error break-words">{saveError}</p>
+        )}
         <button
           onClick={handleSave}
           disabled={loading || !fullName || !displayName}
@@ -315,28 +386,41 @@ export function SocketEditor({ socketId, onClose }: SocketEditorProps) {
           }
           inputLabel={t("patchboard.ai.suggestSocketInputLabel")}
           inputPlaceholder={t("patchboard.ai.suggestSocketInputPlaceholder")}
-          temperature={0.4}
+          temperature={0.1}
           maxTokens={1200}
           onAccept={(text) => {
             const parsed = parseSocketSuggestion(text);
-            if (parsed) {
-              if (parsed.fullName) setFullName(parsed.fullName);
-              if (parsed.displayName) setDisplayName(parsed.displayName);
-              if (Array.isArray(parsed.methods)) {
-                setMethods(
-                  parsed.methods.map((m) => ({
-                    name: m.name ?? "",
-                    params: Array.isArray(m.params)
-                      ? m.params.map((p: any) => ({
-                          name: p.name ?? "",
-                          paramType: p.paramType ?? "any",
-                          optional: !!p.optional,
-                        }))
-                      : [],
-                    returnType: m.returnType ?? "void",
-                  })),
-                );
-              }
+            if (!parsed) {
+              throw new Error(
+                "AI 输出不是合法 JSON,请在预览区里调整(或重新生成):\n" +
+                  "需要形如 {\"fullName\":\"namespace.Name\",\"displayName\":\"...\",\"methods\":[...]}",
+              );
+            }
+            const hasAnyField =
+              parsed.fullName ||
+              parsed.displayName ||
+              (Array.isArray(parsed.methods) && parsed.methods.length > 0);
+            if (!hasAnyField) {
+              throw new Error(
+                "JSON 解析成功但没有任何有用字段(fullName/displayName/methods 都为空)",
+              );
+            }
+            if (parsed.fullName) setFullName(parsed.fullName);
+            if (parsed.displayName) setDisplayName(parsed.displayName);
+            if (Array.isArray(parsed.methods)) {
+              setMethods(
+                parsed.methods.map((m) => ({
+                  name: m.name ?? "",
+                  params: Array.isArray(m.params)
+                    ? m.params.map((p: any) => ({
+                        name: p.name ?? "",
+                        paramType: p.paramType ?? "any",
+                        optional: !!p.optional,
+                      }))
+                    : [],
+                  returnType: m.returnType ?? "void",
+                })),
+              );
             }
             setShowAiSuggest(false);
           }}

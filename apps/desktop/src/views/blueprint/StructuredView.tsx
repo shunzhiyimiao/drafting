@@ -3,7 +3,6 @@ import { Sparkles } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { AcceptanceCriteriaEditor } from "./AcceptanceCriteriaEditor";
 import { AiGenerateDialog } from "../../components/AiGenerateDialog";
-import { useEditorStore } from "../../stores/editor-store";
 import type {
   Blueprint,
   BlueprintSection,
@@ -42,7 +41,7 @@ export function StructuredView() {
   const activeBlueprint = useBlueprintStore((s) => s.activeBlueprint);
   const updateStructured = useBlueprintStore((s) => s.updateStructured);
   const toggleCriterion = useBlueprintStore((s) => s.toggleCriterion);
-  const projectRoot = useEditorStore((s) => s.projectRoot ?? "");
+  const projectRoot = useBlueprintStore((s) => s.projectRoot ?? "");
   const [criteriaAiSectionIdx, setCriteriaAiSectionIdx] = useState<number | null>(null);
 
   const saveChanges = useCallback(

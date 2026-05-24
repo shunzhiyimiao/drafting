@@ -567,6 +567,19 @@ textarea {
   -webkit-backdrop-filter: blur(8px);
 }
 
+/* ReactFlow workaround: in some HMR / ResizeObserver-loop scenarios the
+   library leaves nodes and edges at `visibility: hidden` after measuring
+   them, so the DOM is there with correct dimensions but invisible. Force
+   them visible — measurements have already completed by the time CSS
+   applies. */
+.react-flow__node,
+.react-flow__edge,
+.react-flow__edge-path,
+.react-flow__edge-textbg,
+.react-flow__edge-text {
+  visibility: visible !important;
+}
+
 /* <select> intentionally excluded from backdrop-filter: WebKit (Tauri on
    macOS) has a long-standing bug where applying backdrop-filter to a
    native <select> blocks the native popup from opening — clicks register

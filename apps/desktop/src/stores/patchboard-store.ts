@@ -30,6 +30,7 @@ interface PatchboardState {
   activeCanvasId: string | null;
   activeCanvas: Canvas | null;
   selectedNodeId: string | null;
+  selectedEdgeId: string | null;
   wireBridges: WireBridge[]; // per-wire Type Bridge classification
 
   // Loading
@@ -56,6 +57,7 @@ interface PatchboardState {
   // Canvas mutations (update local state + save)
   updateActiveCanvas: (updater: (canvas: Canvas) => Canvas) => void;
   setSelectedNode: (nodeId: string | null) => void;
+  setSelectedEdge: (edgeId: string | null) => void;
 
   // Validation & Code Generation
   validateActiveCanvas: () => Promise<ValidationResult | null>;
@@ -71,6 +73,7 @@ export const usePatchboardStore = create<PatchboardState>((set, get) => ({
   activeCanvasId: null,
   activeCanvas: null,
   selectedNodeId: null,
+  selectedEdgeId: null,
   wireBridges: [],
   registryLoading: false,
   canvasLoading: false,
@@ -187,7 +190,11 @@ export const usePatchboardStore = create<PatchboardState>((set, get) => ({
   },
 
   setSelectedNode: (nodeId) => {
-    set({ selectedNodeId: nodeId });
+    set({ selectedNodeId: nodeId, selectedEdgeId: null });
+  },
+
+  setSelectedEdge: (edgeId) => {
+    set({ selectedEdgeId: edgeId, selectedNodeId: null });
   },
 
   validateActiveCanvas: async () => {

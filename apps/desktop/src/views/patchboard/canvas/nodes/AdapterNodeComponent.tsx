@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Box, Plug, Key } from "lucide-react";
 import type { AdapterConstructorParam } from "../../../../types/patchboard-types";
 
 export interface AdapterNodeData {
@@ -19,57 +20,98 @@ function AdapterNodeComponentInner({ data, selected }: NodeProps) {
 
   return (
     <div
-      className={`bg-bg-secondary border rounded-lg min-w-[180px] ${
+      className={`bg-bg-secondary border rounded shadow-sm w-[200px] ${
         selected ? "border-accent" : "border-border"
       } ${nodeData.isEntryPoint ? "ring-1 ring-accent/40" : ""}`}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
-        <span className="text-xs font-medium text-text-primary">
+      {/* Title bar — colored band, name + optional entry indicator. */}
+      <div
+        className={`flex items-center gap-1.5 px-2 py-1 border-b border-border rounded-t ${
+          nodeData.isEntryPoint
+            ? "bg-accent/25 text-text-primary"
+            : "bg-accent/10 text-text-primary"
+        }`}
+      >
+        <Box size={10} className="shrink-0 opacity-80" />
+        <span className="text-[11px] font-semibold truncate flex-1">
           {nodeData.name}
         </span>
         {nodeData.isEntryPoint && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-accent/20 text-accent">
-            entry
-          </span>
+          <Key size={9} className="text-accent shrink-0" />
         )}
       </div>
 
-      {/* Implements badges */}
-      <div className="px-3 py-1 flex flex-wrap gap-1">
-        {nodeData.implements.map((socketId) => (
-          <span
-            key={socketId}
-            className="text-[10px] px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary"
-          >
-            {socketId}
-          </span>
-        ))}
-      </div>
+      {/* Field rows: one per implemented Socket. ReactFlow positions the
+          Handle naturally at the row's right edge (slightly outside the
+          node body — that's intentional, gives a clear connector dot).
+          Drag from the dot to start a wire that follows the cursor. */}
+      {nodeData.implements.length > 0 && (
+        <div className="flex flex-col">
+          {nodeData.implements.map((socketId) => (
+            <div
+              key={socketId}
+              className="relative flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-secondary border-b last:border-b-0 border-border/60"
+              title={socketId}
+            >
+              <Plug size={10} className="shrink-0 text-success" />
+              <span className="truncate flex-1">{socketId}</span>
+              <Handle
+                type="source"
+                position={Position.Right}
+                id={socketId}
+                style={{
+                  position: "absolute",
+                  right: -6,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: 12,
+                  height: 12,
+                  background: "var(--color-success)",
+                  border: "2px solid var(--app-bg, #000)",
+                  borderRadius: 6,
+                  cursor: "crosshair",
+                  zIndex: 10,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* Input handles (left) - one per SocketDep param */}
-      {socketDeps.map((param, i) => (
-        <Handle
-          key={`in-${param.name}`}
-          type="target"
-          position={Position.Left}
-          id={param.name}
-          style={{ top: 50 + i * 20 }}
-          className="!w-2.5 !h-2.5 !bg-accent !border-bg-primary"
-        />
-      ))}
+      {/* Constructor params (socket deps) — yellow target dot on the
+          LEFT of each row; drag a green source dot here to wire. */}
+      {socketDeps.length > 0 && (
+        <div className="flex flex-col bg-bg-primary/50 rounded-b">
+          {socketDeps.map((p) => (
+            <div
+              key={`dep-${p.name}`}
+              className="relative flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-muted border-b last:border-b-0 border-border/60"
+              title={`dependency: ${p.name}`}
+            >
+              <Handle
+                type="target"
+                position={Position.Left}
+                id={p.name}
+                style={{
+                  position: "absolute",
+                  left: -6,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: 12,
+                  height: 12,
+                  background: "var(--color-warning)",
+                  border: "2px solid var(--app-bg, #000)",
+                  borderRadius: 6,
+                  cursor: "crosshair",
+                  zIndex: 10,
+                }}
+              />
+              <span className="truncate flex-1">{p.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* Output handles (right) - one per implemented Socket */}
-      {nodeData.implements.map((socketId, i) => (
-        <Handle
-          key={`out-${socketId}`}
-          type="source"
-          position={Position.Right}
-          id={socketId}
-          style={{ top: 50 + i * 20 }}
-          className="!w-2.5 !h-2.5 !bg-success !border-bg-primary"
-        />
-      ))}
     </div>
   );
 }

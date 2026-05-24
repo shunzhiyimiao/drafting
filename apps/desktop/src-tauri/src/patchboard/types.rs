@@ -30,6 +30,7 @@ impl Default for SocketLifecycle {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MethodParam {
     pub name: String,
     pub param_type: String,
@@ -38,6 +39,7 @@ pub struct MethodParam {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SocketMethod {
     pub name: String,
     pub params: Vec<MethodParam>,

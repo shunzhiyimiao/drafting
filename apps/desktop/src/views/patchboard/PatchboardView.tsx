@@ -6,19 +6,26 @@ import { PatchboardCanvas } from "./canvas/PatchboardCanvas";
 import { CanvasToolbar } from "./canvas/toolbar/CanvasToolbar";
 import { CanvasListPanel } from "./canvas/panels/CanvasListPanel";
 import { AdapterPanel } from "./canvas/panels/AdapterPanel";
+import { WirePanel } from "./canvas/panels/WirePanel";
 import { RegistryPanel } from "./registry/RegistryPanel";
 import { AiGenerateDialog } from "../../components/AiGenerateDialog";
 import type { AdapterNode } from "../../types/patchboard-types";
 import { getProjectRoot } from "../../lib/app-bootstrap";
 import { useT } from "../../lib/i18n";
 
-const ADAPTER_SUGGEST_SYSTEM_PROMPT = `You are designing a TypeScript Adapter class for the Drafting Patchboard architecture.
+const ADAPTER_SUGGEST_SYSTEM_PROMPT = `You are designing a TypeScript Adapter class for the Drafting Patchboard architecture. An Adapter is a concrete implementation of one or more Sockets (interfaces).
 
-An Adapter is a concrete implementation of one or more Sockets (interfaces). Given a description of what the Adapter should do and the list of available Sockets, propose:
-1. A descriptive PascalCase class name
-2. Which of the available Sockets this Adapter should implement (by their fullName)
+# OUTPUT FORMAT — STRICT
 
-Output ONLY a JSON object matching this schema, no markdown fences, no prose:
+Your ENTIRE response MUST be a single JSON object.
+- The VERY FIRST character of your response MUST be \`{\` (left brace).
+- The VERY LAST character of your response MUST be \`}\` (right brace).
+- No markdown, no code fences, no prose, no explanation before or after.
+- No "Here is..." preamble. No trailing notes. Nothing but the JSON object.
+
+If you cannot satisfy these constraints, output the literal string \`{}\` and nothing else.
+
+# JSON SCHEMA
 
 {
   "name": "<PascalCaseClassName>",
@@ -26,10 +33,23 @@ Output ONLY a JSON object matching this schema, no markdown fences, no prose:
   "designNotes": "<2-3 short sentences on the implementation approach>"
 }
 
-Rules:
-- Class name should hint at the underlying provider/library (e.g. OpenAiLlmProvider, PostgresUserRepo)
-- Only reference Sockets from the provided list (matching their fullName exactly)
-- An Adapter often implements just one Socket, but can implement multiple if they're closely related`;
+# CONTENT RULES
+
+- \`name\` should hint at the underlying provider/library (e.g. OpenAiLlmProvider, PostgresUserRepo, NodemailerEmailSender).
+- \`implementsSocketFullNames\` MUST be an array of strings that EXACTLY match fullNames from the provided socket list. Do not invent or modify fullNames.
+- An Adapter often implements just one Socket, but can implement multiple if they're closely related.
+- Do NOT include any keys beyond the schema above.
+- All quotes MUST be double-quotes ("). All commas MUST be ASCII commas (,). Never use Chinese or smart-quote punctuation.
+
+# REMINDER
+
+Re-read your response before finishing. Confirm:
+1. First character is \`{\`.
+2. Last character is \`}\`.
+3. \`implementsSocketFullNames\` values all appear in the provided list (don't make them up).
+4. The object parses with \`JSON.parse\` in standard JavaScript.
+
+If any check fails, fix it before stopping.`;
 
 interface AdapterSuggestion {
   name?: string;
@@ -38,12 +58,41 @@ interface AdapterSuggestion {
 }
 
 function parseAdapterSuggestion(raw: string): AdapterSuggestion | null {
-  const trimmed = raw.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
-  try {
-    return JSON.parse(trimmed) as AdapterSuggestion;
-  } catch {
-    return null;
+  const attempts: string[] = [];
+  let s = raw.trim();
+  s = s.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
+  attempts.push(s);
+  const first = s.indexOf("{");
+  const last = s.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    attempts.push(s.slice(first, last + 1));
+    attempts.push(
+      s
+        .slice(first, last + 1)
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'")
+        .replace(/,/g, ",")
+        .replace(/:/g, ":"),
+    );
   }
+  // Recover from missing leading `{`
+  if (/^\s*"[\w-]+"\s*:/.test(s) && s.lastIndexOf("}") > 0) {
+    attempts.push(`{${s.slice(0, s.lastIndexOf("}") + 1)}`);
+  }
+  if (s.startsWith("{") && !s.includes("}")) {
+    attempts.push(`${s}}`);
+  }
+  for (const a of attempts) {
+    try {
+      const parsed = JSON.parse(a);
+      if (typeof parsed === "object" && parsed !== null) {
+        return parsed as AdapterSuggestion;
+      }
+    } catch {
+      // try next
+    }
+  }
+  return null;
 }
 
 type LeftTab = "canvases" | "registry";
@@ -51,7 +100,6 @@ type LeftTab = "canvases" | "registry";
 export function PatchboardView() {
   const t = useT();
   const {
-    initialized,
     initialize,
     activeCanvas,
     activeCanvasId,
@@ -76,22 +124,42 @@ export function PatchboardView() {
   }, []);
 
   useEffect(() => {
-    if (!initialized) {
-      getProjectRoot().then((root) => initialize(root));
-    }
-  }, [initialized, initialize]);
+    // Always re-init on mount so the store picks up the current workspace
+    // — fixes stale projectRoot after a workspace switch.
+    getProjectRoot().then((root) => initialize(root));
+  }, [initialize]);
 
   // Auto-save on canvas changes (debounced)
   useEffect(() => {
     if (!activeCanvas) return;
     const timer = setTimeout(() => {
-      saveActiveCanvas();
+      saveActiveCanvas().catch((e: any) => {
+        setValidationMsg(`⚠ 自动保存失败: ${e?.message ?? String(e)}`);
+        setTimeout(() => setValidationMsg(null), 8000);
+      });
     }, 1000);
     return () => clearTimeout(timer);
   }, [activeCanvas, saveActiveCanvas]);
 
   const handleAddAdapterSubmit = useCallback(() => {
-    if (!adapterName.trim() || selectedSocketIds.size === 0) return;
+    if (!adapterName.trim()) {
+      setValidationMsg("Class Name 不能为空");
+      setTimeout(() => setValidationMsg(null), 4000);
+      return;
+    }
+    if (selectedSocketIds.size === 0) {
+      setValidationMsg("至少选一个 Socket 让 Adapter 实现");
+      setTimeout(() => setValidationMsg(null), 4000);
+      return;
+    }
+    if (!activeCanvas) {
+      setValidationMsg(
+        "没有激活的 Canvas — 先在 Canvases 标签页创建并选中一张画布",
+      );
+      setTimeout(() => setValidationMsg(null), 5000);
+      setShowAddAdapter(false);
+      return;
+    }
 
     const newAdapter: AdapterNode = {
       id: `adapter-${Date.now()}`,
@@ -109,7 +177,9 @@ export function PatchboardView() {
     setAdapterName("");
     setSelectedSocketIds(new Set());
     setShowAddAdapter(false);
-  }, [adapterName, selectedSocketIds, updateActiveCanvas]);
+    setValidationMsg(`已添加 Adapter: ${newAdapter.name}`);
+    setTimeout(() => setValidationMsg(null), 3000);
+  }, [adapterName, selectedSocketIds, updateActiveCanvas, activeCanvas]);
 
   const handleValidate = useCallback(async () => {
     const result = await validateActiveCanvas();
@@ -209,14 +279,15 @@ export function PatchboardView() {
         )}
       </div>
 
-      {/* Right panel: properties */}
+      {/* Right panel: properties — swaps between Adapter / Wire panel
+          based on the current selection. */}
       <div className="w-56 bg-bg-secondary border-l border-border shrink-0 overflow-auto">
         <div className="px-3 py-2 border-b border-border">
           <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
             Properties
           </span>
         </div>
-        <AdapterPanel />
+        <PropertiesBody />
       </div>
 
       {/* Add Adapter dialog */}
@@ -379,23 +450,85 @@ export function PatchboardView() {
           }}
           inputLabel={t("patchboard.ai.suggestAdapterInputLabel")}
           inputPlaceholder={t("patchboard.ai.suggestAdapterInputPlaceholder")}
-          temperature={0.4}
+          temperature={0.1}
           maxTokens={800}
-          onAccept={(text) => {
+          onAccept={async (text) => {
             const parsed = parseAdapterSuggestion(text);
-            if (parsed?.name) setAdapterName(parsed.name);
-            if (Array.isArray(parsed?.implementsSocketFullNames)) {
-              const idsToSelect = new Set<string>();
+            if (!parsed) {
+              throw new Error(
+                "AI 输出不是合法 JSON。请在预览区里改对(或重新生成):\n" +
+                  "需要形如 {\"name\":\"PascalCase\",\"implementsSocketFullNames\":[\"...\"],...}",
+              );
+            }
+            const name = parsed.name?.trim() ?? "";
+            const ids = new Set<string>();
+            if (Array.isArray(parsed.implementsSocketFullNames)) {
               for (const fullName of parsed.implementsSocketFullNames) {
                 const match = socketOptions.find((s) => s.fullName === fullName);
-                if (match) idsToSelect.add(match.id);
+                if (match) ids.add(match.id);
               }
-              if (idsToSelect.size > 0) setSelectedSocketIds(idsToSelect);
             }
+            if (!name) {
+              throw new Error("AI 返回里 `name` 字段缺失或为空");
+            }
+            if (ids.size === 0) {
+              throw new Error(
+                `AI 返回的 implementsSocketFullNames 没有匹配到任何已存在的 Socket。\n` +
+                  `当前 Registry 里有: ${socketOptions.map((s) => s.fullName).join(", ") || "(空)"}`,
+              );
+            }
+            // Auto-commit: directly create the adapter on the canvas instead
+            // of routing through the Add Adapter dialog. Faster + the user
+            // already saw the AI's plan in the preview area.
+            if (!activeCanvas) {
+              throw new Error(
+                "没有激活的 Canvas。先在 Canvases 标签页创建并选中一张画布,再用 AI 建议。",
+              );
+            }
+            const newAdapter: AdapterNode = {
+              id: `adapter-${Date.now()}`,
+              name,
+              implements: [...ids],
+              constructorParams: [],
+              position: {
+                x: 200 + Math.random() * 200,
+                y: 100 + Math.random() * 200,
+              },
+            };
+            updateActiveCanvas((canvas) => ({
+              ...canvas,
+              adapters: [...canvas.adapters, newAdapter],
+            }));
+            setAdapterName("");
+            setSelectedSocketIds(new Set());
             setShowAdapterAi(false);
+            setShowAddAdapter(false);
+            // Immediately persist + refresh list — bypass the 1s debounce
+            // so the on-disk file and the left panel summary update right
+            // away (otherwise the user sees a state-vs-disk mismatch).
+            try {
+              await usePatchboardStore.getState().saveActiveCanvas();
+            } catch (e: any) {
+              setValidationMsg(`⚠ 保存失败: ${e?.message ?? String(e)}`);
+              setTimeout(() => setValidationMsg(null), 8000);
+              return;
+            }
+            const after = usePatchboardStore.getState().activeCanvas;
+            setValidationMsg(
+              `✓ 已添加并保存 Adapter: ${name} (canvas 现共 ${after?.adapters.length ?? 0} 个 adapter)`,
+            );
+            setTimeout(() => setValidationMsg(null), 4000);
           }}
         />
       )}
     </div>
   );
+}
+
+// Swap Properties body based on selection: wire takes precedence over node
+// (you can only have one selected at a time per the store, but be defensive).
+function PropertiesBody() {
+  const selectedEdgeId = usePatchboardStore((s) => s.selectedEdgeId);
+  if (selectedEdgeId) return <WirePanel />;
+  return <AdapterPanel />;
 }

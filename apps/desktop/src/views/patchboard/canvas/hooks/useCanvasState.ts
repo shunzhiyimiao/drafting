@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type MouseEvent } from "react";
 import {
   type Node,
   type Edge,
@@ -6,7 +6,6 @@ import {
   type OnEdgesChange,
   type Connection,
   applyNodeChanges,
-  applyEdgeChanges,
 } from "@xyflow/react";
 import { usePatchboardStore } from "../../../../stores/patchboard-store";
 import type { Wire } from "../../../../types/patchboard-types";
@@ -85,12 +84,18 @@ export function useCanvasState() {
     return result;
   }, [activeCanvas, registry]);
 
+  const selectedEdgeId = usePatchboardStore((s) => s.selectedEdgeId);
   const edges: Edge[] = useMemo(() => {
     if (!activeCanvas) return [];
     const bridgeByWire = new Map(wireBridges.map((b) => [b.wireId, b]));
     return activeCanvas.wires.map((wire) => {
       const bridge = bridgeByWire.get(wire.id);
-      const style = BRIDGE_STYLE[bridge?.level ?? "lossless"];
+      const baseStyle = BRIDGE_STYLE[bridge?.level ?? "lossless"];
+      const isSelected = wire.id === selectedEdgeId;
+      // Selected: solid blue (accent). Otherwise: bridge-level color.
+      const style = isSelected
+        ? { stroke: "#3b82f6", strokeWidth: 2 }
+        : { ...baseStyle, strokeWidth: 1.5 };
       return {
         id: wire.id,
         source: wire.fromAdapterId,
@@ -99,20 +104,32 @@ export function useCanvasState() {
         targetHandle: wire.toParamName,
         type: "default",
         animated: bridge?.level !== "incompatible",
+        selected: isSelected,
         style,
         label: bridge && bridge.level !== "lossless" ? bridge.level : undefined,
-        labelStyle: { fill: style.stroke, fontSize: 10 },
+        labelStyle: { fill: baseStyle.stroke, fontSize: 10 },
         data: bridge ? { bridge } : undefined,
       };
     });
-  }, [activeCanvas, wireBridges]);
+  }, [activeCanvas, wireBridges, selectedEdgeId]);
 
   const onNodesChange: OnNodesChange = useCallback(
     (changes) => {
       if (!activeCanvas) return;
 
-      // Apply position changes back to the canvas data model
-      const updatedNodes = applyNodeChanges(changes, nodes);
+      // Only react to position changes from user drags. ReactFlow also emits
+      // `dimensions` and `select` changes on every measurement and click —
+      // propagating those back to the Zustand store causes a render loop
+      // (activeCanvas re-references → nodes re-memoized → measurement →
+      // dimension change → loop, observed as 8000+ ResizeObserver warnings).
+      const positionChanges = changes.filter(
+        (c): c is Extract<typeof c, { type: "position" }> =>
+          c.type === "position",
+      );
+      if (positionChanges.length === 0) return;
+
+      // Apply only the position changes against the current node list.
+      const updatedNodes = applyNodeChanges(positionChanges, nodes);
 
       updateActiveCanvas((canvas) => {
         const newAdapters = [...canvas.adapters];
@@ -148,16 +165,42 @@ export function useCanvasState() {
   const onEdgesChange: OnEdgesChange = useCallback(
     (changes) => {
       if (!activeCanvas) return;
-      const updatedEdges = applyEdgeChanges(changes, edges);
-      const wireIds = new Set(updatedEdges.map((e) => e.id));
+      // Same trick as onNodesChange: only act on actual removals from the
+      // user. ReactFlow also fires `select` changes on every click which
+      // would churn the store reference for no reason.
+      const removeIds = new Set(
+        changes
+          .filter((c): c is Extract<typeof c, { type: "remove" }> => c.type === "remove")
+          .map((c) => c.id),
+      );
+      if (removeIds.size === 0) return;
 
       updateActiveCanvas((canvas) => ({
         ...canvas,
-        wires: canvas.wires.filter((w) => wireIds.has(w.id)),
+        wires: canvas.wires.filter((w) => !removeIds.has(w.id)),
       }));
     },
-    [activeCanvas, edges, updateActiveCanvas],
+    [activeCanvas, updateActiveCanvas],
   );
+
+  const setSelectedNode = usePatchboardStore((s) => s.setSelectedNode);
+  const setSelectedEdge = usePatchboardStore((s) => s.setSelectedEdge);
+  const onNodeClick = useCallback(
+    (_e: MouseEvent, node: Node) => {
+      setSelectedNode(node.id);
+    },
+    [setSelectedNode],
+  );
+  const onEdgeClick = useCallback(
+    (_e: MouseEvent, edge: Edge) => {
+      setSelectedEdge(edge.id);
+    },
+    [setSelectedEdge],
+  );
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null);
+    setSelectedEdge(null);
+  }, [setSelectedNode, setSelectedEdge]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -179,5 +222,14 @@ export function useCanvasState() {
     [activeCanvas, updateActiveCanvas],
   );
 
-  return { nodes, edges, onNodesChange, onEdgesChange, onConnect };
+  return {
+    nodes,
+    edges,
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    onNodeClick,
+    onEdgeClick,
+    onPaneClick,
+  };
 }

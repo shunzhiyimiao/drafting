@@ -50,7 +50,6 @@ const kindColors: Record<SymbolKind, string> = {
 
 export function AtlasView() {
   const t = useT();
-  const projectRoot = useAtlasStore((s) => s.projectRoot);
   const initialize = useAtlasStore((s) => s.initialize);
   const activeFilePath = useAtlasStore((s) => s.activeFilePath);
   const fileMap = useAtlasStore((s) => s.fileMap);
@@ -65,10 +64,9 @@ export function AtlasView() {
   const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
 
   useEffect(() => {
-    if (!projectRoot) {
-      getProjectRoot().then((root) => initialize(root));
-    }
-  }, [projectRoot, initialize]);
+    // Always re-init on mount so the store picks up the current workspace.
+    getProjectRoot().then((root) => initialize(root));
+  }, [initialize]);
 
   useEffect(() => {
     if (editorActivePath && editorActivePath !== activeFilePath) {

@@ -252,8 +252,9 @@ function AiTab() {
   const [importNotice, setImportNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!config) getProjectRoot().then((root) => initialize(root));
-  }, [config, initialize]);
+    // Always re-init on mount so the AI config reflects the current workspace.
+    getProjectRoot().then((root) => initialize(root));
+  }, [initialize]);
   useEffect(() => {
     listPresets().then(setPresets).catch(() => {});
   }, []);

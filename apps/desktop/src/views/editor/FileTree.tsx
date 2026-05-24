@@ -108,15 +108,13 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
 
 export function FileTree() {
   const t = useT();
-  const initialized = useEditorStore((s) => s.initialized);
   const initialize = useEditorStore((s) => s.initialize);
   const tree = useEditorStore((s) => s.tree);
 
   useEffect(() => {
-    if (!initialized) {
-      getProjectRoot().then((root) => initialize(root));
-    }
-  }, [initialized, initialize]);
+    // Always re-init on mount so the store picks up the current workspace.
+    getProjectRoot().then((root) => initialize(root));
+  }, [initialize]);
 
   const rootEntries = tree[""] ?? [];
 
