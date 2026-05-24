@@ -35,6 +35,7 @@ import type {
 } from "../../types/ai-types";
 import { getProjectRoot } from "../../lib/app-bootstrap";
 import { listPresets } from "../../lib/ai-api";
+import { Dropdown, type DropdownOption } from "../../components/Dropdown";
 
 type SettingsTab = "general" | "appearance" | "ai" | "editor" | "about";
 
@@ -341,6 +342,16 @@ function AiTab() {
         <label className="text-[10px] uppercase tracking-wider text-text-muted mb-3 block">
           {t("settings.ai.taskRouting")}
         </label>
+        <RouteBulkApply
+          routes={config.routes}
+          profiles={config.profiles}
+          onApply={async (profileId, model) => {
+            // Update every existing route to point at the same profile+model.
+            for (const r of config.routes) {
+              await updateRoute({ ...r, profileId, model });
+            }
+          }}
+        />
         <div className="flex flex-col gap-1.5">
           {config.routes.map((route) => (
             <RouteRow
@@ -544,6 +555,107 @@ function protocolDisplay(p: Protocol, t: (key: string) => string): string {
 // Route row (per-task profile + model dropdowns)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Bulk-apply: pick one profile+model and re-route every task to it.
+// ---------------------------------------------------------------------------
+
+function RouteBulkApply({
+  routes,
+  profiles,
+  onApply,
+}: {
+  routes: TaskRoute[];
+  profiles: Profile[];
+  onApply: (profileId: string, model: string) => Promise<void>;
+}) {
+  const t = useT();
+  const [profileId, setProfileId] = useState("");
+  const [model, setModel] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const selectedProfile = profiles.find((p) => p.id === profileId);
+  const modelOptions = selectedProfile?.models ?? [];
+
+  useEffect(() => {
+    // Default the model to the first one of the picked profile.
+    if (selectedProfile && modelOptions.length > 0) {
+      if (!model || !modelOptions.includes(model)) {
+        setModel(modelOptions[0]);
+      }
+    }
+  }, [profileId, modelOptions.join(",")]);
+
+  const profileOptions: DropdownOption[] = profiles.map((p) => ({
+    value: p.id,
+    label: p.name,
+    hint: p.enabled
+      ? undefined
+      : !p.apiKeySet
+        ? t("settings.ai.needsKey")
+        : t("settings.ai.toggleDisabled"),
+    marker: p.enabled ? undefined : ("muted" as const),
+  }));
+
+  const canApply = !!profileId && !!model && !applying;
+
+  const handleApply = async () => {
+    if (!canApply) return;
+    setApplying(true);
+    setStatus(null);
+    try {
+      await onApply(profileId, model);
+      setStatus(t("settings.ai.bulkApplied", { count: String(routes.length) }));
+      setTimeout(() => setStatus(null), 3000);
+    } catch (e: any) {
+      setStatus(`✗ ${e?.message ?? String(e)}`);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div className="mb-3 pb-3 border-b border-white/5 flex items-center gap-2 flex-wrap">
+      <span className="text-[11px] text-text-muted">
+        {t("settings.ai.bulkApplyLabel")}
+      </span>
+      <Dropdown
+        value={profileId}
+        options={profileOptions}
+        onChange={setProfileId}
+        placeholder={t("settings.ai.bulkPickProfile")}
+        className="text-[11px] px-2 py-1 min-w-[140px]"
+      />
+      <Dropdown
+        value={model}
+        options={modelOptions.map((m) => ({ value: m, label: m }))}
+        onChange={setModel}
+        placeholder={
+          !profileId
+            ? t("settings.ai.bulkPickProfileFirst")
+            : modelOptions.length === 0
+              ? t("settings.ai.modelNoneAvailable")
+              : t("settings.ai.modelPlaceholder")
+        }
+        disabled={!profileId || modelOptions.length === 0}
+        className="text-[11px] px-2 py-1 w-44"
+      />
+      <button
+        onClick={handleApply}
+        disabled={!canApply}
+        className="glass-button-primary px-3 py-1 text-[11px] rounded-lg font-medium disabled:opacity-40"
+      >
+        {applying
+          ? t("settings.ai.bulkApplying")
+          : t("settings.ai.bulkApplyButton", { count: String(routes.length) })}
+      </button>
+      {status && (
+        <span className="text-[11px] text-success ml-1">{status}</span>
+      )}
+    </div>
+  );
+}
+
 function RouteRow({
   route,
   profiles,
@@ -554,43 +666,65 @@ function RouteRow({
   onChange: (route: TaskRoute) => void;
 }) {
   const t = useT();
-  const enabled = profiles.filter((p) => p.enabled);
   const target = profiles.find((p) => p.id === route.profileId);
   const targetMissing = !target;
   const modelOptions = target?.models ?? [];
+
+  const dropdownOptions: DropdownOption[] = [
+    ...(targetMissing
+      ? [
+          {
+            value: route.profileId,
+            label: `${t("settings.ai.profileDeleted")} ${route.profileId}`,
+            marker: "error" as const,
+          },
+        ]
+      : []),
+    // Show all profiles so the user can re-route even if they only have
+    // disabled ones. Profiles without an API key (the most common reason
+    // for being disabled) get a clearer hint.
+    ...profiles.map((p) => {
+      const hint = p.enabled
+        ? undefined
+        : !p.apiKeySet
+          ? t("settings.ai.needsKey")
+          : t("settings.ai.toggleDisabled");
+      return {
+        value: p.id,
+        label: p.name,
+        hint,
+        marker: p.enabled ? undefined : ("muted" as const),
+      };
+    }),
+  ];
 
   return (
     <div className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
       <span className="text-xs text-text-primary">{t(`task.${route.taskId}`)}</span>
       <div className="flex items-center gap-2">
-        <select
+        <Dropdown
           value={route.profileId}
-          onChange={(e) => onChange({ ...route, profileId: e.target.value })}
-          className={`text-[10px] px-1.5 py-0.5 rounded ${
-            targetMissing ? "border border-error" : ""
+          options={dropdownOptions}
+          onChange={(v) => onChange({ ...route, profileId: v })}
+          className={`text-[11px] px-2 py-1 min-w-[140px] ${
+            targetMissing ? "border-error" : ""
           }`}
-        >
-          {targetMissing && (
-            <option value={route.profileId}>{t("settings.ai.profileDeleted")} {route.profileId}</option>
-          )}
-          {enabled.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <input
-          list={`models-${route.taskId}`}
-          value={route.model}
-          onChange={(e) => onChange({ ...route, model: e.target.value })}
-          placeholder={t("settings.ai.modelPlaceholder")}
-          className="text-[10px] px-1.5 py-0.5 rounded w-44"
         />
-        <datalist id={`models-${route.taskId}`}>
-          {modelOptions.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
+        <Dropdown
+          value={route.model}
+          options={[
+            // Include the currently-set model even if it's not in the
+            // profile's known list (user may have typed a custom one earlier).
+            ...(route.model && !modelOptions.includes(route.model)
+              ? [{ value: route.model, label: route.model, marker: "muted" as const, hint: t("settings.ai.modelCustom") }]
+              : []),
+            ...modelOptions.map((m) => ({ value: m, label: m })),
+          ]}
+          onChange={(v) => onChange({ ...route, model: v })}
+          placeholder={modelOptions.length === 0 ? t("settings.ai.modelNoneAvailable") : t("settings.ai.modelPlaceholder")}
+          disabled={modelOptions.length === 0 && !route.model}
+          className="text-[11px] px-2 py-1 w-44"
+        />
       </div>
     </div>
   );

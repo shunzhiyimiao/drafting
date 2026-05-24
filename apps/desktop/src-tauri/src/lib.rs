@@ -26,13 +26,75 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-/// Resolve the project root the app should operate on. During `tauri dev` the
-/// process cwd is `apps/desktop/src-tauri`, which is NOT what any of our
-/// subsystems want. We climb until we find a directory that smells like the
-/// workspace root (has a `CLAUDE.md`, `pnpm-workspace.yaml`, or `.git`), and
-/// fall back to cwd otherwise.
+/// Persisted-workspace pointer. Lives in `~/.drafting/workspace.json` so it
+/// survives across sessions and `pnpm tauri dev` rebuilds.
+fn workspace_pref_path() -> std::path::PathBuf {
+    dirs_home()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".drafting")
+        .join("workspace.json")
+}
+
+fn dirs_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+}
+
+fn read_persisted_workspace() -> Option<String> {
+    let path = workspace_pref_path();
+    let data = std::fs::read_to_string(&path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&data).ok()?;
+    let current = v.get("current")?.as_str()?.to_string();
+    // Only return it if the directory still exists.
+    if std::path::Path::new(&current).is_dir() {
+        Some(current)
+    } else {
+        None
+    }
+}
+
+fn write_persisted_workspace(path: &str) -> Result<(), String> {
+    let pref_path = workspace_pref_path();
+    if let Some(parent) = pref_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    // Preserve a small recent-list while we're here (max 10 entries).
+    let mut recent: Vec<String> = std::fs::read_to_string(&pref_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("recent").and_then(|r| {
+                r.as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
+            })
+        })
+        .unwrap_or_default();
+    recent.retain(|p| p != path);
+    recent.insert(0, path.to_string());
+    recent.truncate(10);
+
+    let doc = serde_json::json!({
+        "current": path,
+        "recent": recent,
+    });
+    std::fs::write(&pref_path, serde_json::to_string_pretty(&doc).unwrap())
+        .map_err(|e| e.to_string())
+}
+
+/// Resolve the project root the app should operate on. Priority:
+///   1. Persisted workspace from `~/.drafting/workspace.json`
+///   2. Climb from process cwd looking for a CLAUDE.md / pnpm-workspace.yaml / .git marker
+///   3. Raw cwd
 #[tauri::command]
 fn app_get_cwd() -> String {
+    if let Some(persisted) = read_persisted_workspace() {
+        return persisted;
+    }
+
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut cursor: Option<&std::path::Path> = Some(cwd.as_path());
     while let Some(dir) = cursor {
@@ -45,6 +107,48 @@ fn app_get_cwd() -> String {
         cursor = dir.parent();
     }
     cwd.to_string_lossy().to_string()
+}
+
+/// Switch the active workspace. Validates that the path exists and is a
+/// directory; persists it; returns the canonical absolute path.
+/// The frontend is expected to reload after a successful call so all stores
+/// re-initialize against the new root.
+#[tauri::command]
+fn app_set_workspace(path: String) -> Result<String, String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("Path does not exist: {path}"));
+    }
+    if !p.is_dir() {
+        return Err(format!("Path is not a directory: {path}"));
+    }
+    let canonical = p
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve path: {e}"))?;
+    let canonical_str = canonical.to_string_lossy().to_string();
+    write_persisted_workspace(&canonical_str)?;
+    Ok(canonical_str)
+}
+
+/// List recently-opened workspaces (most-recent first, max 10).
+#[tauri::command]
+fn app_get_recent_workspaces() -> Vec<String> {
+    let path = workspace_pref_path();
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return Vec::new();
+    };
+    v.get("recent")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .filter(|p| std::path::Path::new(p).is_dir())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -197,6 +301,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(sync_bus)
         .manage(codegen_proxy)
         .manage(terminal_manager)
@@ -215,6 +320,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             app_get_cwd,
+            app_set_workspace,
+            app_get_recent_workspaces,
             patchboard::commands::patchboard_init,
             patchboard::commands::patchboard_list_sockets,
             patchboard::commands::patchboard_get_socket,

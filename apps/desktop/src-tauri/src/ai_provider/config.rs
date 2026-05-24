@@ -185,6 +185,22 @@ fn keyring_account(profile_id: &str) -> String {
     format!("profile:{profile_id}")
 }
 
+/// Read just `base_url` for a profile from the config file on disk, without
+/// going through `load_config` (which triggers `refresh_key_flags` and would
+/// recurse into the API key lookup we're being called from).
+fn read_profile_base_url(project_root: &Path, profile_id: &str) -> Option<String> {
+    let path = project_root.join(CONFIG_PATH);
+    let data = std::fs::read_to_string(&path).ok()?;
+    let v: Value = serde_json::from_str(&data).ok()?;
+    let profiles = v.get("profiles")?.as_array()?;
+    for p in profiles {
+        if p.get("id").and_then(|x| x.as_str()) == Some(profile_id) {
+            return p.get("baseUrl").and_then(|x| x.as_str()).map(String::from);
+        }
+    }
+    None
+}
+
 fn key_filename(profile_id: &str) -> String {
     // Profile id is a ULID — safe characters only.
     format!("{profile_id}.key")
@@ -215,6 +231,19 @@ pub fn set_api_key_for_profile(
 }
 
 pub fn get_api_key_for_profile(project_root: &Path, profile_id: &str) -> Option<String> {
+    // 1. Env var lookups (dev-friendly; avoids the macOS Keychain auth
+    //    prompt that fires on every fresh build signature). Tried first
+    //    so a developer can just `export <NAME>=...` without futzing with
+    //    Keychain. Two layers:
+    //      a) Per-profile override: DRAFTING_KEY_<profile_id>
+    //      b) Convention vars derived from the profile's base URL:
+    //         MOONSHOT_API_KEY / DASHSCOPE_API_KEY / ANTHROPIC_API_KEY /
+    //         OPENAI_API_KEY (matching what most SDKs already use).
+    if let Some(v) = env_override_for_profile(project_root, profile_id) {
+        return Some(v);
+    }
+
+    // 2. Keychain (canonical production storage path)
     let account = keyring_account(profile_id);
     if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &account) {
         if let Ok(secret) = entry.get_password() {
@@ -225,6 +254,7 @@ pub fn get_api_key_for_profile(project_root: &Path, profile_id: &str) -> Option<
         }
     }
 
+    // 3. Plaintext file fallback (only used when Keychain not available)
     let path = project_root
         .join(".drafting/keys")
         .join(key_filename(profile_id));
@@ -232,6 +262,55 @@ pub fn get_api_key_for_profile(project_root: &Path, profile_id: &str) -> Option<
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// Look up an API key from environment variables. Returns None if no
+/// matching var is set. See get_api_key_for_profile for the scheme.
+fn env_override_for_profile(project_root: &Path, profile_id: &str) -> Option<String> {
+    // Per-profile override (uppercase ULID with dashes stripped).
+    let pid_upper = profile_id.to_uppercase().replace('-', "");
+    if let Ok(v) = std::env::var(format!("DRAFTING_KEY_{pid_upper}")) {
+        let t = v.trim().to_string();
+        if !t.is_empty() {
+            return Some(t);
+        }
+    }
+
+    // Convention vars derived from base_url. Read the raw config JSON
+    // directly to avoid recursing into load_config → refresh_key_flags
+    // → get_api_key_for_profile → here → load_config → ... (stack overflow).
+    let base_url = read_profile_base_url(project_root, profile_id)?;
+    let url = base_url.to_ascii_lowercase();
+
+    let candidate_vars: &[&str] = if url.contains("moonshot") {
+        &["MOONSHOT_API_KEY", "KIMI_API_KEY"]
+    } else if url.contains("dashscope") {
+        &["DASHSCOPE_API_KEY", "QWEN_API_KEY", "TONGYI_API_KEY"]
+    } else if url.contains("anthropic.com") {
+        &["ANTHROPIC_API_KEY"]
+    } else if url.contains("api.openai.com") {
+        &["OPENAI_API_KEY"]
+    } else if url.contains("deepseek") {
+        &["DEEPSEEK_API_KEY"]
+    } else if url.contains("openrouter") {
+        &["OPENROUTER_API_KEY"]
+    } else if url.contains("groq") {
+        &["GROQ_API_KEY"]
+    } else if url.contains("together") {
+        &["TOGETHER_API_KEY"]
+    } else {
+        &[]
+    };
+
+    for name in candidate_vars {
+        if let Ok(v) = std::env::var(name) {
+            let t = v.trim().to_string();
+            if !t.is_empty() {
+                return Some(t);
+            }
+        }
+    }
+    None
 }
 
 pub fn delete_api_key_for_profile(project_root: &Path, profile_id: &str) {

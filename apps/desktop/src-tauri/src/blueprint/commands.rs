@@ -103,7 +103,12 @@ pub fn blueprint_create(
     sync_bus: State<'_, SyncBus>,
 ) -> Result<Blueprint, String> {
     let root = std::path::Path::new(&project_root);
-    let bp = parser::parse(&raw_md).map_err(|e| e.to_string())?;
+    let mut bp = parser::parse(&raw_md).map_err(|e| e.to_string())?;
+    // Auto-assign a ULID if the input lacks one (the AI draft path doesn't
+    // emit blueprintId, and we don't want it picked from the prompt either).
+    if bp.front_matter.blueprint_id.is_empty() {
+        bp.front_matter.blueprint_id = crate::blueprint::types::new_ulid();
+    }
     storage::save_blueprint(root, &bp).map_err(|e| e.to_string())?;
 
     sync_bus.publish(

@@ -1,7 +1,10 @@
-import { FileText, File, Plus, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { FileText, File, Plus, Sparkles, RefreshCw } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import type { BlueprintIndexEntry } from "../../types/blueprint-types";
 import { useT } from "../../lib/i18n";
+import { invoke } from "@tauri-apps/api/core";
+import type { BlueprintIndex } from "../../types/blueprint-types";
 
 interface Props {
   onNewBlueprint: () => void;
@@ -13,19 +16,82 @@ export function BlueprintListPanel({ onNewBlueprint, onAiDraft }: Props) {
   const index = useBlueprintStore((s) => s.index);
   const activeId = useBlueprintStore((s) => s.activeBlueprintId);
   const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
+  const projectRoot = useBlueprintStore((s) => s.projectRoot);
+  const refreshIndex = useBlueprintStore((s) => s.refreshIndex);
+  const [refreshState, setRefreshState] = useState<
+    "idle" | "running" | "done" | "error"
+  >("idle");
+  const [refreshMsg, setRefreshMsg] = useState<string>("");
 
   const features = (index?.blueprints ?? []).filter(
     (b) => b.type === "feature",
   );
   const files = (index?.blueprints ?? []).filter((b) => b.type === "file");
 
+  // Show the last segment of projectRoot — small but enough to confirm
+  // which workspace is active. Full path is in the tooltip.
+  const wsLabel =
+    (projectRoot ?? "")
+      .split("/")
+      .filter(Boolean)
+      .slice(-1)[0] ?? "(no workspace)";
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-          Blueprints
-        </span>
+        <div className="flex flex-col leading-tight min-w-0">
+          <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
+            Blueprints
+          </span>
+          <span
+            className="text-[10px] text-text-muted font-mono truncate"
+            title={projectRoot ?? ""}
+          >
+            {wsLabel}
+          </span>
+        </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              setRefreshState("running");
+              setRefreshMsg("");
+              if (!projectRoot) {
+                setRefreshState("error");
+                setRefreshMsg("project root not set");
+                setTimeout(() => setRefreshState("idle"), 3000);
+                return;
+              }
+              try {
+                const idx = await invoke<BlueprintIndex>(
+                  "blueprint_rebuild_index",
+                  { projectRoot },
+                );
+                await refreshIndex();
+                setRefreshState("done");
+                setRefreshMsg(`${idx.blueprints.length} entries`);
+                setTimeout(() => setRefreshState("idle"), 2500);
+              } catch (e: any) {
+                setRefreshState("error");
+                setRefreshMsg(e?.message ?? String(e));
+                setTimeout(() => setRefreshState("idle"), 5000);
+              }
+            }}
+            disabled={refreshState === "running"}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+              refreshState === "error"
+                ? "text-error"
+                : refreshState === "done"
+                  ? "text-success"
+                  : "text-text-muted hover:text-text-secondary"
+            }`}
+            title={t("blueprint.refreshList")}
+          >
+            <RefreshCw
+              size={11}
+              className={refreshState === "running" ? "animate-spin" : ""}
+            />
+            {refreshMsg && <span className="font-mono">{refreshMsg}</span>}
+          </button>
           <button
             onClick={onAiDraft}
             className="text-accent hover:text-accent/80"

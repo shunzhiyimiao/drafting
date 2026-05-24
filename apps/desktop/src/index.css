@@ -559,13 +559,22 @@ body::before {
 /* ---------- Form elements ---------- */
 
 input,
-select,
 textarea {
   background: var(--surface-1);
   border: 1px solid var(--border-2);
   color: var(--fg-primary);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+}
+
+/* <select> intentionally excluded from backdrop-filter: WebKit (Tauri on
+   macOS) has a long-standing bug where applying backdrop-filter to a
+   native <select> blocks the native popup from opening — clicks register
+   but nothing happens. Keep the same look without the blur. */
+select {
+  background: var(--surface-1);
+  border: 1px solid var(--border-2);
+  color: var(--fg-primary);
 }
 
 input:focus,

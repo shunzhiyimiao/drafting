@@ -26,8 +26,10 @@ interface Props {
   inputPlaceholder: string;
   /** Initial value in the input textarea (e.g. pre-filled Goal) */
   initialInput?: string;
-  /** Called when user clicks Accept. Receives the full streamed text. */
-  onAccept: (text: string) => void;
+  /** Called when user clicks Accept. Receives the (possibly user-edited)
+   * output text and the original input. May return a Promise; if it
+   * throws, the error is shown in the dialog (stays open for re-tries). */
+  onAccept: (text: string, input: string) => void | Promise<void>;
   /** Optional: override temperature (default 0.3) */
   temperature?: number;
   /** Optional: override max tokens (default 2000) */
@@ -150,9 +152,18 @@ export function AiGenerateDialog({
     }
   };
 
-  const handleAccept = () => {
-    if (!output.trim()) return;
-    onAccept(output);
+  const [accepting, setAccepting] = useState(false);
+  const handleAccept = async () => {
+    if (!output.trim() || accepting) return;
+    setError(null);
+    setAccepting(true);
+    try {
+      await onAccept(output, input);
+    } catch (e: any) {
+      setError(`Accept failed: ${e?.message ?? String(e)}`);
+    } finally {
+      setAccepting(false);
+    }
   };
 
   const handleClose = () => {
@@ -204,15 +215,30 @@ export function AiGenerateDialog({
 
           {(output || streaming) && (
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-text-muted">
-                {t("ai.preview")}
-              </label>
-              <pre className="w-full mt-1 px-2 py-2 text-xs bg-bg-primary border border-border rounded text-text-primary font-mono whitespace-pre-wrap max-h-[40vh] overflow-auto">
-                {output}
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] uppercase tracking-wider text-text-muted">
+                  {t("ai.preview")}
+                  {!streaming && (
+                    <span className="ml-2 text-[10px] normal-case text-text-muted/70">
+                      {t("ai.previewEditable")}
+                    </span>
+                  )}
+                </label>
                 {streaming && (
-                  <span className="inline-block w-1.5 h-3 bg-accent animate-pulse ml-0.5" />
+                  <span className="text-[10px] text-accent inline-flex items-center gap-1">
+                    <span className="inline-block w-1.5 h-3 bg-accent animate-pulse" />
+                    {t("ai.streaming")}
+                  </span>
                 )}
-              </pre>
+              </div>
+              <textarea
+                value={output}
+                onChange={(e) => setOutput(e.target.value)}
+                readOnly={streaming}
+                spellCheck={false}
+                className="w-full mt-1 px-2 py-2 text-xs bg-bg-primary border border-border rounded text-text-primary font-mono resize-y min-h-[180px] max-h-[40vh] focus:border-accent focus:outline-none"
+                style={{ whiteSpace: "pre-wrap" }}
+              />
             </div>
           )}
 
@@ -249,10 +275,10 @@ export function AiGenerateDialog({
             </button>
             <button
               onClick={handleAccept}
-              disabled={!output.trim() || streaming}
+              disabled={!output.trim() || streaming || accepting}
               className="glass-button-primary px-4 py-2 text-sm rounded-lg font-medium disabled:opacity-50 transition-colors"
             >
-              {acceptLabel ?? t("ai.accept")}
+              {accepting ? t("ai.applying") : (acceptLabel ?? t("ai.accept"))}
             </button>
           </div>
         </div>

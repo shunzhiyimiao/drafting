@@ -145,9 +145,16 @@ pub struct RelatedBlueprint {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct BlueprintFrontMatter {
+    // Both blueprintId and displayName are made optional at deserialization
+    // time so the AI Draft flow can omit them — blueprint_create assigns a
+    // ULID for the former, and the frontend injects a name from user input
+    // for the latter. Without these defaults, YAML parse fails before the
+    // command-level repair has a chance to run.
+    #[serde(default)]
     pub blueprint_id: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default)]
     pub blueprint_type: BlueprintType,
+    #[serde(default)]
     pub display_name: String,
     #[serde(default)]
     pub status: BlueprintStatus,

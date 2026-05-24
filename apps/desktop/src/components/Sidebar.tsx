@@ -11,6 +11,7 @@ import {
   Settings,
   Palette,
   Check,
+  FolderOpen,
 } from "lucide-react";
 import {
   useNavigationStore,
@@ -23,6 +24,12 @@ import {
   type ThemeVariant,
 } from "../stores/theme-store";
 import { useT } from "../lib/i18n";
+import {
+  getProjectRoot,
+  getRecentWorkspaces,
+  setWorkspace,
+} from "../lib/app-bootstrap";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 const topItems: { id: ViewId; icon: typeof Home; labelKey: string }[] = [
   { id: "headquarters", icon: Home, labelKey: "nav.headquarters" },
@@ -249,6 +256,7 @@ export function Sidebar() {
         ))}
       </div>
       <div className="flex flex-col items-center gap-1">
+        <WorkspacePicker />
         <ThemePicker />
         <SidebarButton
           id="settings"
@@ -259,5 +267,202 @@ export function Sidebar() {
         />
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Workspace picker (popover anchored to the sidebar button)
+// ---------------------------------------------------------------------------
+
+function WorkspacePicker() {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
+  const [current, setCurrent] = useState<string>("");
+  const [recent, setRecent] = useState<string[]>([]);
+  const [pathInput, setPathInput] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    getProjectRoot().then(setCurrent);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    getRecentWorkspaces().then(setRecent);
+    setPathInput("");
+    setError(null);
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const update = () => {
+      const r = btnRef.current!.getBoundingClientRect();
+      setPos({ left: r.right + 8, bottom: window.innerHeight - r.bottom });
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      const tgt = e.target as Node;
+      if (btnRef.current?.contains(tgt) || popRef.current?.contains(tgt))
+        return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const apply = async (path: string) => {
+    const trimmed = path.trim();
+    if (!trimmed) {
+      setError(t("workspace.errorEmpty"));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await setWorkspace(trimmed); // triggers window.location.reload
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+      setBusy(false);
+    }
+  };
+
+  const popover =
+    open && pos
+      ? createPortal(
+          <div
+            ref={popRef}
+            className="glass-thick rounded-2xl p-2 flex flex-col gap-1 min-w-[340px] max-w-[480px]"
+            style={{
+              position: "fixed",
+              left: pos.left,
+              bottom: pos.bottom,
+              zIndex: 9999,
+            }}
+          >
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-muted">
+              {t("workspace.title")}
+            </div>
+            <div className="px-3 py-1">
+              <div className="text-[10px] text-text-muted">
+                {t("workspace.current")}
+              </div>
+              <div className="text-xs text-text-primary truncate" title={current}>
+                {current || "—"}
+              </div>
+            </div>
+
+            <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-text-muted">
+              {t("workspace.openOther")}
+            </div>
+            <div className="px-3 flex gap-2 items-center">
+              <button
+                onClick={async () => {
+                  setError(null);
+                  try {
+                    const selected = await openDialog({
+                      directory: true,
+                      multiple: false,
+                      defaultPath: current || undefined,
+                      title: t("workspace.title"),
+                    });
+                    if (typeof selected === "string" && selected) {
+                      await apply(selected);
+                    }
+                  } catch (e: any) {
+                    setError(e?.message ?? String(e));
+                  }
+                }}
+                disabled={busy}
+                className="glass-button-primary px-3 py-2 text-xs rounded-lg font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+              >
+                <FolderOpen size={12} />
+                {t("workspace.browseFolder")}
+              </button>
+              <span className="text-[10px] text-text-muted">
+                {t("workspace.orPaste")}
+              </span>
+              <input
+                value={pathInput}
+                onChange={(e) => setPathInput(e.target.value)}
+                placeholder={t("workspace.pathPlaceholder")}
+                disabled={busy}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") apply(pathInput);
+                }}
+                className="flex-1 text-xs px-2 py-1.5 rounded font-mono min-w-[120px]"
+              />
+            </div>
+            {error && (
+              <p className="px-3 mt-1 text-[11px] text-error break-words">
+                {error}
+              </p>
+            )}
+
+            {recent.length > 0 && (
+              <>
+                <div className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-text-muted">
+                  {t("workspace.recent")}
+                </div>
+                <div className="flex flex-col gap-0.5 max-h-48 overflow-y-auto">
+                  {recent.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => apply(p)}
+                      disabled={busy}
+                      className={`text-left px-3 py-1.5 rounded-lg text-xs font-mono truncate hover:bg-white/5 ${
+                        p === current
+                          ? "text-text-primary bg-white/5"
+                          : "text-text-secondary"
+                      }`}
+                      title={p}
+                    >
+                      {p === current && (
+                        <Check size={10} className="inline mr-1.5 text-accent" />
+                      )}
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>,
+          document.body,
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={() => setOpen((v) => !v)}
+        title={t("workspace.title")}
+        className="relative w-10 h-10 flex items-center justify-center rounded-xl text-text-secondary hover:text-text-primary transition-colors"
+      >
+        <span className="absolute inset-0 rounded-xl opacity-0 hover:opacity-100 bg-white/5 transition-opacity" />
+        <FolderOpen size={18} className="relative z-10" />
+      </button>
+      {popover}
+    </>
   );
 }
