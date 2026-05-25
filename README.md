@@ -14,7 +14,7 @@
 
 ---
 
-## 这是什么
+## drafting是什么
 
 Drafting 是给独立开发者(Indie Hacker)用的桌面 IDE,把 AI 协作开发拆成三个层次,各管一摊:
 
