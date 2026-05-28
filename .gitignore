@@ -34,3 +34,6 @@ target/
 # Runtime-created data in dev working directory (Tauri runs from src-tauri/)
 /apps/desktop/src-tauri/blueprints/
 /apps/desktop/src-tauri/.patchboard/
+
+# Personal local todo — never upload
+/todolist.md
