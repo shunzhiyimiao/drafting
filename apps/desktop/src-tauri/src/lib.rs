@@ -335,6 +335,7 @@ pub fn run() {
             patchboard::commands::patchboard_delete_canvas,
             patchboard::commands::patchboard_validate_canvas,
             patchboard::commands::patchboard_classify_wires,
+            patchboard::commands::patchboard_existing_generated_output,
             patchboard_generate_code,
             blueprint::commands::blueprint_init,
             blueprint::commands::blueprint_list,

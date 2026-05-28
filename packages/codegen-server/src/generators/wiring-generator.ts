@@ -189,7 +189,8 @@ function sanitizeFileName(name: string): string {
 }
 
 function getInterfaceName(fullName: string): string {
-  const parts = fullName.split("/");
+  // fullName is dot-separated; the TS identifier is the last segment.
+  const parts = fullName.split(".");
   return parts[parts.length - 1];
 }
 

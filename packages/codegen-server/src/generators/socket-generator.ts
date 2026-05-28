@@ -91,12 +91,16 @@ export function generateSockets(params: GenerateSocketsParams): string[] {
 }
 
 function getInterfaceName(fullName: string): string {
-  const parts = fullName.split("/");
+  // fullName is dot-separated (e.g. "email.EmailSender"). The TS interface
+  // identifier is the last segment only — dots are illegal in identifiers.
+  const parts = fullName.split(".");
   return parts[parts.length - 1];
 }
 
 function getSocketRelPath(fullName: string): string {
-  return fullName.replace(/\//g, "/") + ".ts";
+  // Namespace segments map to directories: "email.EmailSender" →
+  // "email/EmailSender.ts".
+  return fullName.replace(/\./g, "/") + ".ts";
 }
 
 function getSocketFilePath(socketsDir: string, fullName: string): string {

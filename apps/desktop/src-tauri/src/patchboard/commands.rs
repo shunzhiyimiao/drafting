@@ -18,6 +18,30 @@ fn pb_origin() -> Origin {
 // Initialization
 // ---------------------------------------------------------------------------
 
+/// Returns the list of generated package dirs that already contain output,
+/// so the UI can warn before a regeneration overwrites them.
+#[tauri::command]
+pub fn patchboard_existing_generated_output(project_root: String) -> Vec<String> {
+    let root = std::path::Path::new(&project_root);
+    let mut found = Vec::new();
+    for pkg in ["sockets", "adapters", "wiring"] {
+        let dir = root.join(format!("packages/{pkg}/src"));
+        let has_ts = std::fs::read_dir(&dir)
+            .map(|rd| {
+                rd.flatten().any(|e| {
+                    let p = e.path();
+                    p.extension().map_or(false, |x| x == "ts")
+                        || p.is_dir() // namespaced sockets land in subdirs
+                })
+            })
+            .unwrap_or(false);
+        if has_ts {
+            found.push(format!("packages/{pkg}"));
+        }
+    }
+    found
+}
+
 #[tauri::command]
 pub fn patchboard_init(project_root: String) -> Result<(), String> {
     let root = std::path::Path::new(&project_root);

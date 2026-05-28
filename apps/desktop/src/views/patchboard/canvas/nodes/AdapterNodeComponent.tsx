@@ -3,10 +3,17 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { Box, Plug, Key } from "lucide-react";
 import type { AdapterConstructorParam } from "../../../../types/patchboard-types";
 
+export interface AdapterImplement {
+  /** Socket ULID — used as the Handle id so wires reference the real ID. */
+  id: string;
+  /** Human-readable Socket name — shown in the row. */
+  label: string;
+}
+
 export interface AdapterNodeData {
   adapterId: string;
   name: string;
-  implements: string[];
+  implements: AdapterImplement[];
   constructorParams: AdapterConstructorParam[];
   isEntryPoint: boolean;
   [key: string]: unknown;
@@ -47,18 +54,18 @@ function AdapterNodeComponentInner({ data, selected }: NodeProps) {
           Drag from the dot to start a wire that follows the cursor. */}
       {nodeData.implements.length > 0 && (
         <div className="flex flex-col">
-          {nodeData.implements.map((socketId) => (
+          {nodeData.implements.map((impl) => (
             <div
-              key={socketId}
+              key={impl.id}
               className="relative flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-secondary border-b last:border-b-0 border-border/60"
-              title={socketId}
+              title={impl.label}
             >
               <Plug size={10} className="shrink-0 text-success" />
-              <span className="truncate flex-1">{socketId}</span>
+              <span className="truncate flex-1">{impl.label}</span>
               <Handle
                 type="source"
                 position={Position.Right}
-                id={socketId}
+                id={impl.id}
                 style={{
                   position: "absolute",
                   right: -6,

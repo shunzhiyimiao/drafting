@@ -17,9 +17,10 @@ import { useT } from "../../lib/i18n";
 interface TreeNodeProps {
   entry: DirEntry;
   depth: number;
+  onFileOpen?: (path: string) => void;
 }
 
-function TreeNode({ entry, depth }: TreeNodeProps) {
+function TreeNode({ entry, depth, onFileOpen }: TreeNodeProps) {
   const expandedDirs = useEditorStore((s) => s.expandedDirs);
   const tree = useEditorStore((s) => s.tree);
   const toggleDir = useEditorStore((s) => s.toggleDir);
@@ -54,6 +55,7 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
       await toggleDir(entry.path);
     } else {
       await openFile(entry.path);
+      onFileOpen?.(entry.path);
     }
   };
 
@@ -98,7 +100,12 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
       {entry.isDir && isOpen && tree[entry.path] && (
         <>
           {tree[entry.path].map((child) => (
-            <TreeNode key={child.path} entry={child} depth={depth + 1} />
+            <TreeNode
+              key={child.path}
+              entry={child}
+              depth={depth + 1}
+              onFileOpen={onFileOpen}
+            />
           ))}
         </>
       )}
@@ -106,7 +113,13 @@ function TreeNode({ entry, depth }: TreeNodeProps) {
   );
 }
 
-export function FileTree() {
+/** Reusable tree body (no outer header). Shared by the Editor view's
+ *  FileTree and the right-side FILES panel. */
+export function FileTreeBody({
+  onFileOpen,
+}: {
+  onFileOpen?: (path: string) => void;
+}) {
   const t = useT();
   const initialize = useEditorStore((s) => s.initialize);
   const tree = useEditorStore((s) => s.tree);
@@ -119,21 +132,34 @@ export function FileTree() {
   const rootEntries = tree[""] ?? [];
 
   return (
+    <div className="flex-1 overflow-auto py-1">
+      {rootEntries.length === 0 ? (
+        <p className="p-3 text-xs text-text-muted">{t("editor.loading")}</p>
+      ) : (
+        rootEntries.map((entry) => (
+          <TreeNode
+            key={entry.path}
+            entry={entry}
+            depth={0}
+            onFileOpen={onFileOpen}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+export function FileTree() {
+  const t = useT();
+
+  return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
         <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
           {t("editor.explorer")}
         </span>
       </div>
-      <div className="flex-1 overflow-auto py-1">
-        {rootEntries.length === 0 ? (
-          <p className="p-3 text-xs text-text-muted">{t("editor.loading")}</p>
-        ) : (
-          rootEntries.map((entry) => (
-            <TreeNode key={entry.path} entry={entry} depth={0} />
-          ))
-        )}
-      </div>
+      <FileTreeBody />
     </div>
   );
 }

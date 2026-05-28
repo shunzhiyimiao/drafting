@@ -60,14 +60,16 @@ export function useCanvasState() {
       const isEntryPoint = activeCanvas.entryPoints.some(
         (ep) => ep.adapterId === adapter.id,
       );
-      const socketNames = adapter.implements.map((sid) => {
+      // Handle id MUST be the Socket ULID (so wires reference the real id
+      // that codegen validation checks against); the label is just display.
+      const implementsList = adapter.implements.map((sid) => {
         const entry = registry?.sockets.find((s) => s.id === sid);
-        return entry?.displayName ?? sid;
+        return { id: sid, label: entry?.displayName ?? sid };
       });
       const data: AdapterNodeData = {
         adapterId: adapter.id,
         name: adapter.name,
-        implements: socketNames,
+        implements: implementsList,
         constructorParams: adapter.constructorParams,
         isEntryPoint,
       };
@@ -103,7 +105,8 @@ export function useCanvasState() {
         target: wire.toAdapterId,
         targetHandle: wire.toParamName,
         type: "default",
-        animated: bridge?.level !== "incompatible",
+        // Static by default; only the selected wire animates.
+        animated: isSelected,
         selected: isSelected,
         style,
         label: bridge && bridge.level !== "lossless" ? bridge.level : undefined,

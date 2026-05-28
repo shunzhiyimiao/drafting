@@ -25,7 +25,7 @@ const NODE_TYPES = {
   adapter: AdapterNodeComponent,
 };
 
-const DEFAULT_EDGE_OPTIONS = { animated: true };
+const DEFAULT_EDGE_OPTIONS = { animated: false };
 const CONNECTION_LINE_STYLE = {
   stroke: "#ff00aa",
   strokeWidth: 3,

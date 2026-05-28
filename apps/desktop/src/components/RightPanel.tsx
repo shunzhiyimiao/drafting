@@ -1,10 +1,13 @@
 import { FolderTree, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useLayoutStore } from "../stores/layout-store";
+import { useNavigationStore } from "../stores/navigation-store";
+import { FileTreeBody } from "../views/editor/FileTree";
 import { useT } from "../lib/i18n";
 
 export function RightPanel() {
   const t = useT();
   const { rightPanelCollapsed, toggleRightPanel } = useLayoutStore();
+  const setActiveView = useNavigationStore((s) => s.setActiveView);
 
   if (rightPanelCollapsed) {
     return (
@@ -33,9 +36,13 @@ export function RightPanel() {
           <PanelRightClose size={14} />
         </button>
       </div>
-      <div className="flex-1 p-3 text-text-muted text-xs">
-        File tree will be rendered here.
-      </div>
+      <FileTreeBody
+        onFileOpen={() => {
+          // Opening a file from the FILES panel jumps to the editor so the
+          // newly-opened tab is visible.
+          setActiveView("editor");
+        }}
+      />
     </div>
   );
 }

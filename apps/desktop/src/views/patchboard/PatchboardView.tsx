@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ReactFlowProvider } from "@xyflow/react";
 import { X, Check, Sparkles } from "lucide-react";
 import { usePatchboardStore } from "../../stores/patchboard-store";
@@ -117,6 +118,7 @@ export function PatchboardView() {
   const [adapterName, setAdapterName] = useState("");
   const [selectedSocketIds, setSelectedSocketIds] = useState<Set<string>>(new Set());
   const [confirmDeleteCanvas, setConfirmDeleteCanvas] = useState(false);
+  const [confirmOverwrite, setConfirmOverwrite] = useState<string[] | null>(null);
   const [projectRoot, setProjectRoot] = useState("");
 
   useEffect(() => {
@@ -194,7 +196,8 @@ export function PatchboardView() {
 
   const generateCode = usePatchboardStore((s) => s.generateCode);
 
-  const handleGenerate = useCallback(async () => {
+  // Run the actual generation (after any overwrite confirmation).
+  const runGenerate = useCallback(async () => {
     try {
       const result = await generateCode();
       if (result) {
@@ -210,6 +213,23 @@ export function PatchboardView() {
       setTimeout(() => setValidationMsg(null), 5000);
     }
   }, [generateCode]);
+
+  // Pre-flight: if generated output already exists, ask before overwriting.
+  const handleGenerate = useCallback(async () => {
+    try {
+      const existing = await invoke<string[]>(
+        "patchboard_existing_generated_output",
+        { projectRoot },
+      );
+      if (existing.length > 0) {
+        setConfirmOverwrite(existing);
+        return;
+      }
+    } catch {
+      // If the check fails, fall through to generation (don't block).
+    }
+    await runGenerate();
+  }, [projectRoot, runGenerate]);
 
   const handleDeleteCanvas = useCallback(async () => {
     if (!activeCanvasId) return;
@@ -428,6 +448,52 @@ export function PatchboardView() {
                 className="glass-button-error px-4 py-2 text-sm rounded-lg font-medium transition-colors"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm overwrite of existing generated code */}
+      {confirmOverwrite && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setConfirmOverwrite(null)}
+        >
+          <div
+            className="glass-thick rounded-2xl w-[420px] p-5 flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-medium text-text-primary">
+              已存在生成的代码
+            </h3>
+            <p className="text-xs text-text-muted">
+              以下目录已经有生成的文件,重新生成会覆盖它们:
+            </p>
+            <ul className="text-xs text-text-secondary font-mono bg-bg-primary rounded p-2 flex flex-col gap-0.5">
+              {confirmOverwrite.map((d) => (
+                <li key={d}>· {d}/src</li>
+              ))}
+            </ul>
+            <p className="text-[10px] text-text-muted">
+              注:sockets / wiring 是工具拥有,本就每次覆盖;adapters
+              是你拥有,已存在的文件不会被覆盖(只补缺失的)。
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmOverwrite(null)}
+                className="glass-button px-4 py-2 text-sm rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={async () => {
+                  setConfirmOverwrite(null);
+                  await runGenerate();
+                }}
+                className="glass-button-primary px-4 py-2 text-sm rounded-lg font-medium transition-colors"
+              >
+                覆盖生成
               </button>
             </div>
           </div>

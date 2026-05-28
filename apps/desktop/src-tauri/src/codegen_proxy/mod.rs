@@ -97,13 +97,12 @@ impl CodegenProxy {
             }
         }
 
-        // Start the codegen-server
-        let project_root = self.project_root.lock().await.clone();
-        let server_path = if project_root.is_empty() {
-            "packages/codegen-server/src/index.ts".to_string()
-        } else {
-            format!("{}/packages/codegen-server/src/index.ts", project_root)
-        };
+        // Resolve the codegen-server SCRIPT location. This is part of the
+        // Drafting installation, NOT the user's project — the target project
+        // (where files get written) is passed separately via RPC params.
+        // The user's workspace usually has no codegen-server of its own.
+        let server_path = locate_codegen_server()
+            .ok_or_else(|| "Could not locate codegen-server script. Expected packages/codegen-server/src/index.ts in the Drafting install.".to_string())?;
 
         // Try to find npx/tsx in PATH. On Windows, the launcher is `npx.cmd`.
         let npx_cmd = if cfg!(target_os = "windows") { "npx.cmd" } else { "npx" };
@@ -114,7 +113,7 @@ impl CodegenProxy {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn codegen-server: {}", e))?;
+            .map_err(|e| format!("Failed to spawn codegen-server ({server_path}): {e}"))?;
 
         log::info!("codegen-server spawned");
         *child_lock = Some(child);
@@ -127,4 +126,42 @@ impl CodegenProxy {
             let _ = child.kill().await;
         }
     }
+}
+
+/// Find the codegen-server entry script (`packages/codegen-server/src/index.ts`).
+/// It ships with Drafting, so we resolve it relative to this crate's location
+/// (CARGO_MANIFEST_DIR = .../apps/desktop/src-tauri) by climbing to the
+/// workspace root. Falls back to the current working directory.
+fn locate_codegen_server() -> Option<String> {
+    const REL: &str = "packages/codegen-server/src/index.ts";
+
+    // 1. Climb from the compiled crate's manifest dir (works in dev + when the
+    //    repo layout is preserved).
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut cursor = manifest.to_path_buf();
+    for _ in 0..6 {
+        let candidate = cursor.join(REL);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+        if !cursor.pop() {
+            break;
+        }
+    }
+
+    // 2. Climb from the current working directory.
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut cursor = cwd;
+        for _ in 0..6 {
+            let candidate = cursor.join(REL);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+            if !cursor.pop() {
+                break;
+            }
+        }
+    }
+
+    None
 }
