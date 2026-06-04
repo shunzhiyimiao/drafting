@@ -1,13 +1,30 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+
+use tauri::Manager;
 
 /// JSON-RPC client that manages a Node.js codegen-server child process.
 /// Communicates via stdio (newline-delimited JSON).
 pub struct CodegenProxy {
     child: Arc<Mutex<Option<Child>>>,
     project_root: Arc<Mutex<String>>,
+    /// Tauri app handle, injected once at startup via `set_app_handle`. Used to
+    /// locate the bundled `codegen-server.cjs` inside the app's resource dir in
+    /// release builds. Stored behind a `std::sync::Mutex` (not tokio) so the
+    /// setter stays synchronous and can be called from the Tauri `setup` hook
+    /// without `block_on`.
+    app: Arc<std::sync::Mutex<Option<tauri::AppHandle>>>,
+}
+
+/// How to launch the codegen-server child process.
+enum Launcher {
+    /// Release: bundled self-contained CommonJS, run with plain `node`.
+    Bundled(PathBuf),
+    /// Dev: TypeScript entry, run via `npx tsx`.
+    Dev(String),
 }
 
 impl CodegenProxy {
@@ -15,6 +32,15 @@ impl CodegenProxy {
         Self {
             child: Arc::new(Mutex::new(None)),
             project_root: Arc::new(Mutex::new(String::new())),
+            app: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// Inject the Tauri AppHandle (called once from the `setup` hook) so the
+    /// proxy can resolve the bundled codegen-server.cjs from the resource dir.
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        if let Ok(mut guard) = self.app.lock() {
+            *guard = Some(handle);
         }
     }
 
@@ -97,27 +123,83 @@ impl CodegenProxy {
             }
         }
 
-        // Resolve the codegen-server SCRIPT location. This is part of the
-        // Drafting installation, NOT the user's project — the target project
-        // (where files get written) is passed separately via RPC params.
-        // The user's workspace usually has no codegen-server of its own.
-        let server_path = locate_codegen_server()
-            .ok_or_else(|| "Could not locate codegen-server script. Expected packages/codegen-server/src/index.ts in the Drafting install.".to_string())?;
-
-        // Try to find npx/tsx in PATH. On Windows, the launcher is `npx.cmd`.
-        let npx_cmd = if cfg!(target_os = "windows") { "npx.cmd" } else { "npx" };
-        let child = Command::new(npx_cmd)
-            .arg("tsx")
-            .arg(&server_path)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn codegen-server ({server_path}): {e}"))?;
+        // Resolve how to launch codegen-server. It is part of the Drafting
+        // installation, NOT the user's project — the target project (where files
+        // get written) is passed separately via RPC params.
+        let child = match self.resolve_launcher() {
+            Some(Launcher::Bundled(cjs)) => {
+                // On Windows CreateProcess does not auto-append .exe to a bare
+                // name, so spell it out.
+                let node = if cfg!(target_os = "windows") {
+                    "node.exe"
+                } else {
+                    "node"
+                };
+                Command::new(node)
+                    .arg(&cjs)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .map_err(|e| {
+                        format!(
+                            "Failed to spawn codegen-server (node {}): {e}. \
+                             Drafting needs Node.js >= 18 in PATH.",
+                            cjs.display()
+                        )
+                    })?
+            }
+            Some(Launcher::Dev(script)) => {
+                // On Windows the launcher is `npx.cmd`.
+                let npx = if cfg!(target_os = "windows") {
+                    "npx.cmd"
+                } else {
+                    "npx"
+                };
+                Command::new(npx)
+                    .arg("tsx")
+                    .arg(&script)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .map_err(|e| {
+                        format!(
+                            "Failed to spawn codegen-server (npx tsx {script}): {e}. \
+                             Drafting needs Node.js >= 18 in PATH."
+                        )
+                    })?
+            }
+            None => {
+                return Err("Could not locate codegen-server: neither the bundled \
+                     codegen-server.cjs (app resource dir) nor the dev entry \
+                     (packages/codegen-server/src/index.ts) was found."
+                    .to_string());
+            }
+        };
 
         log::info!("codegen-server spawned");
         *child_lock = Some(child);
         Ok(())
+    }
+
+    /// Resolve the launch strategy: prefer the bundled `.cjs` shipped in the
+    /// app's resource dir (release); fall back to the TS source via tsx (dev).
+    fn resolve_launcher(&self) -> Option<Launcher> {
+        // 1. Release: <resource_dir>/codegen-server/codegen-server.cjs
+        //    (see tauri.conf.json bundle.resources).
+        if let Ok(guard) = self.app.lock() {
+            if let Some(app) = guard.as_ref() {
+                if let Ok(res_dir) = app.path().resource_dir() {
+                    let cjs = res_dir.join("codegen-server").join("codegen-server.cjs");
+                    if cjs.is_file() {
+                        return Some(Launcher::Bundled(cjs));
+                    }
+                }
+            }
+        }
+        // 2. Dev: climb the source tree for the TS entry.
+        locate_codegen_server().map(Launcher::Dev)
     }
 
     pub async fn shutdown(&self) {
@@ -128,8 +210,8 @@ impl CodegenProxy {
     }
 }
 
-/// Find the codegen-server entry script (`packages/codegen-server/src/index.ts`).
-/// It ships with Drafting, so we resolve it relative to this crate's location
+/// Find the codegen-server dev entry script (`packages/codegen-server/src/index.ts`).
+/// Used only in dev: resolve it relative to this crate's location
 /// (CARGO_MANIFEST_DIR = .../apps/desktop/src-tauri) by climbing to the
 /// workspace root. Falls back to the current working directory.
 fn locate_codegen_server() -> Option<String> {

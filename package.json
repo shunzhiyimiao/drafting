@@ -4,6 +4,8 @@
   "scripts": {
     "dev": "pnpm --filter @drafting/desktop dev",
     "build": "pnpm --filter @drafting/desktop build",
+    "build:codegen": "pnpm --filter @drafting/codegen-server build",
+    "build:app": "pnpm build:codegen && pnpm build",
     "tauri": "pnpm --filter @drafting/desktop tauri"
   }
 }
