@@ -13,6 +13,7 @@ import { AiGenerateDialog } from "../../components/AiGenerateDialog";
 import type { AdapterNode } from "../../types/patchboard-types";
 import { getProjectRoot } from "../../lib/app-bootstrap";
 import { useT } from "../../lib/i18n";
+import { notify } from "../../stores/notification-store";
 
 const ADAPTER_SUGGEST_SYSTEM_PROMPT = `You are designing a TypeScript Adapter class for the Drafting Patchboard architecture. An Adapter is a concrete implementation of one or more Sockets (interfaces).
 
@@ -201,16 +202,31 @@ export function PatchboardView() {
     try {
       const result = await generateCode();
       if (result) {
-        setValidationMsg(
-          result.success
-            ? `Generated ${result.files.length} files: ${result.files.join(", ")}`
-            : `Generation failed: ${result.errors.join("; ")}`,
-        );
-        setTimeout(() => setValidationMsg(null), 8000);
+        if (result.success) {
+          setValidationMsg(
+            `Generated ${result.files.length} files: ${result.files.join(", ")}`,
+          );
+          setTimeout(() => setValidationMsg(null), 8000);
+        } else {
+          notify({
+            severity: "error",
+            title: t("notif.codegen.failed.title"),
+            message: result.errors.join("; "),
+            hint: t("notif.codegen.failed.hint.generic"),
+          });
+        }
       }
     } catch (err: any) {
-      setValidationMsg(`Error: ${err.message ?? err}`);
-      setTimeout(() => setValidationMsg(null), 5000);
+      const msg = err?.message ?? String(err);
+      const isNode = /node\.js|needs node|ENOENT/i.test(msg);
+      notify({
+        severity: "error",
+        title: t("notif.codegen.failed.title"),
+        message: msg,
+        hint: isNode
+          ? t("notif.codegen.failed.hint.node")
+          : t("notif.codegen.failed.hint.generic"),
+      });
     }
   }, [generateCode]);
 

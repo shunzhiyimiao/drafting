@@ -5,8 +5,10 @@ import { RightPanel } from "./components/RightPanel";
 import { BottomPanel } from "./components/BottomPanel";
 import { CommandPalette } from "./components/CommandPalette";
 import { SearchDialog } from "./components/SearchDialog";
+import { Toaster } from "./components/Toaster";
 import { useLayoutStore } from "./stores/layout-store";
 import { useNavigationStore, type ViewId } from "./stores/navigation-store";
+import { startNotificationBridge } from "./lib/notification-bridge";
 
 function TooSmallScreen() {
   return (
@@ -39,6 +41,15 @@ function App() {
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
+  }, []);
+
+  // Surface backend failure events (LSP / AI / budget) as toast notifications.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    startNotificationBridge().then((u) => {
+      unlisten = u;
+    });
+    return () => unlisten?.();
   }, []);
 
   // Global keyboard shortcuts
@@ -135,6 +146,7 @@ function App() {
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
       />
+      <Toaster />
       {chordBuffer && (
         <div className="glass-thick fixed bottom-4 right-4 rounded-lg px-3 py-1.5 text-xs text-text-secondary">
           {chordBuffer === "cmd-k" ? "Cmd+K ..." : "g ..."}

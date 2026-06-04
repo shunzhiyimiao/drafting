@@ -17,6 +17,46 @@ const translations: Record<string, Record<Locale, string>> = {
   "nav.terminal": { zh: "终端", en: "Terminal" },
   "nav.settings": { zh: "设置", en: "Settings" },
 
+  // -- Notifications (A5: user-visible error states) --------------------
+  "notif.dismiss": { zh: "关闭", en: "Dismiss" },
+  "notif.lsp.failed.title": {
+    zh: "TypeScript 语言服务异常",
+    en: "TypeScript language server error",
+  },
+  "notif.lsp.failed.hint": {
+    zh: "代码补全 / 跳转 / 诊断暂时不可用。重开工程或检查 Node 后重试。",
+    en: "Code completion, go-to-definition and diagnostics are unavailable. Reopen the project or check Node, then retry.",
+  },
+  "notif.ai.failed.title": { zh: "AI 调用失败", en: "AI request failed" },
+  "notif.ai.failed.hint.auth": {
+    zh: "API 密钥缺失或无效，请在 设置 → AI 配置 中检查。",
+    en: "API key missing or invalid — check Settings → AI Config.",
+  },
+  "notif.ai.failed.hint.generic": {
+    zh: "请检查网络与 AI 配置后重试。",
+    en: "Check your network and AI settings, then retry.",
+  },
+  "notif.ai.budgetExceeded.title": {
+    zh: "已达月度 AI 预算上限",
+    en: "Monthly AI budget reached",
+  },
+  "notif.ai.budgetExceeded.hint": {
+    zh: "云端 AI 已暂停，本地模型仍可用。可在 设置 中调整预算。",
+    en: "Cloud AI is paused; local models still work. Adjust the budget in Settings.",
+  },
+  "notif.codegen.failed.title": {
+    zh: "代码生成失败",
+    en: "Code generation failed",
+  },
+  "notif.codegen.failed.hint.node": {
+    zh: "未找到 Node.js。请安装 Node ≥ 18 并确保它在 PATH 中。",
+    en: "Node.js not found. Install Node ≥ 18 and make sure it is on your PATH.",
+  },
+  "notif.codegen.failed.hint.generic": {
+    zh: "请查看上方错误详情。",
+    en: "See the error details above.",
+  },
+
   // -- Settings tabs ----------------------------------------------------
   "settings.title": { zh: "设置", en: "Settings" },
   "settings.tab.general": { zh: "通用", en: "General" },
