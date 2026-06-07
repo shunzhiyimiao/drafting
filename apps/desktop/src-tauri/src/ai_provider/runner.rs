@@ -126,7 +126,24 @@ impl AiRunner {
         let task_label = format!("{:?}", task_id);
 
         // Open the upstream stream first so we report errors synchronously.
-        let inner = adapter.stream_chat(&ctx, stream_id.clone(), req).await?;
+        // An establishment-time failure (e.g. a 401 from a bad/missing API key)
+        // returns Err here without ever yielding a StreamEvent::Failed, so it
+        // would bypass the StreamFailed event published below. Surface it on the
+        // bus explicitly — otherwise the global error toast misses the most
+        // common AI failure (wrong/absent key).
+        let inner = match adapter.stream_chat(&ctx, stream_id.clone(), req).await {
+            Ok(inner) => inner,
+            Err(e) => {
+                sync_bus.publish(
+                    Origin::new("ai_provider"),
+                    SyncBusEvent::AiProvider(AiProviderEvent::StreamFailed {
+                        stream_id: stream_id.clone(),
+                        error: e.clone(),
+                    }),
+                );
+                return Err(e);
+            }
+        };
 
         // Sync Bus: stream started.
         sync_bus.publish(
