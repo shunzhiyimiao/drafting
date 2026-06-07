@@ -315,6 +315,11 @@ pub fn run() {
             let bus = app.state::<SyncBus>();
             sync_bus::bridge::start_bridge(handle, &bus);
             log::info!("SyncBus initialized and bridge started");
+
+            // Give the codegen proxy the app handle so it can locate the bundled
+            // codegen-server.cjs from the resource dir in release builds.
+            app.state::<CodegenProxy>().set_app_handle(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
