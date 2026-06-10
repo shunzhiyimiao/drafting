@@ -64,6 +64,11 @@ export interface Canvas {
   entryPoints: EntryPoint[];
 }
 
+export interface GenerateScaffoldingParams {
+  projectRoot: string;
+  scopeName: string;
+}
+
 export interface GenerateSocketsParams {
   projectRoot: string;
   sockets: SocketDefinition[];

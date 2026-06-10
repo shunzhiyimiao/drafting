@@ -204,6 +204,27 @@ async fn patchboard_generate_code(
 
     let mut all_files = Vec::new();
 
+    // 0. Scaffold workspace files (root package.json / pnpm-workspace.yaml /
+    //    tsconfig with paths aliases / packages/*/package.json) so the
+    //    generated @scope packages resolve in the editor. Skip-if-exists:
+    //    never overwrites user files.
+    let result = codegen
+        .call(
+            "generateScaffolding",
+            serde_json::json!({
+                "projectRoot": project_root,
+                "scopeName": config.scope_name,
+            }),
+        )
+        .await?;
+    if let Some(files) = result.get("files").and_then(|f| f.as_array()) {
+        for f in files {
+            if let Some(s) = f.as_str() {
+                all_files.push(s.to_string());
+            }
+        }
+    }
+
     // 1. Generate sockets
     let sockets_json = serde_json::to_value(&sockets).map_err(|e| e.to_string())?;
     let result = codegen

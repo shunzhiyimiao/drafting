@@ -2,11 +2,17 @@ import type { JsonRpcRequest, JsonRpcResponse } from "./types.js";
 import { generateSockets } from "./generators/socket-generator.js";
 import { generateAdapterSkeleton } from "./generators/adapter-skeleton.js";
 import { generateWiring } from "./generators/wiring-generator.js";
+import { generateScaffolding } from "./generators/scaffolding.js";
 
 type Handler = (params: any) => unknown;
 
 const handlers: Record<string, Handler> = {
   ping: () => ({ status: "ok" }),
+
+  generateScaffolding: (params) => {
+    const files = generateScaffolding(params);
+    return { files };
+  },
 
   generateSockets: (params) => {
     const files = generateSockets(params);
