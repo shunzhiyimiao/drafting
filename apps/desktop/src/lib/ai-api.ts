@@ -53,11 +53,15 @@ export async function cloneProfile(
   return invoke("ai_clone_profile", { projectRoot, sourceProfileId });
 }
 
+/** Where the key was stored: "keychain" (normal) or "plaintextFile"
+ *  (keychain unavailable — caller must warn the user loudly). */
+export type KeyStorage = "keychain" | "plaintextFile";
+
 export async function setProfileApiKey(
   projectRoot: string,
   profileId: string,
   apiKey: string,
-): Promise<void> {
+): Promise<KeyStorage> {
   return invoke("ai_set_profile_api_key", { projectRoot, profileId, apiKey });
 }
 

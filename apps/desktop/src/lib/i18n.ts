@@ -52,6 +52,14 @@ const translations: Record<string, Record<Locale, string>> = {
     zh: "该文件不会发送给 AI。详见 .drafting/local/ai-audit.jsonl。",
     en: "This file was not sent to the AI. See .drafting/local/ai-audit.jsonl.",
   },
+  "notif.ai.keyPlaintext.title": {
+    zh: "API key 以明文存储",
+    en: "API key stored as plaintext",
+  },
+  "notif.ai.keyPlaintext.hint": {
+    zh: "系统钥匙串不可用，key 已写入 .drafting/keys/（仅当前用户可读，已确保不进 Git）。建议改用环境变量。",
+    en: "System keychain unavailable; the key was written to .drafting/keys/ (owner-only, kept out of Git). Consider using an env var instead.",
+  },
   "notif.codegen.failed.title": {
     zh: "代码生成失败",
     en: "Code generation failed",

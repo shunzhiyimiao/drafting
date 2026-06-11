@@ -206,11 +206,20 @@ fn key_filename(profile_id: &str) -> String {
     format!("{profile_id}.key")
 }
 
+/// Where an API key ended up when saving. The frontend warns loudly on
+/// `PlaintextFile` — plaintext on disk is a last resort, never silent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KeyStorage {
+    Keychain,
+    PlaintextFile,
+}
+
 pub fn set_api_key_for_profile(
     project_root: &Path,
     profile_id: &str,
     key: &str,
-) -> Result<(), String> {
+) -> Result<KeyStorage, String> {
     let account = keyring_account(profile_id);
     if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &account) {
         if entry.set_password(key).is_ok() {
@@ -220,14 +229,54 @@ pub fn set_api_key_for_profile(
                     .join(".drafting/keys")
                     .join(key_filename(profile_id)),
             );
-            return Ok(());
+            return Ok(KeyStorage::Keychain);
         }
     }
 
+    // Keychain unavailable — plaintext file fallback. Restrict permissions
+    // to the owner and make sure `.drafting/` can never reach Git.
     let key_dir = project_root.join(".drafting/keys");
     std::fs::create_dir_all(&key_dir).map_err(|e| e.to_string())?;
-    std::fs::write(key_dir.join(key_filename(profile_id)), key).map_err(|e| e.to_string())?;
-    Ok(())
+    let key_path = key_dir.join(key_filename(profile_id));
+    std::fs::write(&key_path, key).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&key_dir, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+    }
+    ensure_drafting_gitignored(project_root);
+    log::warn!(
+        "keychain unavailable — API key for profile {profile_id} stored as plaintext file \
+         under .drafting/keys/ (owner-only permissions)"
+    );
+    Ok(KeyStorage::PlaintextFile)
+}
+
+/// If the project is a Git repo, make sure `.drafting/` is ignored so the
+/// plaintext key fallback (and other local tool state) can never be
+/// committed. Appends to .gitignore without touching existing content.
+fn ensure_drafting_gitignored(project_root: &Path) {
+    if !project_root.join(".git").exists() {
+        return;
+    }
+    let gitignore = project_root.join(".gitignore");
+    let existing = std::fs::read_to_string(&gitignore).unwrap_or_default();
+    let already = existing
+        .lines()
+        .map(str::trim)
+        .any(|l| l == ".drafting/" || l == ".drafting");
+    if already {
+        return;
+    }
+    let mut content = existing;
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(".drafting/\n");
+    if let Err(e) = std::fs::write(&gitignore, content) {
+        log::warn!("failed to update .gitignore: {e}");
+    }
 }
 
 pub fn get_api_key_for_profile(project_root: &Path, profile_id: &str) -> Option<String> {

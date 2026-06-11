@@ -95,8 +95,9 @@ pub fn ai_set_profile_api_key(
     project_root: String,
     profile_id: String,
     api_key: String,
-) -> Result<(), String> {
-    config::set_api_key_for_profile(Path::new(&project_root), &profile_id, &api_key)?;
+) -> Result<config::KeyStorage, String> {
+    let storage =
+        config::set_api_key_for_profile(Path::new(&project_root), &profile_id, &api_key)?;
 
     // Mark the profile as having a key + auto-enable on first key set.
     let mut cfg = config::load_config(Path::new(&project_root));
@@ -107,7 +108,7 @@ pub fn ai_set_profile_api_key(
         }
     }
     config::save_config(Path::new(&project_root), &cfg)?;
-    Ok(())
+    Ok(storage)
 }
 
 #[tauri::command]

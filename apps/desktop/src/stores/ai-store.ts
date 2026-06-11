@@ -6,6 +6,8 @@ import type {
   TaskRoute,
 } from "../types/ai-types";
 import * as api from "../lib/ai-api";
+import { t } from "../lib/i18n";
+import { useNotificationStore } from "./notification-store";
 
 interface AiState {
   projectRoot: string | null;
@@ -96,7 +98,15 @@ export const useAiStore = create<AiState>((set, get) => ({
   setProfileApiKey: async (profileId, apiKey) => {
     const { projectRoot } = get();
     if (!projectRoot) return;
-    await api.setProfileApiKey(projectRoot, profileId, apiKey);
+    const storage = await api.setProfileApiKey(projectRoot, profileId, apiKey);
+    if (storage === "plaintextFile") {
+      useNotificationStore.getState().notify({
+        severity: "warning",
+        title: t("notif.ai.keyPlaintext.title"),
+        hint: t("notif.ai.keyPlaintext.hint"),
+        dedupeKey: `ai-key-plaintext:${profileId}`,
+      });
+    }
     await get().refresh();
   },
 
