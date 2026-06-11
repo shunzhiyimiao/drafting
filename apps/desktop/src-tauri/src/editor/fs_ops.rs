@@ -107,13 +107,146 @@ pub fn write_file(project_root: &Path, rel_path: &str, content: &str) -> std::io
 }
 
 fn resolve(project_root: &Path, rel_path: &str) -> std::io::Result<PathBuf> {
+    confine(rel_path)?;
     let path = project_root.join(rel_path);
-    // Light path traversal check: reject if contains ".."
-    if rel_path.contains("..") {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "path contains ..",
-        ));
-    }
+    canonicalize_existing_prefix(project_root, &path)?;
     Ok(path)
+}
+
+/// Lexical layer: reject inputs that could step outside the project root
+/// before any filesystem access. Component-based, so it catches `..` as a
+/// path segment (but allows filenames that merely contain dots, e.g.
+/// `a..b.ts`), absolute paths (`/etc/passwd`), and Windows drive / UNC
+/// prefixes (`C:\`, `\\server\share`) — `PathBuf::join` would silently
+/// discard the project root for absolute inputs.
+fn confine(rel_path: &str) -> std::io::Result<()> {
+    use std::path::Component;
+    for component in Path::new(rel_path).components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "path contains ..",
+                ));
+            }
+            Component::Prefix(_) | Component::RootDir => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "absolute path not allowed",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Physical layer: resolve symlinks and verify the target stays under the
+/// project root. The target itself may not exist yet (writing a new file),
+/// so canonicalize the deepest ancestor that does exist — the loop always
+/// terminates because project_root itself exists.
+fn canonicalize_existing_prefix(project_root: &Path, candidate: &Path) -> std::io::Result<()> {
+    let canonical_root = project_root.canonicalize()?;
+    let mut cursor = candidate;
+    loop {
+        if cursor.exists() {
+            let real = cursor.canonicalize()?;
+            if real.starts_with(&canonical_root) {
+                return Ok(());
+            }
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "path escapes project root",
+            ));
+        }
+        match cursor.parent() {
+            Some(parent) => cursor = parent,
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "path has no existing ancestor",
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn root() -> TempDir {
+        TempDir::new().unwrap()
+    }
+
+    #[test]
+    fn normal_relative_path_passes() {
+        let dir = root();
+        assert!(resolve(dir.path(), "src/main.ts").is_ok());
+    }
+
+    #[test]
+    fn nested_new_file_passes() {
+        let dir = root();
+        // Deeply nested target where no ancestor below root exists yet.
+        assert!(resolve(dir.path(), "a/b/c/new-file.ts").is_ok());
+    }
+
+    #[test]
+    fn filename_containing_dots_passes() {
+        let dir = root();
+        assert!(resolve(dir.path(), "src/a..b.ts").is_ok());
+    }
+
+    #[test]
+    fn parent_dir_rejected() {
+        let dir = root();
+        assert!(resolve(dir.path(), "../outside.txt").is_err());
+    }
+
+    #[test]
+    fn parent_dir_in_middle_rejected() {
+        let dir = root();
+        assert!(resolve(dir.path(), "src/../../outside.txt").is_err());
+    }
+
+    #[test]
+    fn absolute_path_rejected() {
+        let dir = root();
+        let abs = std::env::temp_dir().join("victim.txt");
+        assert!(resolve(dir.path(), abs.to_str().unwrap()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_escape_rejected() {
+        let dir = root();
+        let outside = TempDir::new().unwrap();
+        let outside_file = outside.path().join("secret.txt");
+        std::fs::write(&outside_file, "secret").unwrap();
+        std::os::unix::fs::symlink(&outside_file, dir.path().join("link.txt")).unwrap();
+        assert!(resolve(dir.path(), "link.txt").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn new_file_under_symlinked_dir_escape_rejected() {
+        let dir = root();
+        let outside = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("linkdir")).unwrap();
+        // Target doesn't exist; deepest existing ancestor is the symlinked
+        // dir, which canonicalizes outside the root.
+        assert!(resolve(dir.path(), "linkdir/new-file.ts").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_inside_root_passes() {
+        let dir = root();
+        let real = dir.path().join("real.txt");
+        std::fs::write(&real, "ok").unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("alias.txt")).unwrap();
+        assert!(resolve(dir.path(), "alias.txt").is_ok());
+    }
 }
