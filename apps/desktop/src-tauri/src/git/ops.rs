@@ -7,11 +7,35 @@ use git2::{
 use crate::git::types::*;
 
 pub fn open_repo(project_root: &Path) -> Result<Repository, git2::Error> {
+    // NO_SEARCH: only open a repository rooted exactly at the workspace.
+    // Without it, open_ext walks up parent directories — a workspace without
+    // .git inside e.g. the user's home directory would resolve to a stray
+    // ancestor repo and status() would then scan that entire tree (observed:
+    // an accidental `git init` in $HOME froze the Git view for minutes).
     Repository::open_ext(
         project_root,
-        RepositoryOpenFlags::empty(),
+        RepositoryOpenFlags::NO_SEARCH,
         &[] as &[&std::ffi::OsStr],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn open_repo_does_not_search_ancestors() {
+        let dir = TempDir::new().unwrap();
+        Repository::init(dir.path()).unwrap();
+        let nested = dir.path().join("sub/project");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        // The repo root itself opens fine…
+        assert!(open_repo(dir.path()).is_ok());
+        // …but a nested workspace must NOT resolve to the ancestor repo.
+        assert!(open_repo(&nested).is_err());
+    }
 }
 
 pub fn status(project_root: &Path) -> Result<GitStatus, String> {
