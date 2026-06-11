@@ -1,13 +1,20 @@
-import { Eye, Code, CheckCircle, Trash2 } from "lucide-react";
+import { Eye, Code, CheckCircle, Sparkles, Trash2 } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { useT } from "../../lib/i18n";
 
 interface Props {
   onCheck: () => void;
+  onAiCheck: () => void;
+  aiChecking: boolean;
   onDelete: () => void;
 }
 
-export function BlueprintToolbar({ onCheck, onDelete }: Props) {
+export function BlueprintToolbar({
+  onCheck,
+  onAiCheck,
+  aiChecking,
+  onDelete,
+}: Props) {
   const t = useT();
   const activeBlueprint = useBlueprintStore((s) => s.activeBlueprint);
   const viewMode = useBlueprintStore((s) => s.viewMode);
@@ -58,6 +65,19 @@ export function BlueprintToolbar({ onCheck, onDelete }: Props) {
         >
           <CheckCircle size={14} />
           {t("blueprint.check")}
+        </button>
+        <button
+          onClick={onAiCheck}
+          disabled={aiChecking}
+          className={`flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors ${
+            aiChecking
+              ? "text-text-muted cursor-wait"
+              : "text-accent hover:bg-bg-hover"
+          }`}
+          title={t("blueprint.aiCheck")}
+        >
+          <Sparkles size={14} className={aiChecking ? "animate-pulse" : ""} />
+          {aiChecking ? t("blueprint.aiCheckRunning") : t("blueprint.aiCheck")}
         </button>
         <button
           onClick={onDelete}

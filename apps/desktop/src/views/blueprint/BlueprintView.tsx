@@ -78,6 +78,8 @@ export function BlueprintView() {
   const viewMode = useBlueprintStore((s) => s.viewMode);
   const deleteBlueprint = useBlueprintStore((s) => s.deleteBlueprint);
   const lightweightCheck = useBlueprintStore((s) => s.lightweightCheck);
+  const requestCheck = useBlueprintStore((s) => s.requestCheck);
+  const [aiChecking, setAiChecking] = useState(false);
 
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showAiDraft, setShowAiDraft] = useState(false);
@@ -110,6 +112,21 @@ export function BlueprintView() {
     setTimeout(() => setStatusMsg(null), 5000);
   }, [activeBlueprint, lightweightCheck]);
 
+  const handleAiCheck = useCallback(async () => {
+    if (!activeBlueprint || aiChecking) return;
+    setAiChecking(true);
+    setStatusMsg(t("blueprint.aiCheckRunning"));
+    try {
+      await requestCheck(activeBlueprint.frontMatter.blueprintId);
+      setStatusMsg(t("blueprint.aiCheckDone"));
+    } catch (e) {
+      setStatusMsg(`AI check failed: ${String(e)}`);
+    } finally {
+      setAiChecking(false);
+      setTimeout(() => setStatusMsg(null), 5000);
+    }
+  }, [activeBlueprint, aiChecking, requestCheck, t]);
+
   const handleDelete = useCallback(async () => {
     if (!activeBlueprint) return;
     if (
@@ -133,7 +150,12 @@ export function BlueprintView() {
       <div className="flex-1 flex flex-col min-w-0">
         {activeBlueprint ? (
           <>
-            <BlueprintToolbar onCheck={handleCheck} onDelete={handleDelete} />
+            <BlueprintToolbar
+              onCheck={handleCheck}
+              onAiCheck={handleAiCheck}
+              aiChecking={aiChecking}
+              onDelete={handleDelete}
+            />
             {statusMsg && (
               <div className="px-3 py-1.5 text-xs bg-bg-hover border-b border-border text-text-secondary">
                 {statusMsg}
