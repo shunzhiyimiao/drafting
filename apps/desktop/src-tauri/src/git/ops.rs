@@ -236,6 +236,11 @@ pub fn diff_file(project_root: &Path, path: &str) -> Result<FileDiff, String> {
     let mut opts = DiffOptions::new();
     opts.pathspec(path);
     opts.context_lines(3);
+    // Untracked files (everything, in a freshly-init'd repo) have no index
+    // entry — without these flags their diff is silently empty.
+    opts.include_untracked(true);
+    opts.recurse_untracked_dirs(true);
+    opts.show_untracked_content(true);
 
     let diff = repo
         .diff_index_to_workdir(None, Some(&mut opts))

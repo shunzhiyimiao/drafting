@@ -239,8 +239,18 @@ function FileSection({
             }`}
           >
             <StatusGlyph status={f.status} />
-            <span className="text-xs text-text-primary truncate flex-1">
-              {f.path.split("/").pop()}
+            <span
+              className="text-xs truncate flex-1"
+              title={f.path}
+            >
+              <span className="text-text-primary">
+                {f.path.split("/").pop()}
+              </span>
+              {f.path.includes("/") && (
+                <span className="text-text-muted ml-1.5 text-[10px]">
+                  {f.path.split("/").slice(0, -1).join("/")}
+                </span>
+              )}
             </span>
             <button
               onClick={(e) => {
