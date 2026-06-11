@@ -2058,3 +2058,17 @@ pub enum EditorEvent {
 - 待补充:Part 11 列出的四个模块
 - 完成全部设计后,本文档将作为 CLAUDE.md 使用
 
+
+---
+
+## 安全审计清单(2026-06-12 安全收尾批次)
+
+| 项 | 状态 | Commit |
+|---|---|---|
+| P0-1 fs_ops 路径解析硬化(绝对路径 / symlink 逃逸) | ✅ closed | 8e830d6 |
+| P0-2 真实 CSP 替换 null(生产严格 + dev 放行 HMR) | ✅ closed | 8313bf8 |
+| P0-3 Privacy Filter 最小实现 + AI 审计日志 | ✅ closed | 3769044 |
+| P1-4 API key 明文回退硬化(0600 + 高声告警 + .gitignore 保障) | ✅ closed | ceced58 |
+| P1-5 BSL 1.1 LICENSE | ⏳ open(用户在 GitHub 上自行添加;参数已定:Licensor=Nebula,Change Date=2030-06-12,Change License=Apache-2.0,Additional Use Grant=个人/非商用生产豁免) |
+
+说明:v1 的 Privacy Filter 为设计三层中的第一层(文件路径黑名单),内容扫描与用户审批留待后续迭代(见 Part 13)。
