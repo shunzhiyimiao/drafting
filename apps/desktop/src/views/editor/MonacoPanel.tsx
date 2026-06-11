@@ -216,6 +216,23 @@ export function MonacoPanel() {
             monacoRef.current = monaco;
             setMonacoReady(true);
 
+            // ts/js diagnostics come exclusively from the LSP bridge
+            // (typescript-language-server reads the real tsconfig on disk).
+            // Monaco's built-in TS worker only sees in-memory models, so it
+            // flags every cross-file import (e.g. "@myapp/sockets") as
+            // unresolvable — silence it to avoid false-positive squiggles.
+            const tsDiagnosticsOff = {
+              noSemanticValidation: true,
+              noSyntaxValidation: true,
+              noSuggestionDiagnostics: true,
+            };
+            monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions(
+              tsDiagnosticsOff,
+            );
+            monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions(
+              tsDiagnosticsOff,
+            );
+
             // Dark variant
             monaco.editor.defineTheme("drafting-dark", {
               base: "vs-dark",
