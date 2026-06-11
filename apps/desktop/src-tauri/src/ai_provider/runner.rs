@@ -8,6 +8,7 @@ use super::adapters::anthropic::AnthropicAdapter;
 use super::adapters::ollama::OllamaAdapter;
 use super::adapters::openai::OpenAiAdapter;
 use super::adapters::{ProviderAdapter, ProviderContext};
+use super::audit;
 use super::config;
 use super::stream::StreamManager;
 use super::types::{ChatRequest, Profile, Protocol, StreamEvent, TaskId};
@@ -124,6 +125,7 @@ impl AiRunner {
         let stream_id = uuid::Uuid::new_v4().to_string();
         let profile_id_for_event = profile.id.clone();
         let task_label = format!("{:?}", task_id);
+        let included_files = req.included_files.clone();
 
         // Open the upstream stream first so we report errors synchronously.
         // An establishment-time failure (e.g. a 401 from a bad/missing API key)
@@ -156,10 +158,16 @@ impl AiRunner {
             }),
         );
 
-        // Wrap on_event so we both forward to the caller and republish terminal
-        // events on the Sync Bus.
+        // Wrap on_event so we both forward to the caller, republish terminal
+        // events on the Sync Bus, and append the local audit log
+        // (.drafting/local/ai-audit.jsonl) for every finished call.
         let stream_id_for_cb = stream_id.clone();
         let bus_for_cb = sync_bus.clone();
+        let audit_root = project_root.to_path_buf();
+        let audit_task = task_label.clone();
+        let audit_provider = profile.name.clone();
+        let audit_model = model.clone();
+        let audit_files = included_files;
         let mut on_event = on_event;
         let wrapped = move |ev: StreamEvent| {
             match &ev {
@@ -177,6 +185,20 @@ impl AiRunner {
                             cost_usd: 0.0,
                         }),
                     );
+                    audit::append(
+                        &audit_root,
+                        &audit::AuditRecord {
+                            timestamp_ms: audit::now_ms(),
+                            task: audit_task.clone(),
+                            provider: audit_provider.clone(),
+                            model: audit_model.clone(),
+                            outcome: "completed".to_string(),
+                            input_tokens: *input_tokens,
+                            output_tokens: *output_tokens,
+                            included_files: audit_files.clone(),
+                            error: None,
+                        },
+                    );
                 }
                 StreamEvent::Cancelled { .. } => {
                     bus_for_cb.publish(
@@ -184,6 +206,20 @@ impl AiRunner {
                         SyncBusEvent::AiProvider(AiProviderEvent::StreamCancelled {
                             stream_id: stream_id_for_cb.clone(),
                         }),
+                    );
+                    audit::append(
+                        &audit_root,
+                        &audit::AuditRecord {
+                            timestamp_ms: audit::now_ms(),
+                            task: audit_task.clone(),
+                            provider: audit_provider.clone(),
+                            model: audit_model.clone(),
+                            outcome: "cancelled".to_string(),
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            included_files: audit_files.clone(),
+                            error: None,
+                        },
                     );
                 }
                 StreamEvent::Failed { error, .. } => {
@@ -193,6 +229,20 @@ impl AiRunner {
                             stream_id: stream_id_for_cb.clone(),
                             error: error.clone(),
                         }),
+                    );
+                    audit::append(
+                        &audit_root,
+                        &audit::AuditRecord {
+                            timestamp_ms: audit::now_ms(),
+                            task: audit_task.clone(),
+                            provider: audit_provider.clone(),
+                            model: audit_model.clone(),
+                            outcome: "failed".to_string(),
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            included_files: audit_files.clone(),
+                            error: Some(error.clone()),
+                        },
                     );
                 }
                 _ => {}

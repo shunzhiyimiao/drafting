@@ -80,10 +80,22 @@ pub async fn run_check(
         return Ok(());
     }
 
-    let (code_bundle, code_hash) = load_related_code(&project_root, &bp.front_matter.related_files);
+    let bundle = load_related_code(&project_root, &bp.front_matter.related_files);
     let blueprint_hash = hash_str(&bp.raw_md);
 
-    let prompt = build_user_prompt(&bp, &criteria, &code_bundle);
+    // Surface privacy-filtered files on the bus (UI toast + audit trail).
+    for (file, reason) in &bundle.blocked {
+        bus.publish(
+            Origin::new(ORIGIN_BLUEPRINT),
+            SyncBusEvent::AiProvider(crate::sync_bus::events::AiProviderEvent::PrivacyViolationBlocked {
+                task: "BlueprintCheck".to_string(),
+                reason: reason.clone(),
+                file: file.clone(),
+            }),
+        );
+    }
+
+    let prompt = build_user_prompt(&bp, &criteria, &bundle.text);
 
     let request = ChatRequest {
         model: String::new(),
@@ -94,6 +106,7 @@ pub async fn run_check(
         }],
         temperature: Some(0.1),
         max_tokens: Some(4000),
+        included_files: bundle.included.clone(),
     };
 
     // Collect streamed deltas into a buffer; signal completion via oneshot.
@@ -188,7 +201,7 @@ pub async fn run_check(
             checked_at: now,
             stale: false,
             blueprint_hash: blueprint_hash.clone(),
-            code_hash: code_hash.clone(),
+            code_hash: bundle.hash.clone(),
             model_id: model_id.clone(),
         };
         storage::save_check_result(&project_root, &result).map_err(|e| e.to_string())?;
@@ -217,13 +230,30 @@ fn collect_criteria(bp: &Blueprint) -> Vec<String> {
     out
 }
 
-fn load_related_code(project_root: &Path, files: &[String]) -> (String, String) {
+/// Result of assembling related-file content for the prompt.
+struct CodeBundle {
+    text: String,
+    hash: String,
+    /// Files whose content actually entered the prompt (for the audit log).
+    included: Vec<String>,
+    /// Files excluded by the privacy filter: (path, reason).
+    blocked: Vec<(String, String)>,
+}
+
+fn load_related_code(project_root: &Path, files: &[String]) -> CodeBundle {
     if files.is_empty() {
-        return (String::new(), hash_str(""));
+        return CodeBundle {
+            text: String::new(),
+            hash: hash_str(""),
+            included: Vec::new(),
+            blocked: Vec::new(),
+        };
     }
     let mut out = String::new();
     let mut hasher = Sha256::new();
     let mut total = 0usize;
+    let mut included = Vec::new();
+    let mut blocked = Vec::new();
     for rel in files {
         if total >= MAX_TOTAL_CODE_BYTES {
             out.push_str(&format!(
@@ -231,6 +261,16 @@ fn load_related_code(project_root: &Path, files: &[String]) -> (String, String) 
                 files.len()
             ));
             break;
+        }
+        // Privacy filter: blacklisted paths never enter the prompt.
+        if let Some(reason) = crate::ai_provider::privacy::check_path(rel) {
+            out.push_str(&format!(
+                "\n### File: {rel}\n(excluded by privacy filter: {reason})\n"
+            ));
+            hasher.update(rel.as_bytes());
+            hasher.update(b":privacy-blocked\n");
+            blocked.push((rel.clone(), reason));
+            continue;
         }
         let path = project_root.join(rel);
         match std::fs::read_to_string(&path) {
@@ -249,6 +289,7 @@ fn load_related_code(project_root: &Path, files: &[String]) -> (String, String) 
                 hasher.update(b"\n");
                 hasher.update(content.as_bytes());
                 total += truncated.len();
+                included.push(rel.clone());
             }
             Err(_) => {
                 out.push_str(&format!("\n### File: {rel}\n(file missing or unreadable)\n"));
@@ -258,7 +299,12 @@ fn load_related_code(project_root: &Path, files: &[String]) -> (String, String) 
         }
     }
     let code_hash = format!("{:x}", hasher.finalize());
-    (out, code_hash)
+    CodeBundle {
+        text: out,
+        hash: code_hash,
+        included,
+        blocked,
+    }
 }
 
 fn build_user_prompt(bp: &Blueprint, criteria: &[String], code_bundle: &str) -> String {

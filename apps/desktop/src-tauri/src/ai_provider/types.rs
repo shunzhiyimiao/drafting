@@ -437,6 +437,12 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// Project-relative paths of files whose content is embedded in this
+    /// request. Not sent to the provider — recorded in the local audit log
+    /// (.drafting/local/ai-audit.jsonl). Callers embedding file content
+    /// must set this after running the privacy filter.
+    #[serde(default)]
+    pub included_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

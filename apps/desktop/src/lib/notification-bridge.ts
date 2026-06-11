@@ -67,5 +67,17 @@ export async function startNotificationBridge(): Promise<UnlistenFn> {
       });
       return;
     }
+
+    // -- Privacy filter blocked a file from entering an AI prompt -------------
+    if (domain === "AiProvider" && event.type === "PrivacyViolationBlocked") {
+      notify({
+        severity: "warning",
+        title: t("notif.ai.privacyBlocked.title"),
+        message: `${String(data.file ?? "")} (${String(data.reason ?? "")})`,
+        hint: t("notif.ai.privacyBlocked.hint"),
+        dedupeKey: `ai-privacy:${String(data.file ?? "")}`,
+      });
+      return;
+    }
   });
 }

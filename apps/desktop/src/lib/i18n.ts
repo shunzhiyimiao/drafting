@@ -44,6 +44,14 @@ const translations: Record<string, Record<Locale, string>> = {
     zh: "云端 AI 已暂停，本地模型仍可用。可在 设置 中调整预算。",
     en: "Cloud AI is paused; local models still work. Adjust the budget in Settings.",
   },
+  "notif.ai.privacyBlocked.title": {
+    zh: "隐私过滤器已拦截文件",
+    en: "Privacy filter blocked a file",
+  },
+  "notif.ai.privacyBlocked.hint": {
+    zh: "该文件不会发送给 AI。详见 .drafting/local/ai-audit.jsonl。",
+    en: "This file was not sent to the AI. See .drafting/local/ai-audit.jsonl.",
+  },
   "notif.codegen.failed.title": {
     zh: "代码生成失败",
     en: "Code generation failed",
