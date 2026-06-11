@@ -21,6 +21,7 @@ interface GitState {
   refresh: () => Promise<void>;
   selectFile: (path: string) => Promise<void>;
   stage: (path: string) => Promise<void>;
+  stageAll: (paths: string[]) => Promise<void>;
   unstage: (path: string) => Promise<void>;
   commit: (message: string) => Promise<void>;
   checkout: (name: string) => Promise<void>;
@@ -76,6 +77,16 @@ export const useGitStore = create<GitState>((set, get) => ({
     const { projectRoot, refresh } = get();
     if (!projectRoot) return;
     await api.stageFile(projectRoot, path);
+    await refresh();
+  },
+
+  stageAll: async (paths) => {
+    const { projectRoot, refresh } = get();
+    if (!projectRoot) return;
+    // One refresh at the end — per-file refresh would rescan status N times.
+    for (const path of paths) {
+      await api.stageFile(projectRoot, path);
+    }
     await refresh();
   },
 

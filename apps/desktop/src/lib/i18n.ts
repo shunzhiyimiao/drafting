@@ -373,6 +373,7 @@ const translations: Record<string, Record<Locale, string>> = {
   "git.refresh": { zh: "刷新", en: "Refresh" },
   "git.staged": { zh: "已暂存", en: "Staged" },
   "git.changes": { zh: "改动", en: "Changes" },
+  "git.stageAll": { zh: "全部暂存", en: "Stage all" },
   "git.history": { zh: "提交历史", en: "History" },
   "git.noCommits": { zh: "暂无提交。", en: "No commits yet." },
   "git.selectForDiff": { zh: "选择文件查看差异", en: "Select a file to view its diff" },

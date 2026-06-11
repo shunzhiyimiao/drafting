@@ -24,6 +24,7 @@ export function GitView() {
   const refresh = useGitStore((s) => s.refresh);
   const selectFile = useGitStore((s) => s.selectFile);
   const stage = useGitStore((s) => s.stage);
+  const stageAll = useGitStore((s) => s.stageAll);
   const unstage = useGitStore((s) => s.unstage);
   const commit = useGitStore((s) => s.commit);
   const checkout = useGitStore((s) => s.checkout);
@@ -105,6 +106,12 @@ export function GitView() {
           onSelect={selectFile}
           action="stage"
           onAction={stage}
+          onActionAll={() =>
+            stageAll(
+              [...status.modified, ...status.untracked].map((f) => f.path),
+            )
+          }
+          actionAllLabel={t("git.stageAll")}
         />
 
         <CommitBox
@@ -211,6 +218,8 @@ function FileSection({
   onSelect,
   action,
   onAction,
+  onActionAll,
+  actionAllLabel,
 }: {
   title: string;
   files: FileStatus[];
@@ -218,6 +227,8 @@ function FileSection({
   onSelect: (path: string) => void;
   action: "stage" | "unstage";
   onAction: (path: string) => void;
+  onActionAll?: () => void;
+  actionAllLabel?: string;
 }) {
   if (files.length === 0) return null;
 
@@ -227,7 +238,18 @@ function FileSection({
         <span className="text-[10px] uppercase tracking-wider text-text-muted">
           {title}
         </span>
-        <span className="text-[10px] text-text-muted">{files.length}</span>
+        <span className="flex items-center gap-2">
+          {onActionAll && (
+            <button
+              onClick={onActionAll}
+              className="text-[10px] text-text-muted hover:text-accent transition-colors"
+              title={actionAllLabel}
+            >
+              {actionAllLabel}
+            </button>
+          )}
+          <span className="text-[10px] text-text-muted">{files.length}</span>
+        </span>
       </div>
       <div className="max-h-52 overflow-auto">
         {files.map((f) => (

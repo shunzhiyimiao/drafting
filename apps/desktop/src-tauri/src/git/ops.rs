@@ -69,7 +69,18 @@ pub fn status(project_root: &Path) -> Result<GitStatus, String> {
                 .unwrap_or_default(),
             true,
         ),
-        None => ("".to_string(), false),
+        None => {
+            // Unborn branch (fresh repo, no commits yet): HEAD is a symbolic
+            // ref to a branch that doesn't exist yet — surface that name
+            // instead of an empty string (which the UI renders as detached).
+            let unborn = repo
+                .find_reference("HEAD")
+                .ok()
+                .and_then(|r| r.symbolic_target().map(String::from))
+                .and_then(|t| t.strip_prefix("refs/heads/").map(String::from))
+                .unwrap_or_default();
+            (unborn, false)
+        }
     };
 
     let mut opts = StatusOptions::new();
