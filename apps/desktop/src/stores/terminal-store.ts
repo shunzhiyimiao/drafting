@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { SessionInfo } from "../types/terminal-types";
 import * as api from "../lib/terminal-api";
+import { getProjectRoot } from "../lib/app-bootstrap";
 
 export interface TerminalTab {
   id: string;
@@ -28,8 +29,11 @@ export const useTerminalStore = create<TerminalState>((set) => ({
   activeTabId: null,
 
   createTab: async (opts) => {
+    // Terminals open in the active workspace root (design Part 11), falling
+    // back to $HOME on the backend only when no workspace is resolvable.
+    const cwd = opts?.cwd ?? (await getProjectRoot().catch(() => null));
     const info = await api.createSession({
-      cwd: opts?.cwd ?? null,
+      cwd,
       shell: null,
       cols: 80,
       rows: 24,
