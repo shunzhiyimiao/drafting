@@ -4,6 +4,9 @@ import type {
   BranchInfo,
   CommitInfo,
   FileDiff,
+  FetchResult,
+  PullResult,
+  PushResult,
 } from "../types/git-types";
 
 export async function getStatus(projectRoot: string): Promise<GitStatus> {
@@ -68,4 +71,22 @@ export async function createBranch(
   name: string,
 ): Promise<void> {
   return invoke("git_create_branch", { projectRoot, name });
+}
+
+export async function fetch(
+  projectRoot: string,
+  remote?: string,
+): Promise<FetchResult> {
+  return invoke("git_fetch", { projectRoot, remote: remote ?? null });
+}
+
+export async function pull(
+  projectRoot: string,
+  remote?: string,
+): Promise<PullResult> {
+  return invoke("git_pull", { projectRoot, remote: remote ?? null });
+}
+
+export async function push(projectRoot: string): Promise<PushResult> {
+  return invoke("git_push", { projectRoot });
 }

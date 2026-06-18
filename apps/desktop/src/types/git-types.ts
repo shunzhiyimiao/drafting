@@ -51,3 +51,19 @@ export interface FileDiff {
   path: string;
   hunks: DiffHunk[];
 }
+
+export interface FetchResult {
+  remote: string;
+  commitsReceived: number;
+}
+
+export interface PullResult {
+  remote: string;
+  commitsReceived: number;
+  fastForwarded: boolean;
+}
+
+export interface PushResult {
+  remote: string;
+  commitsPushed: number;
+}

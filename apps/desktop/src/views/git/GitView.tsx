@@ -5,6 +5,9 @@ import {
   Plus,
   Minus,
   FileText,
+  ArrowDown,
+  ArrowUp,
+  DownloadCloud,
 } from "lucide-react";
 import { useGitStore } from "../../stores/git-store";
 import type { FileStatus } from "../../types/git-types";
@@ -28,6 +31,10 @@ export function GitView() {
   const unstage = useGitStore((s) => s.unstage);
   const commit = useGitStore((s) => s.commit);
   const checkout = useGitStore((s) => s.checkout);
+  const remoteBusy = useGitStore((s) => s.remoteBusy);
+  const fetch = useGitStore((s) => s.fetch);
+  const pull = useGitStore((s) => s.pull);
+  const push = useGitStore((s) => s.push);
 
   useEffect(() => {
     getProjectRoot().then((root) => initialize(root));
@@ -84,6 +91,40 @@ export function GitView() {
               {status.behind > 0 && <span>↓{status.behind}</span>}
             </div>
           )}
+          <div className="flex items-center gap-1 mt-2">
+            <button
+              onClick={pull}
+              disabled={remoteBusy}
+              className="flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:cursor-wait transition-colors"
+              title={t("git.pull")}
+            >
+              <ArrowDown size={11} />
+              {t("git.pull")}
+              {status.behind > 0 && (
+                <span className="text-accent">{status.behind}</span>
+              )}
+            </button>
+            <button
+              onClick={push}
+              disabled={remoteBusy}
+              className="flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-bg-hover text-text-secondary hover:text-text-primary disabled:opacity-40 disabled:cursor-wait transition-colors"
+              title={t("git.push")}
+            >
+              <ArrowUp size={11} />
+              {t("git.push")}
+              {status.ahead > 0 && (
+                <span className="text-accent">{status.ahead}</span>
+              )}
+            </button>
+            <button
+              onClick={fetch}
+              disabled={remoteBusy}
+              className="flex items-center gap-1 px-2 py-1 text-[11px] rounded text-text-muted hover:text-text-secondary disabled:opacity-40 disabled:cursor-wait transition-colors"
+              title={t("git.fetch")}
+            >
+              <DownloadCloud size={11} />
+            </button>
+          </div>
         </div>
 
         {/* Staged */}

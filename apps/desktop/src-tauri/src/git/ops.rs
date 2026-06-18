@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use git2::{
-    BranchType, DiffOptions, Repository, RepositoryOpenFlags, Status, StatusOptions,
+    BranchType, Cred, CredentialType, DiffOptions, FetchOptions, PushOptions, RemoteCallbacks,
+    Repository, RepositoryOpenFlags, Status, StatusOptions,
 };
 
 use crate::git::types::*;
@@ -35,6 +36,63 @@ mod tests {
         assert!(open_repo(dir.path()).is_ok());
         // …but a nested workspace must NOT resolve to the ancestor repo.
         assert!(open_repo(&nested).is_err());
+    }
+
+    fn set_identity(repo_path: &Path) {
+        let repo = open_repo(repo_path).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "Test").unwrap();
+        cfg.set_str("user.email", "test@example.com").unwrap();
+    }
+
+    #[test]
+    fn push_then_pull_roundtrip_via_local_remote() {
+        // Bare repo acts as the remote — a local file remote needs no auth,
+        // so this exercises the fetch/push/pull plumbing in isolation.
+        let remote = TempDir::new().unwrap();
+        Repository::init_bare(remote.path()).unwrap();
+        let url = remote.path().to_str().unwrap();
+
+        // Clone A, make a commit, push it.
+        let a = TempDir::new().unwrap();
+        Repository::clone(url, a.path()).unwrap();
+        set_identity(a.path());
+        std::fs::write(a.path().join("file.txt"), "hello").unwrap();
+        stage_file(a.path(), "file.txt").unwrap();
+        commit(a.path(), "first").unwrap();
+        let (rname, _) = push(a.path()).unwrap();
+        assert_eq!(rname, "origin");
+
+        // Clone B sees the pushed commit.
+        let b = TempDir::new().unwrap();
+        Repository::clone(url, b.path()).unwrap();
+        set_identity(b.path());
+        assert!(b.path().join("file.txt").exists());
+
+        // A commits again and pushes.
+        std::fs::write(a.path().join("file2.txt"), "world").unwrap();
+        stage_file(a.path(), "file2.txt").unwrap();
+        commit(a.path(), "second").unwrap();
+        push(a.path()).unwrap();
+
+        // B fetch sees it as behind; pull fast-forwards and lands the file.
+        assert_eq!(fetch(b.path(), "origin").unwrap(), 1);
+        let (received, fast_forwarded) = pull(b.path(), "origin").unwrap();
+        assert!(fast_forwarded);
+        assert_eq!(received, 1);
+        assert!(b.path().join("file2.txt").exists());
+    }
+
+    #[test]
+    fn push_without_remote_errors_clearly() {
+        let dir = TempDir::new().unwrap();
+        Repository::init(dir.path()).unwrap();
+        set_identity(dir.path());
+        std::fs::write(dir.path().join("f.txt"), "x").unwrap();
+        stage_file(dir.path(), "f.txt").unwrap();
+        commit(dir.path(), "c").unwrap();
+        let err = push(dir.path()).unwrap_err();
+        assert!(err.contains("not found"), "unexpected error: {err}");
     }
 }
 
@@ -430,4 +488,209 @@ pub fn create_branch(project_root: &Path, name: &str) -> Result<(), String> {
     repo.branch(name, &head_commit, false)
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Remote operations (fetch / pull / push)
+//
+// Authentication is delegated entirely to the system git credential helper
+// and ssh-agent — Drafting stores no tokens, passwords, or SSH keys itself
+// (design Part 12, hard constraints 3-4).
+// ---------------------------------------------------------------------------
+
+/// Build remote callbacks whose credentials handler tries, in order:
+///   1. ssh-agent (for ssh:// and git@host: URLs)
+///   2. the system credential helper from git config (for https:// — e.g.
+///      osxkeychain on macOS, manager-core on Windows, libsecret on Linux)
+/// A try counter aborts after a handful of attempts so a wrong credential
+/// can't spin libgit2 in an infinite re-prompt loop.
+fn make_remote_callbacks(repo: &Repository) -> RemoteCallbacks<'static> {
+    let config = repo.config().ok();
+    let tried_ssh = std::cell::Cell::new(false);
+    let attempts = std::cell::Cell::new(0u32);
+
+    let mut cb = RemoteCallbacks::new();
+    cb.credentials(move |url, username_from_url, allowed| {
+        attempts.set(attempts.get() + 1);
+        if attempts.get() > 6 {
+            return Err(git2::Error::from_str(
+                "authentication failed after several attempts — check your \
+                 credential helper / ssh-agent",
+            ));
+        }
+        if allowed.contains(CredentialType::SSH_KEY) && !tried_ssh.get() {
+            tried_ssh.set(true);
+            return Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"));
+        }
+        if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
+            if let Some(cfg) = config.as_ref() {
+                return Cred::credential_helper(cfg, url, username_from_url);
+            }
+        }
+        if allowed.contains(CredentialType::USERNAME) {
+            if let Some(user) = username_from_url {
+                return Cred::username(user);
+            }
+        }
+        Err(git2::Error::from_str(
+            "no supported authentication method for this remote",
+        ))
+    });
+    cb
+}
+
+/// Remote name tracked by the current branch, falling back to "origin".
+fn upstream_remote_name(repo: &Repository) -> String {
+    repo.head()
+        .ok()
+        .and_then(|h| h.name().map(String::from))
+        .and_then(|refname| repo.branch_upstream_remote(&refname).ok())
+        .and_then(|buf| buf.as_str().map(String::from))
+        .unwrap_or_else(|| "origin".to_string())
+}
+
+/// Commits the upstream of HEAD is ahead of HEAD (i.e. waiting to be pulled).
+fn behind_upstream(repo: &Repository) -> u32 {
+    let head = match repo.head().ok().and_then(|h| h.target()) {
+        Some(oid) => oid,
+        None => return 0,
+    };
+    let upstream = repo
+        .revparse_single("@{u}")
+        .ok()
+        .and_then(|o| o.peel_to_commit().ok());
+    match upstream {
+        Some(up) => repo.graph_ahead_behind(head, up.id()).unwrap_or((0, 0)).1 as u32,
+        None => 0,
+    }
+}
+
+pub fn fetch(project_root: &Path, remote_name: &str) -> Result<u32, String> {
+    let repo = open_repo(project_root).map_err(|e| e.to_string())?;
+    let mut remote = repo
+        .find_remote(remote_name)
+        .map_err(|_| format!("remote '{remote_name}' not found"))?;
+    let mut fo = FetchOptions::new();
+    fo.remote_callbacks(make_remote_callbacks(&repo));
+    // Empty refspec list → use the remote's configured fetch refspecs.
+    remote
+        .fetch(&[] as &[&str], Some(&mut fo), None)
+        .map_err(|e| e.to_string())?;
+    Ok(behind_upstream(&repo))
+}
+
+/// Fast-forward pull only. A real merge (diverged history) is refused with a
+/// clear message pointing at the terminal — v1 does not auto-merge to avoid
+/// leaving the tree half-merged (design: complex ops go to the terminal).
+/// Returns (commits_received, fast_forwarded).
+pub fn pull(project_root: &Path, remote_name: &str) -> Result<(u32, bool), String> {
+    let repo = open_repo(project_root).map_err(|e| e.to_string())?;
+    {
+        let mut remote = repo
+            .find_remote(remote_name)
+            .map_err(|_| format!("remote '{remote_name}' not found"))?;
+        let mut fo = FetchOptions::new();
+        fo.remote_callbacks(make_remote_callbacks(&repo));
+        remote
+            .fetch(&[] as &[&str], Some(&mut fo), None)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let upstream = repo
+        .revparse_single("@{u}")
+        .map_err(|_| "current branch has no upstream to pull from".to_string())?
+        .peel_to_commit()
+        .map_err(|e| e.to_string())?;
+    let received = behind_upstream(&repo);
+
+    let annotated = repo
+        .find_annotated_commit(upstream.id())
+        .map_err(|e| e.to_string())?;
+    let (analysis, _) = repo.merge_analysis(&[&annotated]).map_err(|e| e.to_string())?;
+
+    if analysis.is_up_to_date() {
+        return Ok((0, true));
+    }
+    if !analysis.is_fast_forward() {
+        return Err(
+            "Pull needs a merge (local and remote have diverged). Run \
+             `git pull` in the terminal — Drafting v1 only fast-forwards."
+                .to_string(),
+        );
+    }
+
+    // Refuse to fast-forward over uncommitted tracked changes: the forced
+    // checkout below would clobber them. Untracked files are left alone.
+    let st = status(project_root)?;
+    if !st.modified.is_empty() || !st.staged.is_empty() || !st.conflicted.is_empty() {
+        return Err(
+            "You have uncommitted changes — commit or stash them before pulling.".to_string(),
+        );
+    }
+
+    // Fast-forward: move the branch ref to the upstream commit, then force the
+    // work tree + index to match. Force is correct here precisely because the
+    // tree is clean (guarded above) and HEAD is a strict ancestor of the
+    // target, so there is nothing of the user's to lose.
+    let refname = repo
+        .head()
+        .ok()
+        .and_then(|h| h.name().map(String::from))
+        .ok_or_else(|| "cannot resolve HEAD for fast-forward".to_string())?;
+    let mut reference = repo.find_reference(&refname).map_err(|e| e.to_string())?;
+    reference
+        .set_target(upstream.id(), "pull: fast-forward")
+        .map_err(|e| e.to_string())?;
+    repo.set_head(&refname).map_err(|e| e.to_string())?;
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .map_err(|e| {
+            format!("fast-forward updated the branch but the work tree could not be synced: {e}")
+        })?;
+    Ok((received, true))
+}
+
+/// Push the current branch to its upstream remote (fallback "origin"),
+/// returning (remote_name, commits_pushed).
+pub fn push(project_root: &Path) -> Result<(String, u32), String> {
+    let repo = open_repo(project_root).map_err(|e| e.to_string())?;
+    let head = repo.head().map_err(|e| e.to_string())?;
+    if !head.is_branch() {
+        return Err("not on a branch (detached HEAD) — cannot push".to_string());
+    }
+    let branch = head
+        .shorthand()
+        .ok_or_else(|| "cannot resolve branch name".to_string())?
+        .to_string();
+
+    let ahead = {
+        let h = head.target();
+        let up = repo
+            .revparse_single("@{u}")
+            .ok()
+            .and_then(|o| o.peel_to_commit().ok());
+        match (h, up) {
+            (Some(h), Some(up)) => repo.graph_ahead_behind(h, up.id()).unwrap_or((0, 0)).0 as u32,
+            // No upstream yet (first push of a new branch): everything is ahead.
+            _ => 0,
+        }
+    };
+
+    let remote_name = upstream_remote_name(&repo);
+    let mut remote = repo
+        .find_remote(&remote_name)
+        .map_err(|_| format!("remote '{remote_name}' not found — add one with `git remote add`"))?;
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    let mut po = PushOptions::new();
+    po.remote_callbacks(make_remote_callbacks(&repo));
+    remote
+        .push(&[&refspec], Some(&mut po))
+        .map_err(|e| {
+            // The most common failure: remote moved on. Give an actionable hint.
+            if e.message().contains("fast-forward") || e.message().contains("rejected") {
+                format!("push rejected — pull first, then push again ({e})")
+            } else {
+                e.to_string()
+            }
+        })?;
+    Ok((remote_name, ahead))
 }

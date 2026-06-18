@@ -138,3 +138,118 @@ pub fn git_create_branch(
     );
     Ok(())
 }
+
+// --- Remote operations -----------------------------------------------------
+// Network-bound; run on a blocking thread so the UI never freezes. git2's
+// Repository is !Send, so each op opens its own repo inside the closure.
+
+fn publish_op_failed(bus: &SyncBus, operation: &str, reason: &str) {
+    bus.publish(
+        git_origin(),
+        SyncBusEvent::Git(GitEvent::OperationFailed {
+            operation: operation.to_string(),
+            reason: reason.to_string(),
+        }),
+    );
+}
+
+#[tauri::command]
+pub async fn git_fetch(
+    project_root: String,
+    remote: Option<String>,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<FetchResult, String> {
+    let bus = sync_bus.inner().clone();
+    let remote_name = remote.unwrap_or_else(|| "origin".to_string());
+    let pr = project_root.clone();
+    let rn = remote_name.clone();
+    let res = tokio::task::spawn_blocking(move || ops::fetch(Path::new(&pr), &rn))
+        .await
+        .map_err(|e| e.to_string())?;
+    match res {
+        Ok(commits_received) => {
+            bus.publish(
+                git_origin(),
+                SyncBusEvent::Git(GitEvent::FetchCompleted {
+                    remote: remote_name.clone(),
+                    commits_received,
+                }),
+            );
+            Ok(FetchResult {
+                remote: remote_name,
+                commits_received,
+            })
+        }
+        Err(e) => {
+            publish_op_failed(&bus, "fetch", &e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn git_pull(
+    project_root: String,
+    remote: Option<String>,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<PullResult, String> {
+    let bus = sync_bus.inner().clone();
+    let remote_name = remote.unwrap_or_else(|| "origin".to_string());
+    let pr = project_root.clone();
+    let rn = remote_name.clone();
+    let res = tokio::task::spawn_blocking(move || ops::pull(Path::new(&pr), &rn))
+        .await
+        .map_err(|e| e.to_string())?;
+    match res {
+        Ok((commits_received, fast_forwarded)) => {
+            bus.publish(
+                git_origin(),
+                SyncBusEvent::Git(GitEvent::PullCompleted {
+                    from: remote_name.clone(),
+                    commits_received,
+                    has_conflicts: false,
+                }),
+            );
+            Ok(PullResult {
+                remote: remote_name,
+                commits_received,
+                fast_forwarded,
+            })
+        }
+        Err(e) => {
+            publish_op_failed(&bus, "pull", &e);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn git_push(
+    project_root: String,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<PushResult, String> {
+    let bus = sync_bus.inner().clone();
+    let pr = project_root.clone();
+    let res = tokio::task::spawn_blocking(move || ops::push(Path::new(&pr)))
+        .await
+        .map_err(|e| e.to_string())?;
+    match res {
+        Ok((remote, commits_pushed)) => {
+            bus.publish(
+                git_origin(),
+                SyncBusEvent::Git(GitEvent::PushCompleted {
+                    to: remote.clone(),
+                    commits_pushed,
+                }),
+            );
+            Ok(PushResult {
+                remote,
+                commits_pushed,
+            })
+        }
+        Err(e) => {
+            publish_op_failed(&bus, "push", &e);
+            Err(e)
+        }
+    }
+}

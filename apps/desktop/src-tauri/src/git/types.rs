@@ -67,3 +67,25 @@ pub struct FileDiff {
     pub path: String,
     pub hunks: Vec<DiffHunk>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchResult {
+    pub remote: String,
+    pub commits_received: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullResult {
+    pub remote: String,
+    pub commits_received: u32,
+    pub fast_forwarded: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushResult {
+    pub remote: String,
+    pub commits_pushed: u32,
+}
