@@ -12,6 +12,56 @@ const API_VERSION: &str = "2023-06-01";
 
 pub struct AnthropicAdapter;
 
+/// Assemble the Anthropic /v1/messages request body from a ChatRequest.
+///
+/// The system prompt is emitted as a content-block array with a single
+/// `cache_control: ephemeral` breakpoint at its end, so Anthropic caches the
+/// whole (large, stable) system prefix across repeated calls within the cache
+/// TTL — the design's mandated prompt caching (Part 13, constraint 17). When
+/// the prefix is below the model's minimum cacheable size Anthropic simply
+/// ignores the marker and bills normally, so this is always safe to send.
+fn build_body(request: &ChatRequest) -> Value {
+    // Anthropic separates `system` from `messages` and only allows
+    // user/assistant in messages.
+    let mut messages = Vec::with_capacity(request.messages.len());
+    let mut sys_from_messages: Vec<String> = Vec::new();
+    for m in &request.messages {
+        match m.role {
+            Role::System => sys_from_messages.push(m.content.clone()),
+            Role::User => messages.push(json!({ "role": "user", "content": m.content })),
+            Role::Assistant => messages.push(json!({ "role": "assistant", "content": m.content })),
+        }
+    }
+
+    let mut sys_combined = request.system.clone().unwrap_or_default();
+    if !sys_from_messages.is_empty() {
+        if !sys_combined.is_empty() {
+            sys_combined.push_str("\n\n");
+        }
+        sys_combined.push_str(&sys_from_messages.join("\n\n"));
+    }
+
+    let mut body = json!({
+        "model": request.model,
+        "messages": messages,
+        "max_tokens": request.max_tokens.unwrap_or(4096),
+        "stream": true,
+    });
+    if !sys_combined.is_empty() {
+        body["system"] = json!([
+            {
+                "type": "text",
+                "text": sys_combined,
+                "cache_control": { "type": "ephemeral" },
+            }
+        ]);
+    }
+    if let Some(t) = request.temperature {
+        body["temperature"] = json!(t);
+    }
+    body
+}
+
 #[async_trait]
 impl ProviderAdapter for AnthropicAdapter {
     fn id(&self) -> &'static str {
@@ -24,40 +74,9 @@ impl ProviderAdapter for AnthropicAdapter {
         stream_id: String,
         request: ChatRequest,
     ) -> Result<BoxStream<'static, StreamEvent>, String> {
-        // Build Anthropic message payload. Anthropic separates `system` from
-        // `messages` and only allows user/assistant in messages.
-        let mut messages = Vec::with_capacity(request.messages.len());
-        let mut sys_from_messages: Vec<String> = Vec::new();
-        for m in &request.messages {
-            match m.role {
-                Role::System => sys_from_messages.push(m.content.clone()),
-                Role::User => messages.push(json!({ "role": "user", "content": m.content })),
-                Role::Assistant => {
-                    messages.push(json!({ "role": "assistant", "content": m.content }))
-                }
-            }
-        }
-
-        let mut sys_combined = request.system.clone().unwrap_or_default();
-        if !sys_from_messages.is_empty() {
-            if !sys_combined.is_empty() {
-                sys_combined.push_str("\n\n");
-            }
-            sys_combined.push_str(&sys_from_messages.join("\n\n"));
-        }
-
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "max_tokens": request.max_tokens.unwrap_or(4096),
-            "stream": true,
-        });
-        if !sys_combined.is_empty() {
-            body["system"] = Value::String(sys_combined);
-        }
-        if let Some(t) = request.temperature {
-            body["temperature"] = json!(t);
-        }
+        // Build the request body (system prompt carries the prompt-cache
+        // breakpoint — see build_body).
+        let body = build_body(&request);
 
         let url = ctx.url();
 
@@ -131,6 +150,22 @@ impl ProviderAdapter for AnthropicAdapter {
                                         .get("input_tokens")
                                         .and_then(|v| v.as_u64())
                                         .unwrap_or(0);
+                                    // Prompt-cache observability: non-zero
+                                    // cache_read means the cached system prefix
+                                    // was reused (cheaper input).
+                                    let cache_read = usage
+                                        .get("cache_read_input_tokens")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0);
+                                    let cache_created = usage
+                                        .get("cache_creation_input_tokens")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0);
+                                    if cache_read > 0 || cache_created > 0 {
+                                        log::info!(
+                                            "anthropic prompt cache: read={cache_read} created={cache_created} fresh_input={input_tokens}"
+                                        );
+                                    }
                                 }
                             }
                             "message_delta" => {
@@ -224,3 +259,57 @@ impl ProviderAdapter for AnthropicAdapter {
 // async-stream is convenient for SSE — declare the dep alias.
 #[allow(unused_imports)]
 use stream as _stream;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_provider::types::ChatMessage;
+
+    fn req(system: Option<&str>, user: &str) -> ChatRequest {
+        ChatRequest {
+            model: "claude-x".into(),
+            system: system.map(String::from),
+            messages: vec![ChatMessage {
+                role: Role::User,
+                content: user.into(),
+            }],
+            temperature: Some(0.1),
+            max_tokens: Some(1000),
+            included_files: vec![],
+        }
+    }
+
+    #[test]
+    fn system_prompt_carries_ephemeral_cache_breakpoint() {
+        let body = build_body(&req(Some("you are a reviewer"), "check this"));
+        let sys = body.get("system").expect("system present");
+        let arr = sys.as_array().expect("system is a content-block array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["text"], "you are a reviewer");
+        assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn no_system_means_no_system_key() {
+        let body = build_body(&req(None, "hi"));
+        assert!(body.get("system").is_none());
+    }
+
+    #[test]
+    fn system_role_messages_fold_into_cached_system() {
+        let mut r = req(Some("base"), "u");
+        r.messages.insert(
+            0,
+            ChatMessage {
+                role: Role::System,
+                content: "extra".into(),
+            },
+        );
+        let body = build_body(&r);
+        let text = body["system"][0]["text"].as_str().unwrap();
+        assert!(text.contains("base") && text.contains("extra"));
+        // System-role message must not leak into the messages array.
+        let msgs = body["messages"].as_array().unwrap();
+        assert!(msgs.iter().all(|m| m["role"] != "system"));
+    }
+}
