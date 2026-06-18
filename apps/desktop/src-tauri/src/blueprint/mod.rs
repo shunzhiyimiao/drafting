@@ -1,3 +1,4 @@
+pub mod bindings;
 pub mod check;
 pub mod commands;
 pub mod error;
