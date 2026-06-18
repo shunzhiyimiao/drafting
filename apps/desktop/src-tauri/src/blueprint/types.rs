@@ -253,7 +253,7 @@ impl Default for BlueprintIndex {
 #[serde(rename_all = "camelCase")]
 pub struct CheckResult {
     pub blueprint_id: String,
-    pub criterion_index: usize,
+    pub criterion_id: String,
     pub verdict: CheckVerdict,
     pub explanation: String,
     #[serde(default)]

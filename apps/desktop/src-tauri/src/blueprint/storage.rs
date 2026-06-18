@@ -233,7 +233,7 @@ pub fn save_check_result(project_root: &Path, result: &CheckResult) -> Result<()
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!(
         "{}-{}.json",
-        result.blueprint_id, result.criterion_index
+        result.blueprint_id, result.criterion_id
     ));
     let json = serde_json::to_string_pretty(result)?;
     std::fs::write(&path, json)?;

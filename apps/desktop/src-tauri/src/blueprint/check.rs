@@ -19,7 +19,9 @@ use tokio::sync::oneshot;
 use crate::ai_provider::types::{ChatMessage, ChatRequest, Role, StreamEvent, TaskId};
 use crate::ai_provider::AiRunner;
 use crate::blueprint::storage;
-use crate::blueprint::types::{Blueprint, CheckResult, CheckVerdict, SectionKind};
+use crate::blueprint::types::{
+    AcceptanceCriterion, Blueprint, CheckResult, CheckVerdict, SectionKind,
+};
 use crate::sync_bus::events::{BlueprintEvent, SyncBusEvent};
 use crate::sync_bus::types::Origin;
 use crate::sync_bus::SyncBus;
@@ -80,7 +82,17 @@ pub async fn run_check(
         return Ok(());
     }
 
-    let bundle = load_related_code(&project_root, &bp.front_matter.related_files);
+    // S0.4: resolve the code artifacts through the binding resolver (union over
+    // all criteria) instead of reading front_matter.related_files directly.
+    let mut artifact_set: Vec<String> = Vec::new();
+    for c in &criteria {
+        for f in crate::blueprint::bindings::artifacts_for(c, &bp) {
+            if !artifact_set.contains(&f) {
+                artifact_set.push(f);
+            }
+        }
+    }
+    let bundle = load_related_code(&project_root, &artifact_set);
     let blueprint_hash = hash_str(&bp.raw_md);
 
     // Surface privacy-filtered files on the bus (UI toast + audit trail).
@@ -95,7 +107,8 @@ pub async fn run_check(
         );
     }
 
-    let prompt = build_user_prompt(&bp, &criteria, &bundle.text);
+    let criterion_texts: Vec<String> = criteria.iter().map(|c| c.text.clone()).collect();
+    let prompt = build_user_prompt(&bp, &criterion_texts, &bundle.text);
 
     let request = ChatRequest {
         model: String::new(),
@@ -193,7 +206,7 @@ pub async fn run_check(
         }
         let result = CheckResult {
             blueprint_id: blueprint_id.clone(),
-            criterion_index: item.index,
+            criterion_id: criteria[item.index].id.clone(),
             verdict,
             explanation: item.explanation.clone(),
             suggestion: item.suggestion.clone(),
@@ -218,12 +231,12 @@ pub async fn run_check(
     Ok(())
 }
 
-fn collect_criteria(bp: &Blueprint) -> Vec<String> {
+fn collect_criteria(bp: &Blueprint) -> Vec<AcceptanceCriterion> {
     let mut out = Vec::new();
     for section in &bp.sections {
         if matches!(section.kind, SectionKind::AcceptanceCriteria) {
             for c in &section.criteria {
-                out.push(c.text.clone());
+                out.push(c.clone());
             }
         }
     }

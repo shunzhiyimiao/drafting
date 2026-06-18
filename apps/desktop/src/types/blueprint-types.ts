@@ -93,7 +93,9 @@ export interface BlueprintIndex {
 
 export interface CheckResult {
   blueprintId: string;
-  criterionIndex: number;
+  /** Stable id of the criterion this verdict is for (S0.4 — was a positional
+   *  index; now keyed on AcceptanceCriterion.id so reordering can't misalign). */
+  criterionId: string;
   verdict: CheckVerdict;
   explanation: string;
   suggestion?: string | null;
