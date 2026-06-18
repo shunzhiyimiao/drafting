@@ -36,6 +36,10 @@ pub fn serialize(blueprint: &Blueprint) -> Result<String> {
             for crit in &section.criteria {
                 out.push_str(if crit.checked { "- [x] " } else { "- [ ] " });
                 out.push_str(&crit.text);
+                // Persist the stable id as an invisible (non-rendering) marker.
+                out.push_str(" <!-- #");
+                out.push_str(&crit.id);
+                out.push_str(" -->");
                 out.push('\n');
             }
             // Plus any extra non-criteria content (trailing prose if present)
@@ -278,13 +282,24 @@ fn make_section(heading: String, mut content: String) -> BlueprintSection {
 
 fn parse_task_list(content: &str) -> Vec<AcceptanceCriterion> {
     let re = Regex::new(r"^\s*-\s*\[([ xX])\]\s*(.+)$").unwrap();
+    // Trailing `<!-- #ULID -->` marker carrying the stable criterion id.
+    let id_re = Regex::new(r"\s*<!--\s*#([0-9A-Za-z]{26})\s*-->\s*$").unwrap();
     let mut criteria = Vec::new();
 
     for line in content.lines() {
         if let Some(caps) = re.captures(line) {
             let checked = matches!(&caps[1], "x" | "X");
-            let text = caps[2].trim().to_string();
-            criteria.push(AcceptanceCriterion { text, checked });
+            let raw = caps[2].trim();
+            // Pull a stable id from the trailing marker, or mint one for legacy lines.
+            let (text, id) = match id_re.captures(raw) {
+                Some(m) => {
+                    let id = m[1].to_string();
+                    let text = id_re.replace(raw, "").trim().to_string();
+                    (text, id)
+                }
+                None => (raw.to_string(), new_ulid()),
+            };
+            criteria.push(AcceptanceCriterion { id, text, checked });
         }
     }
 
@@ -475,5 +490,67 @@ Handle tokens.
         assert_eq!(bp.front_matter.parent_blueprints.len(), 1);
         assert!(matches!(bp.sections[0].kind, SectionKind::Purpose));
         assert!(matches!(bp.sections[1].kind, SectionKind::Responsibilities));
+    }
+
+    // ----- S0.1: stable criterion ids -----
+
+    const CRIT_MD: &str = r#"---
+blueprintId: 01HX999
+type: feature
+displayName: Crit Test
+status: draft
+priority: high
+---
+
+## Acceptance Criteria
+
+- [ ] First item
+- [x] Second item
+"#;
+
+    fn is_ulid(s: &str) -> bool {
+        regex::Regex::new(r"^[0-9A-Za-z]{26}$").unwrap().is_match(s)
+    }
+
+    #[test]
+    fn criterion_id_minted_for_legacy() {
+        let bp = parse(CRIT_MD).unwrap();
+        let crits = &bp.sections[0].criteria;
+        assert_eq!(crits.len(), 2);
+        for c in crits {
+            assert!(is_ulid(&c.id), "id should be a 26-char ulid: {:?}", c.id);
+            assert!(!c.text.contains("<!--"), "text must be clean of marker: {:?}", c.text);
+        }
+    }
+
+    #[test]
+    fn criterion_id_persisted_on_serialize() {
+        let bp = parse(CRIT_MD).unwrap();
+        let out = serialize(&bp).unwrap();
+        assert_eq!(out.matches("<!-- #").count(), 2, "serialized:\n{out}");
+    }
+
+    #[test]
+    fn criterion_id_stable_round_trip() {
+        let bp1 = parse(CRIT_MD).unwrap();
+        let md2 = serialize(&bp1).unwrap();
+        let bp2 = parse(&md2).unwrap();
+
+        let ids1: Vec<_> = bp1.sections[0].criteria.iter().map(|c| c.id.clone()).collect();
+        let ids2: Vec<_> = bp2.sections[0].criteria.iter().map(|c| c.id.clone()).collect();
+        assert_eq!(ids1, ids2, "ids must survive parse -> serialize -> parse");
+
+        // Once ids are stamped, serialization is a fixed point.
+        let md3 = serialize(&bp2).unwrap();
+        assert_eq!(md2, md3, "serialization must be idempotent after ids are stamped");
+    }
+
+    #[test]
+    fn criterion_id_honored_when_present() {
+        let md = "---\nblueprintId: 01HX998\ntype: feature\ndisplayName: X\nstatus: draft\npriority: high\n---\n\n## Acceptance Criteria\n\n- [ ] Keep my id <!-- #01ARZ3NDEKTSV4RRFFQ69G5FAV -->\n";
+        let bp = parse(md).unwrap();
+        let c = &bp.sections[0].criteria[0];
+        assert_eq!(c.id, "01ARZ3NDEKTSV4RRFFQ69G5FAV", "existing id must not be re-minted");
+        assert_eq!(c.text, "Keep my id", "marker must be stripped from text");
     }
 }

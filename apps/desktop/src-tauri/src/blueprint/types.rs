@@ -70,6 +70,11 @@ pub enum CheckVerdict {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcceptanceCriterion {
+    /// Stable id, persisted in the Markdown as a trailing `<!-- #ULID -->` marker.
+    /// The estimator (S3) keys per-criterion state on this; it must survive
+    /// reordering and text edits. `serde` mints one if a JSON payload omits it.
+    #[serde(default = "new_ulid")]
+    pub id: String,
     pub text: String,
     pub checked: bool,
 }

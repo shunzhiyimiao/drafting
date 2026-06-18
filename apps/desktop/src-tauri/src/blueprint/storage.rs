@@ -272,10 +272,12 @@ mod tests {
                     content: "- [ ] First\n- [x] Second\n".to_string(),
                     criteria: vec![
                         AcceptanceCriterion {
+                            id: new_ulid(),
                             text: "First".to_string(),
                             checked: false,
                         },
                         AcceptanceCriterion {
+                            id: new_ulid(),
                             text: "Second".to_string(),
                             checked: true,
                         },
