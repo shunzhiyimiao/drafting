@@ -73,8 +73,26 @@ fn refresh_key_flags(project_root: &Path, cfg: &mut AiConfig) {
             p.api_key_set = true;
             continue;
         }
-        p.api_key_set = get_api_key_for_profile(project_root, &p.id).is_some();
+        // Determine key presence WITHOUT touching the keychain. A keychain
+        // read fires a macOS auth prompt for every fresh dev build signature,
+        // and load_config runs on nearly every AI interaction — probing the
+        // keychain here produced a storm of prompts (one per key-requiring
+        // profile, per load). Env var and the plaintext fallback are cheap to
+        // check; for a key held in the keychain we trust the persisted flag
+        // (ai_set/clear_profile_api_key keep it accurate) instead of
+        // re-deriving it by reading the secret.
+        p.api_key_set = env_override_for_profile(project_root, &p.id).is_some()
+            || plaintext_key_exists(project_root, &p.id)
+            || p.api_key_set;
     }
+}
+
+/// Cheap, non-prompting check for the plaintext key fallback file.
+fn plaintext_key_exists(project_root: &Path, profile_id: &str) -> bool {
+    project_root
+        .join(".drafting/keys")
+        .join(key_filename(profile_id))
+        .exists()
 }
 
 /// Make sure the three built-in profiles exist (so the user can never delete
