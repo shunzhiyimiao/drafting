@@ -8,6 +8,9 @@ const BLUEPRINTS_DIR: &str = "blueprints";
 const FEATURES_DIR: &str = "blueprints/features";
 const FILES_DIR: &str = "blueprints/files";
 const INDEX_FILE: &str = "blueprints/index.json";
+// Derived reverse index (file → criteria). Lives in the gitignored cache dir,
+// NOT in committed blueprints/ — it is fully rebuildable from the .md files.
+const BINDINGS_FILE: &str = ".blueprint/bindings.json";
 const CHECK_RESULTS_DIR: &str = ".blueprint/check-results";
 const CHECK_CACHE_DIR: &str = ".blueprint/check-cache";
 
@@ -105,36 +108,53 @@ pub fn load_index(project_root: &Path) -> Result<BlueprintIndex> {
 }
 
 pub fn rebuild_index(project_root: &Path) -> Result<BlueprintIndex> {
-    let mut entries = Vec::new();
+    // Collect each parsed blueprint with its project-relative path; both the
+    // index (index.json) and the reverse binding index (.blueprint/bindings.json)
+    // are derived from this single parse pass.
+    let mut parsed: Vec<(Blueprint, String)> = Vec::new();
 
-    // Scan features
     let features_dir = project_root.join(FEATURES_DIR);
     if features_dir.exists() {
-        scan_blueprint_dir(&features_dir, project_root, &mut entries)?;
+        scan_blueprint_dir(&features_dir, project_root, &mut parsed)?;
     }
 
-    // Scan files (recursive)
     let files_dir = project_root.join(FILES_DIR);
     if files_dir.exists() {
-        scan_blueprint_dir_recursive(&files_dir, project_root, &mut entries)?;
+        scan_blueprint_dir_recursive(&files_dir, project_root, &mut parsed)?;
     }
 
+    // index.json (committed)
+    let mut entries: Vec<BlueprintIndexEntry> = parsed
+        .iter()
+        .map(|(bp, rel)| to_index_entry(bp, rel.clone()))
+        .collect();
     entries.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-
     let index = BlueprintIndex {
         version: 1,
         blueprints: entries,
     };
+    std::fs::write(
+        project_root.join(INDEX_FILE),
+        serde_json::to_string_pretty(&index)?,
+    )?;
 
-    let json = serde_json::to_string_pretty(&index)?;
-    std::fs::write(project_root.join(INDEX_FILE), json)?;
+    // .blueprint/bindings.json (derived reverse index, NOT committed — fully
+    // rebuildable from the .md files; lives in the gitignored cache dir).
+    let bps: Vec<&Blueprint> = parsed.iter().map(|(bp, _)| bp).collect();
+    let bindings = crate::blueprint::bindings::build_bindings(&bps);
+    let bindings_path = project_root.join(BINDINGS_FILE);
+    if let Some(dir) = bindings_path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&bindings_path, serde_json::to_string_pretty(&bindings)?)?;
+
     Ok(index)
 }
 
 fn scan_blueprint_dir(
     dir: &Path,
     project_root: &Path,
-    entries: &mut Vec<BlueprintIndexEntry>,
+    parsed: &mut Vec<(Blueprint, String)>,
 ) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -146,7 +166,7 @@ fn scan_blueprint_dir(
             if let Ok(raw) = std::fs::read_to_string(&path) {
                 if let Ok(bp) = parser::parse(&raw) {
                     if let Ok(rel_path) = path.strip_prefix(project_root) {
-                        entries.push(to_index_entry(&bp, rel_path.to_string_lossy().to_string()));
+                        parsed.push((bp, rel_path.to_string_lossy().to_string()));
                     }
                 }
             }
@@ -158,13 +178,13 @@ fn scan_blueprint_dir(
 fn scan_blueprint_dir_recursive(
     dir: &Path,
     project_root: &Path,
-    entries: &mut Vec<BlueprintIndexEntry>,
+    parsed: &mut Vec<(Blueprint, String)>,
 ) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            scan_blueprint_dir_recursive(&path, project_root, entries)?;
+            scan_blueprint_dir_recursive(&path, project_root, parsed)?;
         } else if path
             .file_name()
             .map_or(false, |n| n.to_string_lossy().ends_with(".blueprint.md"))
@@ -172,7 +192,7 @@ fn scan_blueprint_dir_recursive(
             if let Ok(raw) = std::fs::read_to_string(&path) {
                 if let Ok(bp) = parser::parse(&raw) {
                     if let Ok(rel_path) = path.strip_prefix(project_root) {
-                        entries.push(to_index_entry(&bp, rel_path.to_string_lossy().to_string()));
+                        parsed.push((bp, rel_path.to_string_lossy().to_string()));
                     }
                 }
             }
