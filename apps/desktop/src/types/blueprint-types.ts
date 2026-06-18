@@ -14,6 +14,13 @@ export type BlueprintOwner = "human" | "ai" | "collaborative";
 export type CheckVerdict = "pass" | "fail" | "unclear";
 
 export interface AcceptanceCriterion {
+  /** Stable id (ULID), persisted in the Markdown as a `<!-- #ULID -->` marker
+   *  on the Rust side. Optional here: criteria loaded from the backend always
+   *  carry it, and edits must preserve it (spread the original object); newly
+   *  added criteria omit it and the backend mints one on save. Keeping it on
+   *  the type stops a structured-view save from silently dropping the id and
+   *  forcing a re-mint (which would break per-criterion state addressing). */
+  id?: string;
   text: string;
   checked: boolean;
 }
