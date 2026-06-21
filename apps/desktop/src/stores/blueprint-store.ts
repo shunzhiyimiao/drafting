@@ -5,6 +5,7 @@ import type {
   BlueprintIndex,
   BlueprintSection,
   CheckResult,
+  Estimate,
   TemplateInfo,
   ValidationResult,
 } from "../types/blueprint-types";
@@ -23,6 +24,9 @@ interface BlueprintState {
   loading: boolean;
   templates: TemplateInfo[];
   checkResults: Record<string, CheckResult[]>;
+  /** S6 feedback surface: per-blueprint criterion estimates (verdict + why +
+   *  stale/drift), keyed by blueprintId. */
+  estimates: Record<string, Estimate[]>;
 
   // Actions
   initialize: (projectRoot: string) => Promise<void>;
@@ -48,6 +52,7 @@ interface BlueprintState {
   loadTemplates: () => Promise<void>;
   requestCheck: (blueprintId: string) => Promise<void>;
   loadCheckResults: (blueprintId: string) => Promise<void>;
+  loadEstimates: (blueprintId: string) => Promise<void>;
   lightweightCheck: (blueprintId: string) => Promise<ValidationResult>;
 }
 
@@ -62,6 +67,7 @@ export const useBlueprintStore = create<BlueprintState>((set, get) => ({
   loading: false,
   templates: [],
   checkResults: {},
+  estimates: {},
 
   initialize: async (projectRoot) => {
     await api.blueprintInit(projectRoot);
@@ -89,6 +95,8 @@ export const useBlueprintStore = create<BlueprintState>((set, get) => ({
         activeBlueprintId: blueprintId,
         viewMode: mode,
       });
+      // Load the feedback-surface estimates for this blueprint (best-effort).
+      void get().loadEstimates(blueprintId);
     } finally {
       set({ loading: false });
     }
@@ -174,6 +182,7 @@ export const useBlueprintStore = create<BlueprintState>((set, get) => ({
     if (!projectRoot) return;
     await api.requestCheck(projectRoot, blueprintId);
     await get().loadCheckResults(blueprintId);
+    await get().loadEstimates(blueprintId);
   },
 
   loadCheckResults: async (blueprintId) => {
@@ -181,6 +190,17 @@ export const useBlueprintStore = create<BlueprintState>((set, get) => ({
     if (!projectRoot) return;
     const results = await api.getCheckResults(projectRoot, blueprintId);
     set({ checkResults: { ...checkResults, [blueprintId]: results } });
+  },
+
+  loadEstimates: async (blueprintId) => {
+    const { projectRoot, estimates } = get();
+    if (!projectRoot) return;
+    try {
+      const next = await api.getEstimates(projectRoot, blueprintId);
+      set({ estimates: { ...estimates, [blueprintId]: next } });
+    } catch {
+      // best-effort: the feedback surface degrades to "no estimate yet"
+    }
   },
 
   lightweightCheck: async (blueprintId) => {

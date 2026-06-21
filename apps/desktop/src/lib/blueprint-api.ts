@@ -5,6 +5,7 @@ import type {
   BlueprintIndex,
   BlueprintSection,
   CheckResult,
+  Estimate,
   TemplateInfo,
   ValidationResult,
 } from "../types/blueprint-types";
@@ -129,6 +130,13 @@ export async function getCheckResults(
   blueprintId: string,
 ): Promise<CheckResult[]> {
   return invoke("blueprint_get_check_results", { projectRoot, blueprintId });
+}
+
+export async function getEstimates(
+  projectRoot: string,
+  blueprintId: string,
+): Promise<Estimate[]> {
+  return invoke("blueprint_get_estimates", { projectRoot, blueprintId });
 }
 
 export async function rebuildIndex(

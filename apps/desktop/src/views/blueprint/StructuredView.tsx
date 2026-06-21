@@ -1,8 +1,9 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { AcceptanceCriteriaEditor } from "./AcceptanceCriteriaEditor";
 import { AiGenerateDialog } from "../../components/AiGenerateDialog";
+import { subscribeSyncBus } from "../../lib/sync-bus";
 import type {
   Blueprint,
   BlueprintSection,
@@ -42,6 +43,36 @@ export function StructuredView() {
   const updateStructured = useBlueprintStore((s) => s.updateStructured);
   const toggleCriterion = useBlueprintStore((s) => s.toggleCriterion);
   const projectRoot = useBlueprintStore((s) => s.projectRoot ?? "");
+  const estimatesByBp = useBlueprintStore((s) => s.estimates);
+  const loadEstimates = useBlueprintStore((s) => s.loadEstimates);
+  const estimates = activeBlueprint
+    ? estimatesByBp[activeBlueprint.frontMatter.blueprintId]
+    : undefined;
+
+  // S6: live-refresh the feedback surface when this blueprint's verdicts drift
+  // (S5) or a check completes — so badges re-render without a manual reload.
+  const activeId = activeBlueprint?.frontMatter.blueprintId;
+  useEffect(() => {
+    if (!activeId) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void subscribeSyncBus((env) => {
+      const p = env.payload as
+        | { domain?: string; event?: { type?: string; data?: { feature_id?: string } } }
+        | undefined;
+      if (p?.domain !== "Blueprint") return;
+      const t = p.event?.type;
+      if (t !== "DriftDetected" && t !== "CheckCompleted") return;
+      if (p.event?.data?.feature_id === activeId) void loadEstimates(activeId);
+    }).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [activeId, loadEstimates]);
   const [criteriaAiSectionIdx, setCriteriaAiSectionIdx] = useState<number | null>(null);
 
   const saveChanges = useCallback(
@@ -193,6 +224,7 @@ export function StructuredView() {
             {section.kind.kind === "acceptanceCriteria" ? (
               <AcceptanceCriteriaEditor
                 criteria={section.criteria}
+                estimates={estimates}
                 onToggle={(ci, checked) => {
                   toggleCriterion(fm.blueprintId, ci, checked);
                 }}

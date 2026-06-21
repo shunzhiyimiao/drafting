@@ -91,6 +91,21 @@ export interface BlueprintIndex {
   blueprints: BlueprintIndexEntry[];
 }
 
+/** S3/S6 read-only satisfaction estimate for one criterion (the feedback
+ *  surface's data source): the fused verdict + why + freshness. */
+export interface Estimate {
+  criterionId: string;
+  blueprintId: string;
+  verdict: CheckVerdict | null;
+  /** A bound file changed since the last check — verdict may be out of date. */
+  stale: boolean;
+  /** S5: an established verdict whose bound code changed — verdict is suspect. */
+  drifted: boolean;
+  /** Why this verdict (carries the deciding sensor + LLM rationale). */
+  explanation: string | null;
+  checkedAt: number | null;
+}
+
 export interface CheckResult {
   blueprintId: string;
   /** Stable id of the criterion this verdict is for (S0.4 — was a positional

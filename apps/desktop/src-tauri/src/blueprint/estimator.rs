@@ -37,6 +37,10 @@ pub struct Estimate {
     /// changed — the verdict is suspect (drift), not just any file touch.
     /// Cleared on the next check (refresh_from_checks).
     pub drifted: bool,
+    /// S6: the verdict's rationale (carries the deciding sensor, e.g.
+    /// "[compile gate] ..." / "[tests] ...", plus the LLM's reason) so the
+    /// feedback surface can show *why* this is the verdict. None until checked.
+    pub explanation: Option<String>,
     pub checked_at: Option<u64>,
 }
 
@@ -66,6 +70,7 @@ impl Estimator {
                     verdict: Some(r.verdict),
                     stale: false,
                     drifted: false, // a fresh check resolves any prior drift
+                    explanation: Some(r.explanation),
                     checked_at: Some(r.checked_at),
                 },
             );
@@ -108,6 +113,7 @@ impl Estimator {
                             verdict: None,
                             stale: true,
                             drifted: false,
+                            explanation: None,
                             checked_at: None,
                         },
                     );
