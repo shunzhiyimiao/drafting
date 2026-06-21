@@ -82,7 +82,9 @@ export type BlueprintEvent =
   | { type: "FeatureCreated"; data: { feature_id: string } }
   | { type: "FeatureUpdated"; data: { feature_id: string } }
   | { type: "CheckCompleted"; data: { feature_id: string; passed: boolean } }
-  | { type: "IndexChanged" };
+  | { type: "IndexChanged" }
+  // S5: a criterion with an established verdict drifted (bound code changed).
+  | { type: "DriftDetected"; data: { feature_id: string; criterion_id: string } };
 
 // -- Headquarters --
 

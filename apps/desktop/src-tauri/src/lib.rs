@@ -365,8 +365,12 @@ pub fn run() {
             // its own in-memory state — it never publishes or triggers an action.
             let estimator = app.state::<Arc<Estimator>>().inner().clone();
             let mut est_rx = bus.subscribe();
+            // The estimator stays event-free; the subscription publishes the S5
+            // drift signal on its behalf, using this bus handle.
+            let drift_bus = bus.inner().clone();
             tauri::async_runtime::spawn(async move {
                 use sync_bus::events::{BlueprintEvent, EditorEvent, SyncBusEvent};
+                use sync_bus::types::Origin;
                 loop {
                     match est_rx.recv().await {
                         Ok(env) => match env.payload {
@@ -380,10 +384,21 @@ pub fn run() {
                                 );
                             }
                             SyncBusEvent::Editor(EditorEvent::FileSaved { path }) => {
-                                estimator.mark_stale_for_file(
+                                // S5: bound code changed → mark stale; for criteria
+                                // that DRIFTED (had a verdict), publish DriftDetected.
+                                let drifted = estimator.mark_stale_for_file(
                                     std::path::Path::new(&app_get_cwd()),
                                     &path,
                                 );
+                                for (criterion_id, feature_id) in drifted {
+                                    drift_bus.publish(
+                                        Origin::new("estimator"),
+                                        SyncBusEvent::Blueprint(BlueprintEvent::DriftDetected {
+                                            feature_id,
+                                            criterion_id,
+                                        }),
+                                    );
+                                }
                             }
                             _ => {}
                         },

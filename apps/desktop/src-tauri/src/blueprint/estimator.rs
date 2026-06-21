@@ -31,8 +31,12 @@ pub struct Estimate {
     /// None = no verdict yet (e.g. a bound file changed before any check ran).
     pub verdict: Option<CheckVerdict>,
     /// A bound file changed after the last check, so the verdict may be out of
-    /// date. S3 only *marks* this; emitting a drift signal or re-checking is S5.
+    /// date.
     pub stale: bool,
+    /// S5: this criterion had an established verdict and then bound code
+    /// changed — the verdict is suspect (drift), not just any file touch.
+    /// Cleared on the next check (refresh_from_checks).
+    pub drifted: bool,
     pub checked_at: Option<u64>,
 }
 
@@ -61,6 +65,7 @@ impl Estimator {
                     blueprint_id: r.blueprint_id,
                     verdict: Some(r.verdict),
                     stale: false,
+                    drifted: false, // a fresh check resolves any prior drift
                     checked_at: Some(r.checked_at),
                 },
             );
@@ -68,27 +73,48 @@ impl Estimator {
     }
 
     /// A bound file changed → mark every criterion bound to it (via the S0.3
-    /// reverse index) `stale`. Read-only: marks state, triggers nothing. A
-    /// criterion with no prior estimate gets one with `verdict: None`.
-    pub fn mark_stale_for_file(&self, root: &Path, file: &str) {
+    /// reverse index) `stale`. Returns the criteria that **drifted** (S5): those
+    /// that had an established verdict and weren't already stale — their verdict
+    /// is now suspect. Newly-seen criteria (no prior verdict) are marked stale
+    /// but are NOT drift.
+    ///
+    /// Read-only w.r.t. the world: updates in-memory state and returns the drift
+    /// list; publishing the `DriftDetected` signal is the caller's job, keeping
+    /// the estimator itself event-free (the S3 invariant).
+    pub fn mark_stale_for_file(&self, root: &Path, file: &str) -> Vec<(String, String)> {
         let index = storage::load_bindings(root);
         let affected = bindings::criteria_for_file(&index, file);
+        let mut drifted = Vec::new();
         if affected.is_empty() {
-            return;
+            return drifted;
         }
         let mut state = self.state.lock().unwrap();
         for b in affected {
-            let e = state
-                .entry(b.criterion_id.clone())
-                .or_insert_with(|| Estimate {
-                    criterion_id: b.criterion_id.clone(),
-                    blueprint_id: b.blueprint_id.clone(),
-                    verdict: None,
-                    stale: false,
-                    checked_at: None,
-                });
-            e.stale = true;
+            match state.get_mut(&b.criterion_id) {
+                Some(e) => {
+                    // Drift = an established verdict that wasn't already stale.
+                    if e.verdict.is_some() && !e.stale {
+                        e.drifted = true;
+                        drifted.push((e.criterion_id.clone(), e.blueprint_id.clone()));
+                    }
+                    e.stale = true;
+                }
+                None => {
+                    state.insert(
+                        b.criterion_id.clone(),
+                        Estimate {
+                            criterion_id: b.criterion_id.clone(),
+                            blueprint_id: b.blueprint_id.clone(),
+                            verdict: None,
+                            stale: true,
+                            drifted: false,
+                            checked_at: None,
+                        },
+                    );
+                }
+            }
         }
+        drifted
     }
 
     /// Query the current estimates for a blueprint (order-stable by criterion id).
@@ -165,13 +191,16 @@ mod tests {
         .unwrap();
 
         let est = Estimator::new();
-        est.mark_stale_for_file(dir.path(), "a.ts");
+        let drifted = est.mark_stale_for_file(dir.path(), "a.ts");
         let estimates = est.estimates_for("BP1");
 
         assert_eq!(estimates.len(), 1);
         assert_eq!(estimates[0].criterion_id, "C1");
         assert!(estimates[0].stale);
         assert!(estimates[0].verdict.is_none(), "no check yet → verdict None");
+        // No prior verdict → marked stale but NOT drift.
+        assert!(!estimates[0].drifted);
+        assert!(drifted.is_empty(), "a never-checked criterion does not drift");
     }
 
     #[test]
@@ -196,10 +225,21 @@ mod tests {
 
         let est = Estimator::new();
         est.refresh_from_checks(dir.path(), "BP1"); // C1 = Pass, fresh
-        est.mark_stale_for_file(dir.path(), "a.ts"); // a.ts changed → C1 stale
+        let drifted = est.mark_stale_for_file(dir.path(), "a.ts"); // a.ts changed → C1 drifts
 
         let estimates = est.estimates_for("BP1");
         assert!(matches!(estimates[0].verdict, Some(CheckVerdict::Pass)));
         assert!(estimates[0].stale, "verdict kept, but flagged stale");
+        // S5: an established (Pass) verdict whose code changed is drift.
+        assert!(estimates[0].drifted);
+        assert_eq!(drifted, vec![("C1".to_string(), "BP1".to_string())]);
+
+        // A second file change does not re-report drift (already stale).
+        assert!(est.mark_stale_for_file(dir.path(), "a.ts").is_empty());
+
+        // Re-checking resolves the drift.
+        est.refresh_from_checks(dir.path(), "BP1");
+        assert!(!est.estimates_for("BP1")[0].drifted);
+        assert!(!est.estimates_for("BP1")[0].stale);
     }
 }

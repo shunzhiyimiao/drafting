@@ -275,6 +275,12 @@ pub enum BlueprintEvent {
         passed: bool,
     },
     IndexChanged,
+    /// S5: a criterion with an established verdict drifted because bound code
+    /// changed — its verdict is now suspect (re-check to refresh).
+    DriftDetected {
+        feature_id: String,
+        criterion_id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
