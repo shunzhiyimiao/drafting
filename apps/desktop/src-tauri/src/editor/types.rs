@@ -10,6 +10,29 @@ pub struct DirEntry {
     pub modified_at: u64,
 }
 
+/// Who a code artifact came from (v1.5 S1 provenance). The `Ai` variant exists
+/// in the model but is NOT produced by file-level inference today — AI
+/// completions don't stamp provenance yet, so anything not tool-generated is
+/// attributed to `Human`. Distinguishing AI-written regions is block-level
+/// provenance, deferred to v1.5.x. Internally tagged for ergonomic TS consumption.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ProvenanceSource {
+    Human,
+    Ai { model: String },
+    Derived { generator: String },
+}
+
+/// File-level provenance: where the file came from + a best-effort "when".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileProvenance {
+    pub source: ProvenanceSource,
+    /// Best-effort "when": file mtime in ms (0 if not yet on disk). Precise
+    /// per-region timing is block-level provenance, deferred to v1.5.x.
+    pub last_modified_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileIdentity {
@@ -19,6 +42,11 @@ pub struct FileIdentity {
     pub file_blueprint_id: Option<String>,
     pub feature_blueprint_ids: Vec<String>,
     pub readonly: bool,
+    /// S1: where this file came from (source + when). Coarser than the
+    /// block-level "any region traceable" goal — adapter files are really
+    /// collaborative (patchboard skeleton + human method bodies), but
+    /// file-level can only stamp the skeleton's origin.
+    pub provenance: FileProvenance,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

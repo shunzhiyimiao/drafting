@@ -1,6 +1,7 @@
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
-use crate::editor::types::FileIdentity;
+use crate::editor::types::{FileIdentity, FileProvenance, ProvenanceSource};
 
 /// Compute the FileIdentity for a file path given its content.
 pub fn compute_identity(project_root: &Path, rel_path: &str, content: &str) -> FileIdentity {
@@ -17,6 +18,13 @@ pub fn compute_identity(project_root: &Path, rel_path: &str, content: &str) -> F
     // Find feature blueprints that reference this file
     let feature_blueprint_ids = find_feature_blueprints(project_root, rel_path);
 
+    let provenance = compute_provenance(
+        project_root,
+        rel_path,
+        is_generated || tool_owned,
+        adapter_id.is_some(),
+    );
+
     FileIdentity {
         path: rel_path.to_string(),
         is_generated: is_generated || tool_owned,
@@ -24,6 +32,42 @@ pub fn compute_identity(project_root: &Path, rel_path: &str, content: &str) -> F
         file_blueprint_id,
         feature_blueprint_ids,
         readonly: tool_owned,
+        provenance,
+    }
+}
+
+/// File-level provenance inference (S1). Source from generation markers; "when"
+/// from file mtime. Honest about its limits: the `Ai` source is never produced
+/// here (no AI-stamping convention yet), and adapter files are really
+/// collaborative — file-level can only record the skeleton's origin.
+fn compute_provenance(
+    project_root: &Path,
+    rel_path: &str,
+    generated: bool,
+    is_adapter: bool,
+) -> FileProvenance {
+    let source = if is_adapter {
+        ProvenanceSource::Derived {
+            generator: "patchboard".to_string(),
+        }
+    } else if generated {
+        ProvenanceSource::Derived {
+            generator: "codegen".to_string(),
+        }
+    } else {
+        ProvenanceSource::Human
+    };
+
+    let last_modified_ms = std::fs::metadata(project_root.join(rel_path))
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    FileProvenance {
+        source,
+        last_modified_ms,
     }
 }
 
@@ -111,4 +155,53 @@ fn extract_blueprint_id(md: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn auto_generated_is_derived_codegen() {
+        let dir = TempDir::new().unwrap();
+        let id = compute_identity(dir.path(), "packages/sockets/src/x.ts", "// AUTO-GENERATED\n");
+        assert_eq!(
+            id.provenance.source,
+            ProvenanceSource::Derived {
+                generator: "codegen".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn adapter_marker_is_derived_patchboard() {
+        let dir = TempDir::new().unwrap();
+        let id = compute_identity(
+            dir.path(),
+            "packages/adapters/src/Mailer.ts",
+            "// @adapter-id: 01ABC\nexport class Mailer {}\n",
+        );
+        assert_eq!(
+            id.provenance.source,
+            ProvenanceSource::Derived {
+                generator: "patchboard".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn plain_file_is_human() {
+        let dir = TempDir::new().unwrap();
+        let id = compute_identity(dir.path(), "src/app.ts", "export const x = 1;\n");
+        assert_eq!(id.provenance.source, ProvenanceSource::Human);
+    }
+
+    #[test]
+    fn mtime_recorded_for_existing_file() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("real.ts"), "export const x = 1;\n").unwrap();
+        let id = compute_identity(dir.path(), "real.ts", "export const x = 1;\n");
+        assert!(id.provenance.last_modified_ms > 0, "mtime should be set");
+    }
 }

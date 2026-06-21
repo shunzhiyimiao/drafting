@@ -6,6 +6,20 @@ export interface DirEntry {
   modifiedAt: number;
 }
 
+/** v1.5 S1 provenance source. `ai` exists in the model but file-level
+ *  inference never produces it yet (no AI-stamping convention) — block-level
+ *  attribution is deferred to v1.5.x. */
+export type ProvenanceSource =
+  | { kind: "human" }
+  | { kind: "ai"; model: string }
+  | { kind: "derived"; generator: string };
+
+export interface FileProvenance {
+  source: ProvenanceSource;
+  /** Best-effort mtime in ms (0 if not on disk). */
+  lastModifiedMs: number;
+}
+
 export interface FileIdentity {
   path: string;
   isGenerated: boolean;
@@ -13,6 +27,7 @@ export interface FileIdentity {
   fileBlueprintId: string | null;
   featureBlueprintIds: string[];
   readonly: boolean;
+  provenance: FileProvenance;
 }
 
 export interface FileContent {
