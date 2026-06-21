@@ -190,12 +190,16 @@ pub async fn run_check(
     let items = parse_verdicts(&response)
         .map_err(|e| format!("Failed to parse AI response: {e}\n---\n{response}"))?;
 
-    // S4 (first leg): run the compile gate once for the project. A failing gate
-    // means the code doesn't build, so any LLM "pass" gets downgraded to
-    // Unclear below — the gate catches the LLM hallucinating a pass on code
-    // that doesn't even compile. Gate is project-level; precise compile-error→
-    // criterion attribution is a later refinement.
-    let gate = crate::blueprint::language_provider::run_gate(&project_root).await;
+    // S4: run the deterministic sensors once for the project, then fuse them
+    // per criterion below (gate → tests → LLM residual).
+    //   - compile gate (cargo check): a failing gate means the code doesn't
+    //     build, so an LLM "pass" is downgraded to Unclear.
+    //   - test sensor (cargo test, module granularity): a failing mapped module
+    //     forces Fail; module-green is a weak signal that falls back to the LLM.
+    // Both are project-level and may be slow / unavailable (degrade gracefully).
+    use crate::blueprint::language_provider as lp;
+    let gate = lp::run_gate(&project_root).await;
+    let test_report = lp::run_rust_tests(&project_root).await;
 
     let mut all_pass = true;
     let now = current_millis();
@@ -209,17 +213,31 @@ pub async fn run_check(
             _ => CheckVerdict::Unclear,
         };
         let llm_said_pass = matches!(llm_verdict, CheckVerdict::Pass);
-        let verdict = crate::blueprint::language_provider::fuse_verdict(llm_verdict, gate);
+        // Route this criterion to its module's test outcome (None if no Rust
+        // binding / no test report), then fuse all three sensors.
+        let module = lp::module_of_criterion(&criteria[item.index], &bp);
+        let test = test_report
+            .as_ref()
+            .map_or(lp::TestOutcome::Unavailable, |r| {
+                r.outcome_for_module(module.as_deref())
+            });
+        let verdict = lp::fuse_verdict(llm_verdict, gate, test);
         let gate_downgraded = llm_said_pass && matches!(verdict, CheckVerdict::Unclear);
+        let test_failed = matches!(test, lp::TestOutcome::Failed);
         if !matches!(verdict, CheckVerdict::Pass) {
             all_pass = false;
         }
-        // Keep the verdict and its explanation consistent: if the gate
-        // downgraded a claimed pass, say so instead of showing the LLM's
-        // pass rationale next to an Unclear verdict.
+        // Keep the verdict and its explanation consistent: name the sensor that
+        // moved the verdict so the UI doesn't show the LLM's rationale next to a
+        // gate/test-driven result.
         let explanation = if gate_downgraded {
             format!(
                 "[compile gate] project does not build — LLM pass downgraded to unclear. {}",
+                item.explanation
+            )
+        } else if test_failed {
+            format!(
+                "[tests] mapped module has failing tests — verdict is Fail. {}",
                 item.explanation
             )
         } else {
