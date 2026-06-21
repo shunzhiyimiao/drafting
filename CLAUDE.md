@@ -2072,3 +2072,11 @@ pub enum EditorEvent {
 | P1-5 BSL 1.1 LICENSE | ⏳ open(用户在 GitHub 上自行添加;参数已定:Licensor=Nebula,Change Date=2030-06-12,Change License=Apache-2.0,Additional Use Grant=个人/非商用生产豁免) |
 
 说明:v1 的 Privacy Filter 为设计三层中的第一层(文件路径黑名单),内容扫描与用户审批留待后续迭代(见 Part 13)。
+
+---
+
+## v1.5 范围指针
+
+> v1.5 范围由 `docs/v1.5-design.md` 定义(闭合 spec↔code 回路 / 验证侧 / Rust+TS)。历史性「留 v1.5」标记降级为 backlog,待单独 triage。
+
+S0–S7 内部细节以 `docs/v1.5-design.md` 为准;若与早期设计笔记有出入,以该文档为 v1.5 工作定义。
