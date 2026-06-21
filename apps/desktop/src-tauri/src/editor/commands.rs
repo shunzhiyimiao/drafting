@@ -8,6 +8,9 @@ use crate::editor::identity;
 use crate::editor::search;
 use crate::editor::search_advanced::{run_advanced_search, SearchRegistry};
 use crate::editor::types::*;
+use crate::sync_bus::events::{EditorEvent, SyncBusEvent};
+use crate::sync_bus::types::Origin;
+use crate::sync_bus::SyncBus;
 
 #[tauri::command]
 pub fn editor_list_dir(
@@ -34,17 +37,20 @@ pub fn editor_read_file(
     })
 }
 
-#[tauri::command]
-pub fn editor_write_file(
-    project_root: String,
-    rel_path: String,
-    content: String,
+/// Write a file and, on success, publish `EditorEvent::FileSaved` on the bus
+/// (S2: the code-change event the S3 estimator subscribes to). Extracted from
+/// the Tauri command so the write-then-notify behavior is unit-testable.
+/// A rejected (tool-owned) write publishes nothing.
+pub fn write_file_and_notify(
+    root: &Path,
+    rel_path: &str,
+    content: &str,
+    bus: &SyncBus,
 ) -> Result<(), String> {
-    let root = Path::new(&project_root);
     // Reject write if file is tool-owned
-    let current = fs_ops::read_file(root, &rel_path).ok();
+    let current = fs_ops::read_file(root, rel_path).ok();
     if let Some((cur_content, _)) = &current {
-        let identity = identity::compute_identity(root, &rel_path, cur_content);
+        let identity = identity::compute_identity(root, rel_path, cur_content);
         if identity.readonly {
             return Err(format!(
                 "File '{}' is tool-owned and read-only. Edit in Patchboard instead.",
@@ -52,7 +58,25 @@ pub fn editor_write_file(
             ));
         }
     }
-    fs_ops::write_file(root, &rel_path, &content).map_err(|e| e.to_string())
+    fs_ops::write_file(root, rel_path, content).map_err(|e| e.to_string())?;
+    bus.publish(
+        Origin::new("editor"),
+        SyncBusEvent::Editor(EditorEvent::FileSaved {
+            path: rel_path.to_string(),
+        }),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn editor_write_file(
+    project_root: String,
+    rel_path: String,
+    content: String,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<(), String> {
+    let root = Path::new(&project_root);
+    write_file_and_notify(root, &rel_path, &content, sync_bus.inner())
 }
 
 #[tauri::command]
@@ -93,4 +117,44 @@ pub async fn editor_cancel_search(
     registry: State<'_, Arc<SearchRegistry>>,
 ) -> Result<bool, String> {
     Ok(registry.cancel(&search_id).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn write_publishes_file_saved() {
+        let dir = TempDir::new().unwrap();
+        let bus = SyncBus::new();
+        let mut rx = bus.subscribe();
+
+        write_file_and_notify(dir.path(), "src/a.ts", "export const x = 1;", &bus).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("src/a.ts")).unwrap(), "export const x = 1;");
+
+        let env = rx.try_recv().expect("a FileSaved event should be published");
+        match env.payload {
+            SyncBusEvent::Editor(EditorEvent::FileSaved { path }) => assert_eq!(path, "src/a.ts"),
+            other => panic!("expected Editor(FileSaved), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_owned_write_rejected_and_silent() {
+        let dir = TempDir::new().unwrap();
+        // sockets/ is tool-owned → readonly; create the file so the guard reads it
+        std::fs::create_dir_all(dir.path().join("packages/sockets/src")).unwrap();
+        std::fs::write(
+            dir.path().join("packages/sockets/src/x.ts"),
+            "// AUTO-GENERATED\n",
+        )
+        .unwrap();
+        let bus = SyncBus::new();
+        let mut rx = bus.subscribe();
+
+        let res = write_file_and_notify(dir.path(), "packages/sockets/src/x.ts", "hacked", &bus);
+        assert!(res.is_err(), "tool-owned write must be rejected");
+        assert!(rx.try_recv().is_err(), "rejected write must publish nothing");
+    }
 }
