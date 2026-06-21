@@ -190,25 +190,46 @@ pub async fn run_check(
     let items = parse_verdicts(&response)
         .map_err(|e| format!("Failed to parse AI response: {e}\n---\n{response}"))?;
 
+    // S4 (first leg): run the compile gate once for the project. A failing gate
+    // means the code doesn't build, so any LLM "pass" gets downgraded to
+    // Unclear below — the gate catches the LLM hallucinating a pass on code
+    // that doesn't even compile. Gate is project-level; precise compile-error→
+    // criterion attribution is a later refinement.
+    let gate = crate::blueprint::language_provider::run_gate(&project_root).await;
+
     let mut all_pass = true;
     let now = current_millis();
     for item in &items {
         if item.index >= criteria.len() {
             continue;
         }
-        let verdict = match item.verdict.to_lowercase().as_str() {
+        let llm_verdict = match item.verdict.to_lowercase().as_str() {
             "pass" => CheckVerdict::Pass,
             "fail" => CheckVerdict::Fail,
             _ => CheckVerdict::Unclear,
         };
+        let llm_said_pass = matches!(llm_verdict, CheckVerdict::Pass);
+        let verdict = crate::blueprint::language_provider::fuse_verdict(llm_verdict, gate);
+        let gate_downgraded = llm_said_pass && matches!(verdict, CheckVerdict::Unclear);
         if !matches!(verdict, CheckVerdict::Pass) {
             all_pass = false;
         }
+        // Keep the verdict and its explanation consistent: if the gate
+        // downgraded a claimed pass, say so instead of showing the LLM's
+        // pass rationale next to an Unclear verdict.
+        let explanation = if gate_downgraded {
+            format!(
+                "[compile gate] project does not build — LLM pass downgraded to unclear. {}",
+                item.explanation
+            )
+        } else {
+            item.explanation.clone()
+        };
         let result = CheckResult {
             blueprint_id: blueprint_id.clone(),
             criterion_id: criteria[item.index].id.clone(),
             verdict,
-            explanation: item.explanation.clone(),
+            explanation,
             suggestion: item.suggestion.clone(),
             references: Vec::new(),
             checked_at: now,
