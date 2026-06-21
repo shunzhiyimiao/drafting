@@ -1,6 +1,7 @@
 pub mod bindings;
 pub mod check;
 pub mod commands;
+pub mod estimator;
 pub mod error;
 pub mod parser;
 pub mod storage;

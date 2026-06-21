@@ -20,6 +20,7 @@ use lsp::LspManager;
 use lsp::commands::LspForwarderRegistry;
 use ai_provider::AiRunner;
 use editor::search_advanced::SearchRegistry;
+use blueprint::estimator::Estimator;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -149,6 +150,24 @@ fn app_get_recent_workspaces() -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// S3: query the read-only estimator for a blueprint's current per-criterion
+/// estimates. Lazily fills from persisted check results on a cold cache (so
+/// "queryable at any time" holds even before any event), then returns the
+/// in-memory view (which carries runtime `stale` flags from file changes).
+#[tauri::command]
+fn blueprint_get_estimates(
+    project_root: String,
+    blueprint_id: String,
+    estimator: tauri::State<'_, Arc<Estimator>>,
+) -> Result<Vec<blueprint::estimator::Estimate>, String> {
+    let mut est = estimator.estimates_for(&blueprint_id);
+    if est.is_empty() {
+        estimator.refresh_from_checks(std::path::Path::new(&project_root), &blueprint_id);
+        est = estimator.estimates_for(&blueprint_id);
+    }
+    Ok(est)
 }
 
 #[tauri::command]
@@ -331,6 +350,7 @@ pub fn run() {
         .manage(lsp_forwarder_registry)
         .manage(ai_runner)
         .manage(search_registry)
+        .manage(Arc::new(Estimator::new()))
         .setup(|app| {
             let handle = app.handle().clone();
             let bus = app.state::<SyncBus>();
@@ -340,6 +360,38 @@ pub fn run() {
             // Give the codegen proxy the app handle so it can locate the bundled
             // codegen-server.cjs from the resource dir in release builds.
             app.state::<CodegenProxy>().set_app_handle(app.handle().clone());
+
+            // S3: the read-only estimator subscribes to the bus. It only updates
+            // its own in-memory state — it never publishes or triggers an action.
+            let estimator = app.state::<Arc<Estimator>>().inner().clone();
+            let mut est_rx = bus.subscribe();
+            tauri::async_runtime::spawn(async move {
+                use sync_bus::events::{BlueprintEvent, EditorEvent, SyncBusEvent};
+                loop {
+                    match est_rx.recv().await {
+                        Ok(env) => match env.payload {
+                            SyncBusEvent::Blueprint(BlueprintEvent::CheckCompleted {
+                                feature_id,
+                                ..
+                            }) => {
+                                estimator.refresh_from_checks(
+                                    std::path::Path::new(&app_get_cwd()),
+                                    &feature_id,
+                                );
+                            }
+                            SyncBusEvent::Editor(EditorEvent::FileSaved { path }) => {
+                                estimator.mark_stale_for_file(
+                                    std::path::Path::new(&app_get_cwd()),
+                                    &path,
+                                );
+                            }
+                            _ => {}
+                        },
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        Err(_) => {} // lagged — keep consuming
+                    }
+                }
+            });
 
             Ok(())
         })
@@ -379,6 +431,7 @@ pub fn run() {
             blueprint::commands::blueprint_request_check,
             blueprint::commands::blueprint_get_check_results,
             blueprint::commands::blueprint_rebuild_index,
+            blueprint_get_estimates,
             editor::commands::editor_list_dir,
             editor::commands::editor_read_file,
             editor::commands::editor_write_file,

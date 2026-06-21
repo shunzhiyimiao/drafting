@@ -240,6 +240,19 @@ pub fn save_check_result(project_root: &Path, result: &CheckResult) -> Result<()
     Ok(())
 }
 
+/// Load the derived reverse binding index (S0.3). Returns an empty index if the
+/// file is missing or unreadable — it is a rebuildable cache, never fatal.
+pub fn load_bindings(project_root: &Path) -> crate::blueprint::bindings::BindingsIndex {
+    let path = project_root.join(BINDINGS_FILE);
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+        .unwrap_or(crate::blueprint::bindings::BindingsIndex {
+            version: 1,
+            bindings: Vec::new(),
+        })
+}
+
 pub fn load_check_results(project_root: &Path, blueprint_id: &str) -> Result<Vec<CheckResult>> {
     let dir = project_root.join(CHECK_RESULTS_DIR);
     if !dir.exists() {
