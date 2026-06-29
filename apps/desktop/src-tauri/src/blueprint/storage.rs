@@ -69,7 +69,19 @@ pub fn load_blueprint(project_root: &Path, blueprint_id: &str) -> Result<Bluepri
 
     let path = project_root.join(&entry.file_path);
     let raw = std::fs::read_to_string(&path)?;
-    parser::parse(&raw)
+    let bp = parser::parse(&raw)?;
+
+    // S0.1 self-heal: if the criteria had no `<!-- #ULID -->` markers, parse
+    // just minted them — persist now so the ids are STABLE across future loads
+    // (otherwise every parse mints fresh ids and check-results / the S6
+    // feedback surface can't match a criterion). Round-trip safe: once markers
+    // exist, re-serialization reproduces the file and we skip the write.
+    if let Ok(reserialized) = parser::serialize(&bp) {
+        if reserialized != raw {
+            let _ = std::fs::write(&path, &reserialized);
+        }
+    }
+    Ok(bp)
 }
 
 pub fn load_blueprint_raw(project_root: &Path, blueprint_id: &str) -> Result<String> {
@@ -371,5 +383,50 @@ mod tests {
 
         delete_blueprint(tmp.path(), &id).unwrap();
         assert_eq!(load_index(tmp.path()).unwrap().blueprints.len(), 0);
+    }
+
+    #[test]
+    fn load_blueprint_self_heals_missing_criterion_markers() {
+        let tmp = TempDir::new().unwrap();
+        init_blueprint_dirs(tmp.path()).unwrap();
+
+        // A blueprint .md with NO criterion id markers (e.g. created before
+        // S0.1 / never saved since).
+        let md = "---\nblueprintId: bp-selfheal-1\ntype: feature\n\
+                  displayName: T\nstatus: draft\npriority: high\n---\n\n\
+                  ## Acceptance Criteria\n\n- [ ] First item\n- [x] Second item\n";
+        assert!(!md.contains("<!-- #"));
+        let path = tmp.path().join("blueprints/features/t.blueprint.md");
+        std::fs::write(&path, md).unwrap();
+        rebuild_index(tmp.path()).unwrap();
+
+        let bp1 = load_blueprint(tmp.path(), "bp-selfheal-1").unwrap();
+        let ids1: Vec<_> = bp1
+            .sections
+            .iter()
+            .find(|s| s.kind.is_acceptance_criteria())
+            .unwrap()
+            .criteria
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+
+        // Markers are now persisted to disk…
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("<!-- #"), "self-heal should write markers back");
+
+        // …so a second load yields the SAME ids (stable across loads — the
+        // property S6's badge matching depends on).
+        let bp2 = load_blueprint(tmp.path(), "bp-selfheal-1").unwrap();
+        let ids2: Vec<_> = bp2
+            .sections
+            .iter()
+            .find(|s| s.kind.is_acceptance_criteria())
+            .unwrap()
+            .criteria
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+        assert_eq!(ids1, ids2, "criterion ids must be stable after self-heal");
     }
 }

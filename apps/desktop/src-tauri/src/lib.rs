@@ -378,6 +378,7 @@ pub fn run() {
                                 feature_id,
                                 ..
                             }) => {
+                                log::info!("estimator: CheckCompleted → refresh {feature_id}");
                                 estimator.refresh_from_checks(
                                     std::path::Path::new(&app_get_cwd()),
                                     &feature_id,
@@ -389,6 +390,10 @@ pub fn run() {
                                 let drifted = estimator.mark_stale_for_file(
                                     std::path::Path::new(&app_get_cwd()),
                                     &path,
+                                );
+                                log::info!(
+                                    "estimator: FileSaved {path} → {} criteria drifted",
+                                    drifted.len()
                                 );
                                 for (criterion_id, feature_id) in drifted {
                                     drift_bus.publish(
