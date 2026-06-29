@@ -94,30 +94,36 @@ impl Estimator {
             return drifted;
         }
         let mut state = self.state.lock().unwrap();
+        // Per-criterion diagnostic for drift debugging — off by default, surfaced
+        // with RUST_LOG=debug. The user-facing "N criteria drifted" summary is
+        // logged at info by the caller (lib.rs).
+        log::debug!(
+            "mark_stale file={file} affected={} state_size={}",
+            affected.len(),
+            state.len()
+        );
+        for b in &affected {
+            log::debug!(
+                "  crit={} in_state={} verdict_some={:?} stale={:?}",
+                b.criterion_id,
+                state.contains_key(&b.criterion_id),
+                state.get(&b.criterion_id).map(|e| e.verdict.is_some()),
+                state.get(&b.criterion_id).map(|e| e.stale)
+            );
+        }
         for b in affected {
-            match state.get_mut(&b.criterion_id) {
-                Some(e) => {
-                    // Drift = an established verdict that wasn't already stale.
-                    if e.verdict.is_some() && !e.stale {
-                        e.drifted = true;
-                        drifted.push((e.criterion_id.clone(), e.blueprint_id.clone()));
-                    }
-                    e.stale = true;
+            // Only an ESTABLISHED verdict can drift. A criterion with no
+            // estimate yet (never checked) is SKIPPED — we must not insert a
+            // verdict-less placeholder. Doing so polluted the state, and because
+            // the lazy fill in blueprint_get_estimates keys on "estimates
+            // empty", a placeholder permanently prevented the real verdict from
+            // ever loading — which silently broke drift entirely.
+            if let Some(e) = state.get_mut(&b.criterion_id) {
+                if e.verdict.is_some() && !e.stale {
+                    e.drifted = true;
+                    drifted.push((e.criterion_id.clone(), e.blueprint_id.clone()));
                 }
-                None => {
-                    state.insert(
-                        b.criterion_id.clone(),
-                        Estimate {
-                            criterion_id: b.criterion_id.clone(),
-                            blueprint_id: b.blueprint_id.clone(),
-                            verdict: None,
-                            stale: true,
-                            drifted: false,
-                            explanation: None,
-                            checked_at: None,
-                        },
-                    );
-                }
+                e.stale = true;
             }
         }
         drifted
@@ -200,12 +206,11 @@ mod tests {
         let drifted = est.mark_stale_for_file(dir.path(), "a.ts");
         let estimates = est.estimates_for("BP1");
 
-        assert_eq!(estimates.len(), 1);
-        assert_eq!(estimates[0].criterion_id, "C1");
-        assert!(estimates[0].stale);
-        assert!(estimates[0].verdict.is_none(), "no check yet → verdict None");
-        // No prior verdict → marked stale but NOT drift.
-        assert!(!estimates[0].drifted);
+        // A never-checked criterion (no estimate) is NOT given a placeholder —
+        // mark_stale only touches established estimates. So nothing is created
+        // and nothing drifts. (A verdict-less placeholder here used to block the
+        // lazy verdict load and silently break drift.)
+        assert!(estimates.is_empty(), "no placeholder for an unchecked criterion");
         assert!(drifted.is_empty(), "a never-checked criterion does not drift");
     }
 

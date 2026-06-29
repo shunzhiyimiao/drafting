@@ -361,6 +361,24 @@ pub fn run() {
             // codegen-server.cjs from the resource dir in release builds.
             app.state::<CodegenProxy>().set_app_handle(app.handle().clone());
 
+            // Rebuild the binding index on startup so .blueprint/bindings.json
+            // (the S0.3 reverse index S5 drift reads) is fresh — it was only
+            // rebuilt on blueprint save, so a project that hadn't saved since
+            // had a stale/empty index and drift silently found nothing. Guarded
+            // to blueprint projects so we never create blueprints/ or .blueprint/
+            // in an unrelated workspace.
+            {
+                let root = app_get_cwd();
+                let root_path = std::path::Path::new(&root);
+                if root_path.join("blueprints").is_dir() {
+                    if let Err(e) = blueprint::storage::rebuild_index(root_path) {
+                        log::warn!("startup rebuild_index failed: {e}");
+                    } else {
+                        log::info!("startup: rebuilt blueprint + binding index");
+                    }
+                }
+            }
+
             // S3: the read-only estimator subscribes to the bus. It only updates
             // its own in-memory state — it never publishes or triggers an action.
             let estimator = app.state::<Arc<Estimator>>().inner().clone();
