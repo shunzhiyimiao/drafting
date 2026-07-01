@@ -253,4 +253,68 @@ mod tests {
         assert!(!est.estimates_for("BP1")[0].drifted);
         assert!(!est.estimates_for("BP1")[0].stale);
     }
+
+    /// Regression for the S5 FileSaved→drift path (previously only hand-verified
+    /// in the running app): when a file bound to several criteria changes, EVERY
+    /// criterion with an established verdict must drift, and a never-checked
+    /// criterion bound to the same file must NOT. This is exactly what the lib.rs
+    /// FileSaved handler iterates over to publish DriftDetected.
+    #[test]
+    fn file_change_drifts_all_established_criteria_and_skips_unchecked() {
+        let dir = TempDir::new().unwrap();
+
+        // Three established criteria (C1..C3, distinct verdicts) + one that was
+        // never checked (C4) — all bound to the same file.
+        storage::save_check_result(dir.path(), &check_result("BP1", "C1", CheckVerdict::Pass))
+            .unwrap();
+        storage::save_check_result(dir.path(), &check_result("BP1", "C2", CheckVerdict::Fail))
+            .unwrap();
+        storage::save_check_result(dir.path(), &check_result("BP1", "C3", CheckVerdict::Unclear))
+            .unwrap();
+        let idx = bindings::BindingsIndex {
+            version: 1,
+            bindings: ["C1", "C2", "C3", "C4"]
+                .iter()
+                .map(|c| bindings::Binding {
+                    file: "shared.ts".to_string(),
+                    criterion_id: c.to_string(),
+                    blueprint_id: "BP1".to_string(),
+                })
+                .collect(),
+        };
+        std::fs::create_dir_all(dir.path().join(".blueprint")).unwrap();
+        std::fs::write(
+            dir.path().join(".blueprint/bindings.json"),
+            serde_json::to_string(&idx).unwrap(),
+        )
+        .unwrap();
+
+        let est = Estimator::new();
+        est.refresh_from_checks(dir.path(), "BP1"); // C1..C3 established; C4 has no result
+        let mut drifted = est.mark_stale_for_file(dir.path(), "shared.ts");
+        drifted.sort();
+
+        // Every established criterion drifts; C4 (never checked) is skipped.
+        assert_eq!(
+            drifted,
+            vec![
+                ("C1".to_string(), "BP1".to_string()),
+                ("C2".to_string(), "BP1".to_string()),
+                ("C3".to_string(), "BP1".to_string()),
+            ],
+            "all established criteria bound to the file drift; the unchecked one does not"
+        );
+
+        // State: C1..C3 each drifted+stale; C4 never materialized (no placeholder).
+        let estimates = est.estimates_for("BP1");
+        assert_eq!(estimates.len(), 3, "no estimate created for the never-checked C4");
+        assert!(
+            estimates.iter().all(|e| e.drifted && e.stale),
+            "every established criterion is both drifted and stale"
+        );
+        assert!(
+            !estimates.iter().any(|e| e.criterion_id == "C4"),
+            "the never-checked criterion must not appear in state"
+        );
+    }
 }
