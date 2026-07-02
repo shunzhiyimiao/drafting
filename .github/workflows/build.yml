@@ -81,6 +81,10 @@ jobs:
         if: matrix.platform == 'ubuntu-latest'
         run: pnpm --filter @drafting/codegen-server test
 
+      - name: sketch-core tests
+        if: matrix.platform == 'ubuntu-latest'
+        run: pnpm --filter @drafting/sketch-core test
+
       - name: Build Tauri app
         working-directory: apps/desktop
         run: pnpm tauri build ${{ matrix.args }}

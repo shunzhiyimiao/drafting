@@ -102,6 +102,18 @@ importers:
 
   packages/shared-types: {}
 
+  packages/sketch-core:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      tsx:
+        specifier: ^4.19.4
+        version: 4.21.0
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+
 packages:
 
   '@babel/code-frame@7.29.0':
