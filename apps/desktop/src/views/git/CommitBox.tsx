@@ -6,16 +6,12 @@ import {
   onStreamEvent,
   streamChat,
 } from "../../lib/ai-api";
+import { getBlueprint, listBlueprints } from "../../lib/blueprint-api";
 import type { ChatMessage } from "../../types/ai-types";
+import type { BlueprintIndex } from "../../types/blueprint-types";
 import { useEditorStore } from "../../stores/editor-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { useT } from "../../lib/i18n";
-
-// A stable empty-array reference so the Zustand selector below returns the
-// same snapshot every render even when the store doesn't (yet) have a
-// `features` field. Without this, React throws
-// "getSnapshot should be cached" and hits the infinite-loop guard.
-const EMPTY_FEATURES: unknown[] = [];
 
 interface Props {
   stagedCount: number;
@@ -37,9 +33,6 @@ export function CommitBox({ stagedCount, onCommit }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const projectRoot = useEditorStore((s) => s.projectRoot);
-  const featureBlueprints = useBlueprintStore(
-    (s) => ((s as any).features as unknown[] | undefined) ?? EMPTY_FEATURES,
-  );
 
   const activeStreamIdRef = useRef<string | null>(null);
 
@@ -67,10 +60,10 @@ export function CommitBox({ stagedCount, onCommit }: Props) {
       return;
     }
 
-    // Optional: include a short summary of in-progress feature Blueprints so
-    // the model can reflect their intent. Cheap signal, easy to ignore if
-    // empty.
-    const blueprintContext = summarizeBlueprints(featureBlueprints);
+    // Optional: include a short summary of in-progress feature Blueprints
+    // (name, criteria progress, Goal) so the model can reflect their intent.
+    // Cheap signal, easy to ignore if empty.
+    const blueprintContext = await buildBlueprintContext(projectRoot);
 
     const userMessage = [
       "Generate a commit message for the following staged diff.",
@@ -203,17 +196,45 @@ export function CommitBox({ stagedCount, onCommit }: Props) {
   );
 }
 
-/** Compact summary of in-progress features for the AI prompt. */
-function summarizeBlueprints(features: any[]): string {
-  if (!Array.isArray(features) || features.length === 0) return "";
-  return features
-    .filter((f) => f?.status === "in-progress" || f?.status === "draft")
-    .slice(0, 3)
-    .map((f) => {
-      const name = f.displayName ?? f.blueprintId ?? "feature";
-      const goal = (f.goal ?? "").trim().slice(0, 180);
-      return goal ? `- ${name}: ${goal}` : `- ${name}`;
-    })
-    .filter((l) => l.length > 0)
-    .join("\n");
+/** Compact summary of in-progress features for the AI prompt. The index only
+ *  carries name/status/progress; the Goal text lives in the blueprint body,
+ *  so fetch it per candidate. Context is optional — any failure degrades to
+ *  an empty string and never blocks generation. */
+async function buildBlueprintContext(projectRoot: string): Promise<string> {
+  try {
+    const index: BlueprintIndex | null =
+      useBlueprintStore.getState().index ??
+      (await listBlueprints(projectRoot));
+    const candidates = (index?.blueprints ?? [])
+      .filter(
+        (b) =>
+          b.type === "feature" &&
+          (b.status === "in-progress" || b.status === "draft"),
+      )
+      .slice(0, 3);
+    const lines = await Promise.all(
+      candidates.map(async (b) => {
+        const progress =
+          b.criteriaTotal > 0
+            ? ` (${b.criteriaDone}/${b.criteriaTotal} criteria done)`
+            : "";
+        let goal = "";
+        try {
+          const bp = await getBlueprint(projectRoot, b.blueprintId);
+          goal = (bp.sections.find((s) => s.kind.kind === "goal")?.content ?? "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 180);
+        } catch {
+          // The index entry alone (name + progress) is still a useful signal.
+        }
+        return goal
+          ? `- ${b.displayName}${progress}: ${goal}`
+          : `- ${b.displayName}${progress}`;
+      }),
+    );
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
 }
