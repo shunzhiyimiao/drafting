@@ -3,6 +3,7 @@ import { generateSockets } from "./generators/socket-generator.js";
 import { generateAdapterSkeleton } from "./generators/adapter-skeleton.js";
 import { generateWiring } from "./generators/wiring-generator.js";
 import { generateScaffolding } from "./generators/scaffolding.js";
+import { generateSketch } from "./generators/sketch-generator.js";
 
 type Handler = (params: any) => unknown;
 
@@ -26,6 +27,11 @@ const handlers: Record<string, Handler> = {
 
   generateWiring: (params) => {
     const files = generateWiring(params);
+    return { files };
+  },
+
+  generateSketch: (params) => {
+    const files = generateSketch(params);
     return { files };
   },
 };

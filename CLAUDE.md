@@ -542,6 +542,7 @@ my-project/
 
 1. 三个子系统各有独立的 `.前缀目录`(`.patchboard/`、`blueprints/`、`.atlas/`),互不交叉访问
 2. `packages/` 是共享代码空间,只有 Patchboard 能写,Blueprint 和 Atlas 只读
+   > **v2 修正案(见 docs/sketch-design.md §6)**:Sketch 同样获得写权,限定其生成区——`packages/ui/src/generated/` 工具拥有整体覆盖,`packages/ui/` 其余(sibling 接线文件、package.json/tsconfig.json 一经生成)归用户,复刻 sockets/adapter-skeleton 的所有权语法
 
 **引用关系(3-5)**
 

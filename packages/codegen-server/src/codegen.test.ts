@@ -19,6 +19,7 @@ import { generateSockets } from "./generators/socket-generator.js";
 import { generateAdapterSkeleton } from "./generators/adapter-skeleton.js";
 import { generateWiring } from "./generators/wiring-generator.js";
 import { generateScaffolding } from "./generators/scaffolding.js";
+import { generateSketch } from "./generators/sketch-generator.js";
 import { handleRequest } from "./rpc.js";
 import type {
   AdapterNode,
@@ -434,6 +435,123 @@ test("scaffolding: user-owned once created — skip-if-exists, never overwrites"
     const created = generateScaffolding({ projectRoot: root, scopeName: SCOPE });
     assert.ok(!created.includes("package.json"));
     assert.equal(read(root, "package.json"), '{"name":"user-managed"}\n');
+  });
+});
+
+// ----------------------------------------------------------------- sketch --
+
+const SKETCH_FIXTURE = JSON.stringify({
+  id: "sk_login",
+  name: "Login Screen",
+  blueprintRef: "feat_login",
+  schemaVersion: 1,
+  root: {
+    kind: "stack",
+    id: "root",
+    layout: {
+      direction: "col",
+      gap: 6,
+      padding: { top: 6, right: 6, bottom: 6, left: 6 },
+      mainAxis: "start",
+      crossAxis: "stretch",
+    },
+    sizing: { width: { mode: "fill" }, height: { mode: "fill" } },
+    children: [
+      {
+        kind: "button",
+        id: "submit",
+        label: "Sign in",
+        variant: "primary",
+        intent: { kind: "submit" },
+        sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
+      },
+    ],
+  },
+});
+
+function seedSketch(root: string, rel = "sketches/login-screen.sketch.json"): string {
+  fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+  fs.writeFileSync(path.join(root, rel), SKETCH_FIXTURE);
+  return rel;
+}
+
+test("sketch: emits the generated half, sibling, ui scaffolding and tokens", () => {
+  withTmpDir((root) => {
+    const rel = seedSketch(root);
+    const files = generateSketch({ projectRoot: root, sketchPath: rel });
+
+    assert.deepEqual(
+      [...files].sort(),
+      [
+        "packages/ui/package.json",
+        "packages/ui/src/generated/login-screen.generated.tsx",
+        "packages/ui/src/login-screen.tsx",
+        "packages/ui/tsconfig.json",
+        "tokens.default.json",
+      ],
+    );
+
+    const gen = read(root, "packages/ui/src/generated/login-screen.generated.tsx");
+    assert.match(gen, /AUTO-GENERATED/);
+    // Provenance comment points at the REAL file, not a name-derived guess.
+    assert.match(gen, /from sketches\/login-screen\.sketch\.json/);
+    assert.match(gen, /export function LoginScreen\(/);
+    assert.match(gen, /export type SketchHandlers = \{/);
+    assert.match(gen, /"submit"\?: \(\) => void;/);
+    assert.match(gen, /data-sk="submit"/);
+
+    const sibling = read(root, "packages/ui/src/login-screen.tsx");
+    assert.match(
+      sibling,
+      /import \{ LoginScreen as Generated, type SketchHandlers \} from "\.\/generated\/login-screen\.generated";/,
+    );
+    assert.match(sibling, /export function LoginScreen\(\)/);
+
+    // No patchboard config → the ui package lands under the default scope.
+    const pkg = JSON.parse(read(root, "packages/ui/package.json"));
+    assert.equal(pkg.name, "@app/ui");
+
+    // tsconfig turns on the jsx transform the generated .tsx needs.
+    const tsconfig = JSON.parse(read(root, "packages/ui/tsconfig.json"));
+    assert.equal(tsconfig.compilerOptions.jsx, "react-jsx");
+
+    // tokens.default.json is a complete offline-readable binding table.
+    const tokens = JSON.parse(read(root, "tokens.default.json"));
+    assert.equal(tokens.colors.primary, "blue-600");
+    assert.deepEqual(tokens.spacing, [0, 1, 2, 3, 4, 6, 8, 12, 16, 24]);
+  });
+});
+
+test("sketch: ownership — generated is overwritten, sibling never is", () => {
+  withTmpDir((root) => {
+    const rel = seedSketch(root);
+    generateSketch({ projectRoot: root, sketchPath: rel });
+
+    fs.writeFileSync(
+      path.join(root, "packages/ui/src/generated/login-screen.generated.tsx"),
+      "// clobbered\n",
+    );
+    fs.writeFileSync(path.join(root, "packages/ui/src/login-screen.tsx"), "// USER\n");
+
+    const second = generateSketch({ projectRoot: root, sketchPath: rel });
+    assert.match(
+      read(root, "packages/ui/src/generated/login-screen.generated.tsx"),
+      /AUTO-GENERATED/,
+    );
+    assert.equal(read(root, "packages/ui/src/login-screen.tsx"), "// USER\n");
+    assert.ok(!second.includes("packages/ui/src/login-screen.tsx"));
+    assert.ok(second.includes("packages/ui/src/generated/login-screen.generated.tsx"));
+  });
+});
+
+test("sketch: package scope comes from .patchboard/config.json when present", () => {
+  withTmpDir((root) => {
+    fs.mkdirSync(path.join(root, ".patchboard"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".patchboard/config.json"), '{"scopeName":"@myapp"}');
+    const rel = seedSketch(root);
+    generateSketch({ projectRoot: root, sketchPath: rel });
+    const pkg = JSON.parse(read(root, "packages/ui/package.json"));
+    assert.equal(pkg.name, "@myapp/ui");
   });
 });
 

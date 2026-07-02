@@ -390,6 +390,80 @@ pub fn run() {
                 }
             }
 
+            // Sketch → codegen pipeline (docs/sketch-design.md §8): a saved
+            // sketch regenerates its React half through the codegen-server —
+            // the same @drafting/sketch-core fold the editor canvas will
+            // render with (K3). Debounced 500ms trailing so an autosave burst
+            // costs one codegen; per-path sequence numbers keep bursts on
+            // different sketches independent.
+            {
+                let mut sketch_rx = bus.subscribe();
+                let app_handle = app.handle().clone();
+                let pending: Arc<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
+                    Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+                tauri::async_runtime::spawn(async move {
+                    use sync_bus::events::{EditorEvent, SyncBusEvent};
+                    loop {
+                        match sketch_rx.recv().await {
+                            Ok(env) => {
+                                let SyncBusEvent::Editor(EditorEvent::FileSaved { path }) =
+                                    env.payload
+                                else {
+                                    continue;
+                                };
+                                if !(path.starts_with("sketches/")
+                                    && path.ends_with(".sketch.json"))
+                                {
+                                    continue;
+                                }
+                                let my_seq = {
+                                    let mut map =
+                                        pending.lock().unwrap_or_else(|p| p.into_inner());
+                                    let seq = map.entry(path.clone()).or_insert(0);
+                                    *seq += 1;
+                                    *seq
+                                };
+                                let pending = pending.clone();
+                                let app_handle = app_handle.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    tokio::time::sleep(std::time::Duration::from_millis(500))
+                                        .await;
+                                    let still_latest = pending
+                                        .lock()
+                                        .unwrap_or_else(|p| p.into_inner())
+                                        .get(&path)
+                                        .is_some_and(|s| *s == my_seq);
+                                    if !still_latest {
+                                        return; // a newer save supersedes this one
+                                    }
+                                    let root = app_get_cwd();
+                                    let proxy = app_handle.state::<CodegenProxy>();
+                                    match proxy
+                                        .call(
+                                            "generateSketch",
+                                            serde_json::json!({
+                                                "projectRoot": root,
+                                                "sketchPath": path,
+                                            }),
+                                        )
+                                        .await
+                                    {
+                                        Ok(result) => {
+                                            log::info!("sketch codegen: {path} → {result}")
+                                        }
+                                        Err(e) => {
+                                            log::warn!("sketch codegen failed for {path}: {e}")
+                                        }
+                                    }
+                                });
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                            Err(_) => {} // lagged — keep consuming
+                        }
+                    }
+                });
+            }
+
             // S3: the read-only estimator subscribes to the bus. It only updates
             // its own in-memory state — it never publishes or triggers an action.
             let estimator = app.state::<Arc<Estimator>>().inner().clone();

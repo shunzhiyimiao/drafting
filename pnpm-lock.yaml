@@ -80,6 +80,9 @@ importers:
 
   packages/codegen-server:
     dependencies:
+      '@drafting/sketch-core':
+        specifier: workspace:*
+        version: link:../sketch-core
       ts-morph:
         specifier: ^25.0.1
         version: 25.0.1
