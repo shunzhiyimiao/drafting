@@ -86,7 +86,7 @@ pub async fn run_check(
     // all criteria) instead of reading front_matter.related_files directly.
     let mut artifact_set: Vec<String> = Vec::new();
     for c in &criteria {
-        for f in crate::blueprint::bindings::artifacts_for(c, &bp) {
+        for f in crate::blueprint::bindings::artifacts_for_with_root(c, &bp, &project_root) {
             if !artifact_set.contains(&f) {
                 artifact_set.push(f);
             }
@@ -279,8 +279,12 @@ pub async fn run_check(
         // S4.5 evidence trail: gate diagnostics (project-level, shared by all
         // criteria) + the provenance of this criterion's own bound artifacts.
         let artifact_provenance: Vec<(String, String)> =
-            crate::blueprint::bindings::artifacts_for(&criteria[item.index], &bp)
-                .into_iter()
+            crate::blueprint::bindings::artifacts_for_with_root(
+                &criteria[item.index],
+                &bp,
+                &project_root,
+            )
+            .into_iter()
                 .filter_map(|f| {
                     bundle
                         .provenance

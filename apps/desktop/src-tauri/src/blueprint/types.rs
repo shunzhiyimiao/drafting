@@ -69,6 +69,7 @@ pub enum CheckVerdict {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcceptanceCriterion {
     /// Stable id, persisted in the Markdown as a trailing `<!-- #ULID -->` marker.
     /// The estimator (S3) keys per-criterion state on this; it must survive
@@ -77,6 +78,36 @@ pub struct AcceptanceCriterion {
     pub id: String,
     pub text: String,
     pub checked: bool,
+    /// Sketch binding (docs/sketch-design.md §6): this criterion verifies a
+    /// UI node. Rides the marker as a `sk:<sketch>/<node>` field;
+    /// child-points-to-parent — the node doesn't know who verifies it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch_node: Option<SketchNodeRef>,
+    /// Unknown marker fields, preserved verbatim on round-trip. The marker
+    /// grammar is `#<id> [key:value]*` — fields we don't understand yet must
+    /// survive us byte-identically (§6 obligation 1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marker_extras: Vec<String>,
+}
+
+impl Default for AcceptanceCriterion {
+    fn default() -> Self {
+        Self {
+            id: new_ulid(),
+            text: String::new(),
+            checked: false,
+            sketch_node: None,
+            marker_extras: Vec::new(),
+        }
+    }
+}
+
+/// `{sketch_id, node_id}` — the §6 authoritative criterion→node edge.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SketchNodeRef {
+    pub sketch_id: String,
+    pub node_id: String,
 }
 
 // ---------------------------------------------------------------------------

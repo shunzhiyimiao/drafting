@@ -89,9 +89,8 @@ mod tests {
             heading_text: "Acceptance Criteria".to_string(),
             content: "".to_string(),
             criteria: vec![AcceptanceCriterion {
-                id: new_ulid(),
                 text: "item".to_string(),
-                checked: false,
+                ..Default::default()
             }],
         });
         let result = validate_blueprint(&bp);

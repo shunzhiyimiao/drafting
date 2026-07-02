@@ -23,6 +23,14 @@ export interface AcceptanceCriterion {
   id?: string;
   text: string;
   checked: boolean;
+  /** Sketch binding (docs/sketch-design.md §6) — rides the marker as
+   *  `sk:<sketch>/<node>`. Same discipline as `id`: edits must spread the
+   *  original object or a structured-view save silently unbinds the
+   *  criterion. */
+  sketchNode?: { sketchId: string; nodeId: string };
+  /** Unknown marker fields — round-trip freight from newer writers. Never
+   *  edit; always spread. */
+  markerExtras?: string[];
 }
 
 export type SectionKind =

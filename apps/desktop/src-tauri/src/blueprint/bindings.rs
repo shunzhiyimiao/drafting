@@ -10,6 +10,8 @@
 // is the S5 drift-detection consumer, not called yet — hence the module allow.
 #![allow(dead_code)]
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 
 use crate::blueprint::types::{AcceptanceCriterion, Blueprint};
@@ -26,6 +28,64 @@ use crate::blueprint::types::{AcceptanceCriterion, Blueprint};
 /// affect the result — passing any criterion yields the same artifacts.
 pub fn artifacts_for(_criterion: &AcceptanceCriterion, bp: &Blueprint) -> Vec<String> {
     blueprint_artifacts(bp)
+}
+
+/// Root-aware artifact resolution — the sketch leg (docs/sketch-design.md
+/// §6/§8): a sketch-bound criterion's artifacts additionally include the
+/// sketch file and its generated React, so the S0.3 reverse index, S5 drift
+/// and the estimator treat a sketch edit exactly like a code edit — no
+/// changes needed on their side.
+///
+/// Resolving `sketch_id → file` scans `sketches/*.sketch.json` as plain JSON
+/// values — a FILE-level cross-domain read (the Headquarters aggregation
+/// precedent), deliberately not an import of the sketch module's code.
+pub fn artifacts_for_with_root(
+    criterion: &AcceptanceCriterion,
+    bp: &Blueprint,
+    root: &Path,
+) -> Vec<String> {
+    let mut out = artifacts_for(criterion, bp);
+    if let Some(sk) = &criterion.sketch_node {
+        if let Some((sketch_rel, generated_rel)) = resolve_sketch_artifacts(root, &sk.sketch_id) {
+            for p in [sketch_rel, generated_rel] {
+                if !out.iter().any(|x| x == &p) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `sketch_id` → (sketch file, generated file), both project-relative. The
+/// generated path mirrors the codegen-server's landing rule:
+/// `packages/ui/src/generated/<slug>.generated.tsx` where slug = the sketch
+/// file's basename. None when no sketch carries the id (dangling — a signal
+/// surfaced elsewhere, not an error here).
+fn resolve_sketch_artifacts(root: &Path, sketch_id: &str) -> Option<(String, String)> {
+    let entries = std::fs::read_dir(root.join("sketches")).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(slug) = name.strip_suffix(".sketch.json") else {
+            continue;
+        };
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if value.get("id").and_then(|i| i.as_str()) == Some(sketch_id) {
+            return Some((
+                format!("sketches/{name}"),
+                format!("packages/ui/src/generated/{slug}.generated.tsx"),
+            ));
+        }
+    }
+    None
 }
 
 /// Blueprint-level artifact set: `target_file ∪ related_files`, de-duplicated,
@@ -67,8 +127,9 @@ pub struct BindingsIndex {
 
 /// Build the reverse index from the parsed blueprints: for every acceptance
 /// criterion, emit one [`Binding`] per artifact it resolves to (via
-/// [`artifacts_for`]). Order-stable (by file, then criterion id).
-pub fn build_bindings(blueprints: &[&Blueprint]) -> BindingsIndex {
+/// [`artifacts_for_with_root`], so sketch-bound criteria bind to their sketch
+/// and generated files too). Order-stable (by file, then criterion id).
+pub fn build_bindings(blueprints: &[&Blueprint], root: &Path) -> BindingsIndex {
     let mut bindings = Vec::new();
     for bp in blueprints {
         let blueprint_id = &bp.front_matter.blueprint_id;
@@ -77,7 +138,7 @@ pub fn build_bindings(blueprints: &[&Blueprint]) -> BindingsIndex {
                 continue;
             }
             for crit in &section.criteria {
-                for file in artifacts_for(crit, bp) {
+                for file in artifacts_for_with_root(crit, bp, root) {
                     bindings.push(Binding {
                         file,
                         criterion_id: crit.id.clone(),
@@ -111,9 +172,8 @@ mod tests {
 
     fn crit(text: &str) -> AcceptanceCriterion {
         AcceptanceCriterion {
-            id: new_ulid(),
             text: text.to_string(),
-            checked: false,
+            ..Default::default()
         }
     }
 
@@ -133,6 +193,42 @@ mod tests {
     fn related_files_only() {
         let b = bp(None, &["a.ts", "b.ts"]);
         assert_eq!(artifacts_for(&crit("x"), &b), vec!["a.ts", "b.ts"]);
+    }
+
+    #[test]
+    fn sketch_bound_criterion_binds_to_sketch_and_generated_files() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("sketches")).unwrap();
+        std::fs::write(
+            root.join("sketches/login-screen.sketch.json"),
+            r#"{"id":"sk_login","name":"Login"}"#,
+        )
+        .unwrap();
+
+        let mut c = crit("has a submit button");
+        c.sketch_node = Some(SketchNodeRef {
+            sketch_id: "sk_login".to_string(),
+            node_id: "btn_submit".to_string(),
+        });
+        let b = bp(None, &["a.ts"]);
+        assert_eq!(
+            artifacts_for_with_root(&c, &b, root),
+            vec![
+                "a.ts",
+                "sketches/login-screen.sketch.json",
+                "packages/ui/src/generated/login-screen.generated.tsx",
+            ]
+        );
+
+        // A dangling sketch id degrades to the base artifacts — the missing
+        // sketch is a signal surfaced elsewhere, not an error here.
+        let mut dangling = crit("x");
+        dangling.sketch_node = Some(SketchNodeRef {
+            sketch_id: "sk_gone".to_string(),
+            node_id: "n".to_string(),
+        });
+        assert_eq!(artifacts_for_with_root(&dangling, &b, root), vec!["a.ts"]);
     }
 
     #[test]
@@ -183,7 +279,7 @@ mod tests {
                     .map(|id| AcceptanceCriterion {
                         id: id.to_string(),
                         text: "c".to_string(),
-                        checked: false,
+                        ..Default::default()
                     })
                     .collect(),
             }],
@@ -194,7 +290,7 @@ mod tests {
     #[test]
     fn build_bindings_emits_flat_criterion_file_pairs() {
         let b = bp_with_criteria("BP1", &["a.ts", "b.ts"], &["C1", "C2"]);
-        let idx = build_bindings(&[&b]);
+        let idx = build_bindings(&[&b], std::path::Path::new("."));
         // 2 criteria × 2 files
         assert_eq!(idx.bindings.len(), 4);
         assert!(idx.bindings.iter().all(|x| x.blueprint_id == "BP1"));
@@ -210,7 +306,7 @@ mod tests {
     #[test]
     fn criteria_for_file_filters_by_file() {
         let b = bp_with_criteria("BP1", &["a.ts", "b.ts"], &["C1", "C2"]);
-        let idx = build_bindings(&[&b]);
+        let idx = build_bindings(&[&b], std::path::Path::new("."));
         let on_a = criteria_for_file(&idx, "a.ts");
         assert_eq!(on_a.len(), 2);
         assert!(on_a.iter().all(|x| x.file == "a.ts"));
@@ -221,7 +317,7 @@ mod tests {
     fn build_bindings_spans_multiple_blueprints() {
         let b1 = bp_with_criteria("BP1", &["a.ts"], &["C1"]);
         let b2 = bp_with_criteria("BP2", &["a.ts"], &["C2"]);
-        let idx = build_bindings(&[&b1, &b2]);
+        let idx = build_bindings(&[&b1, &b2], std::path::Path::new("."));
         let on_a = criteria_for_file(&idx, "a.ts");
         assert_eq!(on_a.len(), 2);
         let owners: std::collections::HashSet<_> =

@@ -153,7 +153,7 @@ pub fn rebuild_index(project_root: &Path) -> Result<BlueprintIndex> {
     // .blueprint/bindings.json (derived reverse index, NOT committed — fully
     // rebuildable from the .md files; lives in the gitignored cache dir).
     let bps: Vec<&Blueprint> = parsed.iter().map(|(bp, _)| bp).collect();
-    let bindings = crate::blueprint::bindings::build_bindings(&bps);
+    let bindings = crate::blueprint::bindings::build_bindings(&bps, project_root);
     let bindings_path = project_root.join(BINDINGS_FILE);
     if let Some(dir) = bindings_path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -317,14 +317,14 @@ mod tests {
                     content: "- [ ] First\n- [x] Second\n".to_string(),
                     criteria: vec![
                         AcceptanceCriterion {
-                            id: new_ulid(),
                             text: "First".to_string(),
                             checked: false,
+                            ..Default::default()
                         },
                         AcceptanceCriterion {
-                            id: new_ulid(),
                             text: "Second".to_string(),
                             checked: true,
+                            ..Default::default()
                         },
                     ],
                 },
@@ -383,6 +383,58 @@ mod tests {
 
         delete_blueprint(tmp.path(), &id).unwrap();
         assert_eq!(load_index(tmp.path()).unwrap().blueprints.len(), 0);
+    }
+
+    /// The loop-closure proof (docs/sketch-design.md §8): a criterion bound
+    /// to a sketch node — persisted as the `sk:` marker field — lands in
+    /// `.blueprint/bindings.json` under BOTH the sketch file and its
+    /// generated React, so `FileSaved(sketches/…)` drives the existing
+    /// S3/S5 stale/drift machinery with zero changes on that side.
+    #[test]
+    fn rebuild_binds_sketch_bound_criteria_to_sketch_files() {
+        let tmp = TempDir::new().unwrap();
+        init_blueprint_dirs(tmp.path()).unwrap();
+        std::fs::create_dir_all(tmp.path().join("sketches")).unwrap();
+        std::fs::write(
+            tmp.path().join("sketches/login-screen.sketch.json"),
+            r#"{"id":"sk_login","name":"Login"}"#,
+        )
+        .unwrap();
+
+        let mut bp = create_test_bp();
+        bp.sections[1].criteria[0].sketch_node =
+            Some(crate::blueprint::types::SketchNodeRef {
+                sketch_id: "sk_login".to_string(),
+                node_id: "btn_submit".to_string(),
+            });
+        let crit_id = bp.sections[1].criteria[0].id.clone();
+        save_blueprint(tmp.path(), &bp).unwrap();
+        rebuild_index(tmp.path()).unwrap();
+
+        let bindings = load_bindings(tmp.path());
+        let sketch_hits = crate::blueprint::bindings::criteria_for_file(
+            &bindings,
+            "sketches/login-screen.sketch.json",
+        );
+        assert_eq!(sketch_hits.len(), 1);
+        assert_eq!(sketch_hits[0].criterion_id, crit_id);
+
+        let generated_hits = crate::blueprint::bindings::criteria_for_file(
+            &bindings,
+            "packages/ui/src/generated/login-screen.generated.tsx",
+        );
+        assert_eq!(generated_hits.len(), 1);
+        assert_eq!(generated_hits[0].criterion_id, crit_id);
+
+        // And the binding itself survives the .md round-trip.
+        let loaded = load_blueprint(tmp.path(), &bp.front_matter.blueprint_id).unwrap();
+        assert_eq!(
+            loaded.sections[1].criteria[0]
+                .sketch_node
+                .as_ref()
+                .map(|s| s.node_id.as_str()),
+            Some("btn_submit")
+        );
     }
 
     #[test]

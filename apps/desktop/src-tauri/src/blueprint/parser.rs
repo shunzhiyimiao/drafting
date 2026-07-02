@@ -37,8 +37,21 @@ pub fn serialize(blueprint: &Blueprint) -> Result<String> {
                 out.push_str(if crit.checked { "- [x] " } else { "- [ ] " });
                 out.push_str(&crit.text);
                 // Persist the stable id as an invisible (non-rendering) marker.
+                // Field grammar (docs/sketch-design.md §6): `#<id> [key:value]*`,
+                // canonical order = id, sk, then unknown fields verbatim in
+                // their original order.
                 out.push_str(" <!-- #");
                 out.push_str(&crit.id);
+                if let Some(sk) = &crit.sketch_node {
+                    out.push_str(" sk:");
+                    out.push_str(&sk.sketch_id);
+                    out.push('/');
+                    out.push_str(&sk.node_id);
+                }
+                for extra in &crit.marker_extras {
+                    out.push(' ');
+                    out.push_str(extra);
+                }
                 out.push_str(" -->");
                 out.push('\n');
             }
@@ -282,8 +295,12 @@ fn make_section(heading: String, mut content: String) -> BlueprintSection {
 
 fn parse_task_list(content: &str) -> Vec<AcceptanceCriterion> {
     let re = Regex::new(r"^\s*-\s*\[([ xX])\]\s*(.+)$").unwrap();
-    // Trailing `<!-- #ULID -->` marker carrying the stable criterion id.
-    let id_re = Regex::new(r"\s*<!--\s*#([0-9A-Za-z]{26})\s*-->\s*$").unwrap();
+    // Trailing `<!-- #ULID [key:value]* -->` marker: the stable criterion id
+    // plus optional fields (§6 grammar). Known field: `sk:<sketch>/<node>`.
+    // Unknown fields are carried verbatim so future writers don't lose data
+    // through older parsers.
+    let id_re =
+        Regex::new(r"\s*<!--\s*#([0-9A-Za-z]{26})((?:\s+[^\s>]+)*)\s*-->\s*$").unwrap();
     let mut criteria = Vec::new();
 
     for line in content.lines() {
@@ -291,15 +308,43 @@ fn parse_task_list(content: &str) -> Vec<AcceptanceCriterion> {
             let checked = matches!(&caps[1], "x" | "X");
             let raw = caps[2].trim();
             // Pull a stable id from the trailing marker, or mint one for legacy lines.
-            let (text, id) = match id_re.captures(raw) {
+            let crit = match id_re.captures(raw) {
                 Some(m) => {
                     let id = m[1].to_string();
+                    let mut sketch_node = None;
+                    let mut marker_extras = Vec::new();
+                    for token in m[2].split_whitespace() {
+                        let parsed = token.strip_prefix("sk:").and_then(|rest| {
+                            rest.split_once('/').filter(|(s, n)| !s.is_empty() && !n.is_empty())
+                        });
+                        match parsed {
+                            Some((sketch_id, node_id)) => {
+                                sketch_node = Some(crate::blueprint::types::SketchNodeRef {
+                                    sketch_id: sketch_id.to_string(),
+                                    node_id: node_id.to_string(),
+                                });
+                            }
+                            // Malformed sk (or any unknown field): preserve
+                            // verbatim rather than silently dropping it.
+                            None => marker_extras.push(token.to_string()),
+                        }
+                    }
                     let text = id_re.replace(raw, "").trim().to_string();
-                    (text, id)
+                    AcceptanceCriterion {
+                        id,
+                        text,
+                        checked,
+                        sketch_node,
+                        marker_extras,
+                    }
                 }
-                None => (raw.to_string(), new_ulid()),
+                None => AcceptanceCriterion {
+                    text: raw.to_string(),
+                    checked,
+                    ..Default::default()
+                },
             };
-            criteria.push(AcceptanceCriterion { id, text, checked });
+            criteria.push(crit);
         }
     }
 
@@ -552,5 +597,61 @@ priority: high
         let c = &bp.sections[0].criteria[0];
         assert_eq!(c.id, "01ARZ3NDEKTSV4RRFFQ69G5FAV", "existing id must not be re-minted");
         assert_eq!(c.text, "Keep my id", "marker must be stripped from text");
+    }
+
+    #[test]
+    fn marker_sk_binding_round_trips() {
+        let md = "---\nblueprintId: 01HX998\ntype: feature\ndisplayName: X\nstatus: draft\npriority: high\n---\n\n## Acceptance Criteria\n\n- [ ] Has a submit button <!-- #01ARZ3NDEKTSV4RRFFQ69G5FAV sk:sk_login/btn_8f3a -->\n";
+        let bp = parse(md).unwrap();
+        let c = &bp.sections[0].criteria[0];
+        assert_eq!(c.text, "Has a submit button", "fields must not leak into text");
+        assert_eq!(
+            c.sketch_node,
+            Some(SketchNodeRef {
+                sketch_id: "sk_login".to_string(),
+                node_id: "btn_8f3a".to_string(),
+            })
+        );
+
+        let out = serialize(&bp).unwrap();
+        assert!(
+            out.contains("<!-- #01ARZ3NDEKTSV4RRFFQ69G5FAV sk:sk_login/btn_8f3a -->"),
+            "serialized:\n{out}"
+        );
+        // Idempotent: reparse yields the same binding.
+        let again = parse(&out).unwrap();
+        assert_eq!(again.sections[0].criteria[0].sketch_node, c.sketch_node);
+    }
+
+    #[test]
+    fn marker_unknown_fields_survive_round_trip_verbatim() {
+        // §6 obligation 1: fields we don't understand yet ride through us
+        // byte-identically (canonical order: id, sk, then extras as given).
+        let md = "---\nblueprintId: 01HX998\ntype: feature\ndisplayName: X\nstatus: draft\npriority: high\n---\n\n## Acceptance Criteria\n\n- [ ] Future-proof <!-- #01ARZ3NDEKTSV4RRFFQ69G5FAV zz:future sk:s1/n1 aa:1 -->\n";
+        let bp = parse(md).unwrap();
+        let c = &bp.sections[0].criteria[0];
+        assert!(c.sketch_node.is_some());
+        assert_eq!(c.marker_extras, vec!["zz:future", "aa:1"]);
+
+        let out = serialize(&bp).unwrap();
+        assert!(
+            out.contains("<!-- #01ARZ3NDEKTSV4RRFFQ69G5FAV sk:s1/n1 zz:future aa:1 -->"),
+            "serialized:\n{out}"
+        );
+        let again = parse(&out).unwrap();
+        assert_eq!(again.sections[0].criteria[0].marker_extras, c.marker_extras);
+        assert_eq!(again.sections[0].criteria[0].sketch_node, c.sketch_node);
+    }
+
+    #[test]
+    fn marker_malformed_sk_is_preserved_not_dropped() {
+        // A malformed sk token isn't understood → it is freight, not garbage.
+        let md = "---\nblueprintId: 01HX998\ntype: feature\ndisplayName: X\nstatus: draft\npriority: high\n---\n\n## Acceptance Criteria\n\n- [ ] T <!-- #01ARZ3NDEKTSV4RRFFQ69G5FAV sk:broken -->\n";
+        let bp = parse(md).unwrap();
+        let c = &bp.sections[0].criteria[0];
+        assert_eq!(c.sketch_node, None);
+        assert_eq!(c.marker_extras, vec!["sk:broken"]);
+        let out = serialize(&bp).unwrap();
+        assert!(out.contains("sk:broken"), "serialized:\n{out}");
     }
 }
