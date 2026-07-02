@@ -10,11 +10,6 @@
 //! toolchain degradation come in later S4 sub-steps. Subprocesses use
 //! `tokio::process` (same precedent as lsp/client.rs + codegen_proxy).
 
-// Part of the seam is built ahead of its consumers: `capability()` /
-// CapabilityProfile.has_tests feed S4.6 (toolchain degradation), and
-// BuildResult.diagnostics feeds the S4.5/S6 evidence trail. Allow until then.
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
@@ -42,7 +37,9 @@ pub struct BuildResult {
     pub available: bool,
     /// Did the project compile? (only meaningful when `available`)
     pub ok: bool,
-    /// Short diagnostic lines on failure (for evidence/UX later).
+    /// Short diagnostic lines on failure. Feeds the S4.5/S6 evidence trail;
+    /// unread until that lands.
+    #[allow(dead_code)]
     pub diagnostics: Vec<String>,
 }
 
@@ -241,6 +238,56 @@ fn rust_module_of_file(file: &str) -> Option<String> {
     Some(first.to_string())
 }
 
+/// Which deterministic sensors were actually live for a check — the
+/// "effective sensor = capability ∩ toolchain" input to the honest
+/// degradation annotation (design §2 graceful degradation, §7 dogfood).
+pub struct SensorContext {
+    /// The matched provider's capability profile; None = no provider for
+    /// this project's language (e.g. TS — only Rust is wired in v1.5).
+    pub capability: Option<CapabilityProfile>,
+    pub gate: GateOutcome,
+    /// Did the test sensor produce a report?
+    pub tests_ran: bool,
+}
+
+/// The honest degradation annotation for one criterion (design §2: when a
+/// deterministic sensor is silent, say so, say the verdict is
+/// lower-confidence, and say what upgrades it). `None` ⇔ both deterministic
+/// sensors were live for this criterion — nothing to disclose.
+pub fn degradation_note(ctx: &SensorContext, test: TestOutcome) -> Option<String> {
+    let Some(cap) = &ctx.capability else {
+        return Some(
+            "compile gate & test sensor unavailable for this project's language \
+             (v1.5 wires Rust only) — AI-only estimate, lower confidence"
+                .to_string(),
+        );
+    };
+    if cap.has_compile_gate && ctx.gate == GateOutcome::Unavailable {
+        // With the toolchain missing, the test leg can't run either.
+        return Some(
+            "cargo not found — compile gate and tests skipped; AI-only estimate, \
+             lower confidence (install cargo to upgrade verdict quality)"
+                .to_string(),
+        );
+    }
+    let mut parts: Vec<&str> = Vec::new();
+    if !cap.has_compile_gate {
+        parts.push("no compile gate for this language");
+    }
+    if !cap.has_tests {
+        parts.push("no test sensor for this language");
+    } else if !ctx.tests_ran {
+        parts.push("test sensor did not run (cargo test failed or timed out)");
+    } else if test == TestOutcome::NoCoverage {
+        parts.push("no tests map to this criterion's module (test leg silent)");
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(format!("{} — lower confidence", parts.join("; ")))
+    }
+}
+
 /// Fuse the LLM verdict with the compile gate + test sensor (design §2/§3),
 /// priority order: gate → tests → LLM residual.
 ///
@@ -383,6 +430,78 @@ mod tests {
         let cap = RustProvider.capability();
         assert!(cap.has_compile_gate);
         assert!(cap.has_tests);
+    }
+
+    fn ctx(
+        capability: Option<CapabilityProfile>,
+        gate: GateOutcome,
+        tests_ran: bool,
+    ) -> SensorContext {
+        SensorContext {
+            capability,
+            gate,
+            tests_ran,
+        }
+    }
+
+    #[test]
+    fn degradation_note_no_provider_is_ai_only() {
+        let n = degradation_note(
+            &ctx(None, GateOutcome::Unavailable, false),
+            TestOutcome::Unavailable,
+        )
+        .expect("must disclose");
+        assert!(n.contains("AI-only"), "{n}");
+        assert!(n.contains("lower confidence"), "{n}");
+    }
+
+    #[test]
+    fn degradation_note_missing_cargo_says_install() {
+        let n = degradation_note(
+            &ctx(
+                Some(RustProvider.capability()),
+                GateOutcome::Unavailable,
+                false,
+            ),
+            TestOutcome::Unavailable,
+        )
+        .expect("must disclose");
+        assert!(n.contains("install cargo"), "{n}");
+        assert!(n.contains("AI-only"), "{n}");
+    }
+
+    #[test]
+    fn degradation_note_tests_did_not_run() {
+        let n = degradation_note(
+            &ctx(Some(RustProvider.capability()), GateOutcome::Passed, false),
+            TestOutcome::Unavailable,
+        )
+        .expect("must disclose");
+        assert!(n.contains("test sensor did not run"), "{n}");
+    }
+
+    #[test]
+    fn degradation_note_no_coverage_flags_silent_test_leg() {
+        let n = degradation_note(
+            &ctx(Some(RustProvider.capability()), GateOutcome::Passed, true),
+            TestOutcome::NoCoverage,
+        )
+        .expect("must disclose");
+        assert!(n.contains("no tests map"), "{n}");
+    }
+
+    #[test]
+    fn degradation_note_silent_when_all_sensors_live() {
+        // Gate ran (either way) and the mapped module has real test signal —
+        // nothing to disclose, the fusion result stands on live sensors.
+        for gate in [GateOutcome::Passed, GateOutcome::Failed] {
+            for test in [TestOutcome::Passed, TestOutcome::Failed] {
+                assert!(
+                    degradation_note(&ctx(Some(RustProvider.capability()), gate, true), test)
+                        .is_none()
+                );
+            }
+        }
     }
 
     // Real `cargo check` is environment-dependent and slow — excluded from the

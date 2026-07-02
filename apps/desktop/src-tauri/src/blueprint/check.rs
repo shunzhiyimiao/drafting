@@ -198,8 +198,16 @@ pub async fn run_check(
     //     forces Fail; module-green is a weak signal that falls back to the LLM.
     // Both are project-level and may be slow / unavailable (degrade gracefully).
     use crate::blueprint::language_provider as lp;
+    let capability = lp::select_provider(&project_root).map(|p| p.capability());
     let gate = lp::run_gate(&project_root).await;
     let test_report = lp::run_rust_tests(&project_root).await;
+    // "Effective sensor = capability ∩ toolchain" — feeds the honest
+    // degradation annotation per criterion below (§2 graceful degradation).
+    let sensor_ctx = lp::SensorContext {
+        capability,
+        gate,
+        tests_ran: test_report.is_some(),
+    };
 
     let mut all_pass = true;
     let now = current_millis();
@@ -242,6 +250,14 @@ pub async fn run_check(
             )
         } else {
             item.explanation.clone()
+        };
+        // Honest degradation (§2/§7): if a deterministic sensor was silent for
+        // this criterion, say so — the UI must never present an AI-only
+        // verdict as if the gates had backed it.
+        let explanation = match lp::degradation_note(&sensor_ctx, test) {
+            Some(note) if explanation.trim().is_empty() => format!("[sensors] {note}"),
+            Some(note) => format!("{explanation} [sensors] {note}"),
+            None => explanation,
         };
         let result = CheckResult {
             blueprint_id: blueprint_id.clone(),
