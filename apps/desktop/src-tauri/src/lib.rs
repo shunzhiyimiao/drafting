@@ -1,6 +1,7 @@
 mod sync_bus;
 mod patchboard;
 mod blueprint;
+mod sketch;
 mod editor;
 mod atlas;
 mod git;
@@ -377,6 +378,16 @@ pub fn run() {
                         log::info!("startup: rebuilt blueprint + binding index");
                     }
                 }
+                // Same discipline for the sketch index (§6: rebuild on load,
+                // guarded so we never create sketch artifacts in an
+                // unrelated workspace).
+                if root_path.join("sketches").is_dir() {
+                    if let Err(e) = sketch::index::rebuild(root_path) {
+                        log::warn!("startup sketch index rebuild failed: {e}");
+                    } else {
+                        log::info!("startup: rebuilt sketch index");
+                    }
+                }
             }
 
             // S3: the read-only estimator subscribes to the bus. It only updates
@@ -475,6 +486,11 @@ pub fn run() {
             blueprint::commands::blueprint_request_check,
             blueprint::commands::blueprint_get_check_results,
             blueprint::commands::blueprint_rebuild_index,
+            sketch::commands::sketch_list,
+            sketch::commands::sketch_get,
+            sketch::commands::sketch_create,
+            sketch::commands::sketch_save,
+            sketch::commands::sketch_rebuild_index,
             blueprint_get_estimates,
             editor::commands::editor_list_dir,
             editor::commands::editor_read_file,
