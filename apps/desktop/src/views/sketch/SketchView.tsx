@@ -117,12 +117,15 @@ export function SketchView() {
               ))}
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {/* min-w-0 lets the input shrink below its placeholder width —
+                without it the row overflows the panel padding and the button
+                lands flush against the border. */}
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="New sketch name…"
-              className="flex-1 text-xs px-2 py-1.5 rounded"
+              className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-md"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && newName.trim()) {
                   void createSketch(newName.trim(), null);
@@ -137,9 +140,9 @@ export function SketchView() {
                   setNewName("");
                 }
               }}
-              className="glass-button-primary px-3 py-1.5 text-xs rounded-lg"
+              className="glass-button-primary shrink-0"
             >
-              <Plus size={12} className="inline mr-1" />
+              <Plus size={12} />
               Create
             </button>
           </div>

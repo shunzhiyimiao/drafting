@@ -515,8 +515,8 @@ body::before {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 8px 14px;
-    min-height: 32px;
+    padding: 5px 12px;
+    min-height: 28px;
     border-radius: 10px;
     font-size: 12px;
     line-height: 1.3;
