@@ -2080,3 +2080,11 @@ pub enum EditorEvent {
 > v1.5 范围由 `docs/v1.5-design.md` 定义(闭合 spec↔code 回路 / 验证侧 / Rust+TS)。历史性「留 v1.5」标记降级为 backlog,待单独 triage。
 
 S0–S7 内部细节以 `docs/v1.5-design.md` 为准;若与早期设计笔记有出入,以该文档为 v1.5 工作定义。
+
+---
+
+## v2 / Sketch 范围指针
+
+> Sketch(界面结构层,画出来)由 `docs/sketch-design.md` 定义(Rev 2:三 keystone——树即真相 / 有限纯折叠 / 单 IR 双序列化器)。该文档 §6 记录了对本宪法的两条 v2 修正案(Part 6 §2 的 packages/ 写权限扩展 + `packages/ui` 所有权行),Sketch 落地时以该文档为准。
+
+实现骨架:`packages/sketch-core`(共享 TS 包,K3 唯一实现,前端 canvas 与 codegen-server 同源 import;Rust 只做 Spec serde + storage + index,永不计算 className)。
