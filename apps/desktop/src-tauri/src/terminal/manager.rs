@@ -110,18 +110,9 @@ impl TerminalManager {
                 Ok(status) => status.exit_code() as i32,
                 Err(_) => -1,
             };
-            // Update session
-            let rt = tokio::runtime::Handle::try_current();
-            if let Ok(handle) = rt {
-                let sessions = sessions_clone.clone();
-                let sid = session_id_for_waiter.clone();
-                handle.spawn(async move {
-                    let mut s = sessions.lock().await;
-                    if let Some(session) = s.get_mut(&sid) {
-                        session.exit_code = Some(exit_code);
-                    }
-                });
-            }
+            // Record before emitting, so a frontend reacting to the exit
+            // event already sees the code via list().
+            record_exit_code(&sessions_clone, &session_id_for_waiter, exit_code);
             let _ = app_waiter.emit(
                 "terminal://exit",
                 SessionExitPayload {
@@ -223,6 +214,23 @@ impl TerminalManager {
     }
 }
 
+/// Record a child's exit code on its session entry, if it still exists.
+///
+/// Runs on the bare child-waiter thread, which has no tokio runtime context
+/// (`Handle::try_current()` there always fails — the original bug), so it
+/// must use `blocking_lock`. Do NOT call this from async code: `blocking_lock`
+/// panics inside a runtime.
+fn record_exit_code(
+    sessions: &Arc<Mutex<HashMap<String, PtySession>>>,
+    session_id: &str,
+    exit_code: i32,
+) {
+    let mut s = sessions.blocking_lock();
+    if let Some(session) = s.get_mut(session_id) {
+        session.exit_code = Some(exit_code);
+    }
+}
+
 pub fn detect_default_shell() -> String {
     #[cfg(target_os = "windows")]
     {
@@ -254,5 +262,69 @@ pub fn default_home_dir() -> String {
     #[cfg(not(target_os = "windows"))]
     {
         std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: the child-waiter runs on a bare std thread with no tokio
+    /// runtime context. The old implementation called `Handle::try_current()`
+    /// there, which always failed, so the exit code was silently never
+    /// recorded and `list()` reported `exit_code: None` forever.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn exit_code_is_recorded_from_bare_waiter_thread() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 4,
+                cols: 20,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+        let writer = pair.master.take_writer().expect("writer");
+
+        let sessions: Arc<Mutex<HashMap<String, PtySession>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        sessions.lock().await.insert(
+            "s1".to_string(),
+            PtySession {
+                id: "s1".to_string(),
+                cwd: "/".to_string(),
+                shell: "/bin/sh".to_string(),
+                created_at: 0,
+                pty: pair,
+                writer,
+                exit_code: None,
+            },
+        );
+
+        // Mimic production exactly: a bare thread, spawned while a tokio
+        // runtime is live on the test thread.
+        let sessions_clone = sessions.clone();
+        std::thread::spawn(move || {
+            record_exit_code(&sessions_clone, "s1", 42);
+        })
+        .join()
+        .expect("waiter thread panicked");
+
+        let s = sessions.lock().await;
+        assert_eq!(s.get("s1").and_then(|s| s.exit_code), Some(42));
+    }
+
+    /// A session already removed by close() must not panic the waiter.
+    #[tokio::test]
+    async fn record_exit_code_tolerates_removed_session() {
+        let sessions: Arc<Mutex<HashMap<String, PtySession>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let sessions_clone = sessions.clone();
+        std::thread::spawn(move || {
+            record_exit_code(&sessions_clone, "gone", 0);
+        })
+        .join()
+        .expect("waiter thread panicked");
+        assert!(sessions.lock().await.is_empty());
     }
 }
