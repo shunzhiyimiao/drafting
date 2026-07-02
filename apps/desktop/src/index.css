@@ -45,6 +45,7 @@
     radial-gradient(at 85% 20%, rgba(236, 72, 153, 0.16) 0%, transparent 50%),
     radial-gradient(at 50% 80%, rgba(14, 165, 233, 0.2) 0%, transparent 55%),
     radial-gradient(at 90% 90%, rgba(168, 85, 247, 0.14) 0%, transparent 50%);
+  --glow-alt-rgb: 236, 72, 153; /* pink — the dark theme's second voice */
   --app-bg: #0a0b13;
   --app-sheen: radial-gradient(
     ellipse 80% 50% at 50% -20%,
@@ -109,6 +110,7 @@
     radial-gradient(at 90% 10%, rgba(190, 220, 255, 0.55) 0%, transparent 50%),
     radial-gradient(at 50% 90%, rgba(200, 240, 220, 0.45) 0%, transparent 55%),
     radial-gradient(at 80% 70%, rgba(230, 200, 255, 0.4) 0%, transparent 50%);
+  --glow-alt-rgb: 168, 120, 255; /* violet */
   --app-bg: #f5f7fb;
   --app-sheen: radial-gradient(
     ellipse 90% 60% at 50% -10%,
@@ -165,6 +167,7 @@
     radial-gradient(at 85% 15%, rgba(255, 200, 220, 0.6) 0%, transparent 55%),
     radial-gradient(at 50% 85%, rgba(255, 235, 240, 0.75) 0%, transparent 60%),
     radial-gradient(at 85% 80%, rgba(255, 210, 225, 0.55) 0%, transparent 55%);
+  --glow-alt-rgb: 255, 158, 110; /* peach */
   --app-bg: #ffdee7;
   --app-sheen: radial-gradient(
     ellipse 90% 60% at 50% -10%,
@@ -220,6 +223,7 @@
     radial-gradient(at 12% 0%, rgba(238, 214, 150, 0.26) 0%, transparent 50%),
     radial-gradient(at 88% 12%, rgba(250, 238, 204, 0.3) 0%, transparent 52%),
     radial-gradient(at 50% 94%, rgba(242, 224, 170, 0.18) 0%, transparent 55%);
+  --glow-alt-rgb: 214, 214, 224; /* platinum — 金银双流 */
   --app-bg: #fdfcf9;
   --app-sheen: radial-gradient(
     ellipse 90% 60% at 50% -10%,
@@ -273,6 +277,7 @@
 
 /* --- Mist: lavender blue #C5CEF9 --- */
 [data-theme="mist"] {
+  --glow-alt-rgb: 110, 190, 255; /* sky */
   --app-gradient:
     radial-gradient(at 10% 10%, rgba(197, 206, 249, 0.85) 0%, transparent 55%),
     radial-gradient(at 90% 20%, rgba(180, 195, 245, 0.6) 0%, transparent 55%),
@@ -329,6 +334,7 @@
 
 /* --- Soft: muted pastel glow --- */
 [data-theme="soft"] {
+  --glow-alt-rgb: 214, 130, 200; /* orchid */
   --app-gradient:
     radial-gradient(at 20% 10%, rgba(180, 200, 230, 0.4) 0%, transparent 55%),
     radial-gradient(at 80% 15%, rgba(220, 190, 210, 0.35) 0%, transparent 55%),
@@ -523,10 +529,11 @@ body::before {
   }
 }
 
-/* Flowing-light hover border: a conic highlight sweeping around the button.
-   The ::after paints a 2px ring (two mask layers XORed leave only the
-   padding band) and a registered @property lets the gradient's angle
-   animate. Colors ride --color-accent-rgb, so Gilded flows gold. */
+/* Flowing-light hover border: two comet heads chasing each other 180°
+   apart around the button — the accent color leads, the theme's
+   --glow-alt-rgb answers (Gilded: gold and platinum, 金银双流). The ::after
+   paints a 2px ring (two mask layers XORed leave only the padding band)
+   and a registered @property lets the gradient's angle animate. */
 @property --btn-glow-angle {
   syntax: "<angle>";
   inherits: false;
@@ -550,13 +557,15 @@ body::before {
   background: conic-gradient(
     from var(--btn-glow-angle),
     transparent 0%,
-    rgba(var(--color-accent-rgb), 0.85) 10%,
-    rgba(255, 255, 255, 0.95) 18%,
-    rgba(var(--color-accent-rgb), 0.85) 26%,
-    transparent 38%,
+    rgba(var(--color-accent-rgb), 0.9) 9%,
+    rgba(255, 255, 255, 0.95) 15%,
+    rgba(var(--color-accent-rgb), 0.9) 21%,
+    transparent 34%,
     transparent 50%,
-    rgba(var(--color-accent-rgb), 0.5) 62%,
-    transparent 74%
+    rgba(var(--glow-alt-rgb, 255, 255, 255), 0.9) 59%,
+    rgba(255, 255, 255, 0.95) 65%,
+    rgba(var(--glow-alt-rgb, 255, 255, 255), 0.9) 71%,
+    transparent 84%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
