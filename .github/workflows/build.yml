@@ -63,6 +63,15 @@ jobs:
 
       # Tests run on one platform: they are platform-independent, and the
       # three-platform matrix exists for the build, not the suite.
+      # tauri-build's build script validates the bundled codegen-server
+      # resource and the frontendDist dir even for `cargo test`, and this
+      # step runs before the real frontend build — provide both.
+      - name: Prepare Rust test prerequisites
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          pnpm --filter @drafting/codegen-server build
+          mkdir -p apps/desktop/dist
+
       - name: Rust tests
         if: matrix.platform == 'ubuntu-latest'
         working-directory: apps/desktop/src-tauri
