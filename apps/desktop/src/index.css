@@ -223,7 +223,10 @@
     radial-gradient(at 12% 0%, rgba(238, 214, 150, 0.26) 0%, transparent 50%),
     radial-gradient(at 88% 12%, rgba(250, 238, 204, 0.3) 0%, transparent 52%),
     radial-gradient(at 50% 94%, rgba(242, 224, 170, 0.18) 0%, transparent 55%);
-  --glow-alt-rgb: 214, 214, 224; /* platinum — 金银双流 */
+  /* 金银双流 — deepened so both heads read against the white ground AND the
+     satin-gold button face (the accent itself blends into both). */
+  --glow-rgb: 170, 130, 30; /* deep gold */
+  --glow-alt-rgb: 128, 138, 160; /* solid silver */
   --app-bg: #fdfcf9;
   --app-sheen: radial-gradient(
     ellipse 90% 60% at 50% -10%,
@@ -554,12 +557,14 @@ body::before {
   inset: -2px;
   border-radius: inherit;
   padding: 2px;
+  /* Two identical comet shapes, cores at 15% and 65% — exactly 180° apart,
+     mirror-symmetric about the center at every moment of the sweep. */
   background: conic-gradient(
     from var(--btn-glow-angle),
     transparent 0%,
-    rgba(var(--color-accent-rgb), 0.9) 9%,
+    rgba(var(--glow-rgb, var(--color-accent-rgb)), 0.9) 9%,
     rgba(255, 255, 255, 0.95) 15%,
-    rgba(var(--color-accent-rgb), 0.9) 21%,
+    rgba(var(--glow-rgb, var(--color-accent-rgb)), 0.9) 21%,
     transparent 34%,
     transparent 50%,
     rgba(var(--glow-alt-rgb, 255, 255, 255), 0.9) 59%,
