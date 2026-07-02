@@ -5,10 +5,11 @@
 //! language. Per the design (§2): compile/LSP is a GATE, not a vote — a hard
 //! build error means an LLM "pass" can't be trusted.
 //!
-//! Scope of the first leg (agreed): Rust `cargo check` only; tests
-//! (`run_tests`), rust-analyzer diagnostics, the TS provider, and graceful
-//! toolchain degradation come in later S4 sub-steps. Subprocesses use
-//! `tokio::process` (same precedent as lsp/client.rs + codegen_proxy).
+//! Wired sensors: Rust (`cargo check` gate + `cargo test` leg) and
+//! TypeScript (`tsc --noEmit` gate; no test leg — the degradation note says
+//! so). rust-analyzer diagnostics and richer evidence stay later S4
+//! sub-steps. Subprocesses use `tokio::process` (same precedent as
+//! lsp/client.rs + codegen_proxy).
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -26,8 +27,13 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(300);
 /// What a language can be observed with (its intrinsic sensor surface).
 #[derive(Debug, Clone)]
 pub struct CapabilityProfile {
+    /// Language name as shown in degradation notes ("Rust", "TypeScript").
+    pub language: &'static str,
     pub has_compile_gate: bool,
     pub has_tests: bool,
+    /// What installing would bring the missing toolchain online — quoted
+    /// verbatim in the degradation note when the gate is unavailable.
+    pub toolchain_hint: &'static str,
 }
 
 /// Result of the compile gate.
@@ -98,17 +104,84 @@ impl LanguageProvider for RustProvider {
 
     fn capability(&self) -> CapabilityProfile {
         CapabilityProfile {
+            language: "Rust",
             has_compile_gate: true,
             has_tests: true,
+            toolchain_hint: "install cargo",
         }
     }
 }
 
-/// Pick a provider for the project. First leg: Rust only (Cargo.toml present).
-/// No match → the compile gate is simply unavailable for this project.
+pub struct TsProvider;
+
+#[async_trait]
+impl LanguageProvider for TsProvider {
+    async fn build_check(&self, project_root: &Path) -> BuildResult {
+        // Prefer the project's own typescript package (same version the
+        // editor diagnostics use) run through `node` — cross-platform, no
+        // shell shims. Fall back to a PATH `tsc` for global installs (unix;
+        // on Windows the global shim is tsc.cmd, which CreateProcess won't
+        // resolve — that lands in the honest Unavailable path).
+        let local_tsc = project_root.join("node_modules/typescript/bin/tsc");
+        let mut cmd = if local_tsc.exists() {
+            let mut c = tokio::process::Command::new("node");
+            c.arg(local_tsc);
+            c
+        } else {
+            tokio::process::Command::new("tsc")
+        };
+        match cmd
+            .arg("--noEmit")
+            .current_dir(project_root)
+            .output()
+            .await
+        {
+            Ok(out) => BuildResult {
+                available: true,
+                ok: out.status.success(),
+                // tsc prints diagnostics to STDOUT, not stderr.
+                diagnostics: if out.status.success() {
+                    Vec::new()
+                } else {
+                    String::from_utf8_lossy(&out.stdout)
+                        .lines()
+                        .take(50)
+                        .map(String::from)
+                        .collect()
+                },
+            },
+            // node/tsc not runnable → sensor unavailable (gate stays silent)
+            Err(_) => BuildResult {
+                available: false,
+                ok: false,
+                diagnostics: Vec::new(),
+            },
+        }
+    }
+
+    fn capability(&self) -> CapabilityProfile {
+        CapabilityProfile {
+            language: "TypeScript",
+            has_compile_gate: true,
+            // No TS test leg yet (vitest/jest mapping is future work) — the
+            // degradation note discloses this on every TS criterion.
+            has_tests: false,
+            toolchain_hint: "install typescript (e.g. pnpm add -D typescript)",
+        }
+    }
+}
+
+/// Pick a provider for the project. Rust (Cargo.toml) and TypeScript (root
+/// tsconfig.json — the same signal tsserver keys off, and the scaffolding
+/// always writes one). Rust wins on mixed projects: fusion is single-gate
+/// for now, multi-gate is future work. No match → the compile gate is
+/// simply unavailable for this project.
 pub fn select_provider(project_root: &Path) -> Option<Box<dyn LanguageProvider>> {
     if project_root.join("Cargo.toml").exists() {
         return Some(Box::new(RustProvider));
+    }
+    if project_root.join("tsconfig.json").exists() {
+        return Some(Box::new(TsProvider));
     }
     None
 }
@@ -257,18 +330,24 @@ pub struct SensorContext {
 pub fn degradation_note(ctx: &SensorContext, test: TestOutcome) -> Option<String> {
     let Some(cap) = &ctx.capability else {
         return Some(
-            "compile gate & test sensor unavailable for this project's language \
-             (v1.5 wires Rust only) — AI-only estimate, lower confidence"
+            "no supported language detected (Rust: Cargo.toml / TypeScript: \
+             root tsconfig.json) — compile & test sensors unavailable; \
+             AI-only estimate, lower confidence"
                 .to_string(),
         );
     };
     if cap.has_compile_gate && ctx.gate == GateOutcome::Unavailable {
-        // With the toolchain missing, the test leg can't run either.
-        return Some(
-            "cargo not found — compile gate and tests skipped; AI-only estimate, \
-             lower confidence (install cargo to upgrade verdict quality)"
-                .to_string(),
-        );
+        // With the toolchain missing, any test leg can't run either.
+        let legs = if cap.has_tests {
+            "compile gate and tests"
+        } else {
+            "compile gate"
+        };
+        return Some(format!(
+            "{} toolchain not found — {legs} skipped; AI-only estimate, lower \
+             confidence ({} to upgrade verdict quality)",
+            cap.language, cap.toolchain_hint
+        ));
     }
     let mut parts: Vec<&str> = Vec::new();
     if !cap.has_compile_gate {
@@ -416,10 +495,29 @@ mod tests {
     }
 
     #[test]
-    fn select_provider_picks_rust_on_cargo_toml() {
+    fn select_provider_picks_by_project_marker() {
         let with_cargo = TempDir::new().unwrap();
         std::fs::write(with_cargo.path().join("Cargo.toml"), "[package]\n").unwrap();
-        assert!(select_provider(with_cargo.path()).is_some());
+        assert_eq!(
+            select_provider(with_cargo.path()).unwrap().capability().language,
+            "Rust"
+        );
+
+        let with_tsconfig = TempDir::new().unwrap();
+        std::fs::write(with_tsconfig.path().join("tsconfig.json"), "{}\n").unwrap();
+        assert_eq!(
+            select_provider(with_tsconfig.path()).unwrap().capability().language,
+            "TypeScript"
+        );
+
+        // Mixed project: Rust wins (single-gate fusion for now).
+        let mixed = TempDir::new().unwrap();
+        std::fs::write(mixed.path().join("Cargo.toml"), "[package]\n").unwrap();
+        std::fs::write(mixed.path().join("tsconfig.json"), "{}\n").unwrap();
+        assert_eq!(
+            select_provider(mixed.path()).unwrap().capability().language,
+            "Rust"
+        );
 
         let without = TempDir::new().unwrap();
         assert!(select_provider(without.path()).is_none());
@@ -430,6 +528,13 @@ mod tests {
         let cap = RustProvider.capability();
         assert!(cap.has_compile_gate);
         assert!(cap.has_tests);
+    }
+
+    #[test]
+    fn ts_provider_advertises_compile_gate_without_test_leg() {
+        let cap = TsProvider.capability();
+        assert!(cap.has_compile_gate);
+        assert!(!cap.has_tests, "no TS test leg yet — must be disclosed, not implied");
     }
 
     fn ctx(
@@ -491,6 +596,33 @@ mod tests {
     }
 
     #[test]
+    fn degradation_note_missing_tsc_says_install_typescript() {
+        let n = degradation_note(
+            &ctx(Some(TsProvider.capability()), GateOutcome::Unavailable, false),
+            TestOutcome::Unavailable,
+        )
+        .expect("must disclose");
+        assert!(n.contains("TypeScript toolchain not found"), "{n}");
+        assert!(n.contains("install typescript"), "{n}");
+        assert!(n.contains("AI-only"), "{n}");
+        // TS has no test leg — the note must not claim tests were "skipped".
+        assert!(!n.contains("and tests"), "{n}");
+    }
+
+    #[test]
+    fn degradation_note_ts_gate_live_still_discloses_missing_test_leg() {
+        // tsc ran fine — but TS has no test sensor, and that must be said
+        // rather than letting a gate-green verdict read as fully sensed.
+        let n = degradation_note(
+            &ctx(Some(TsProvider.capability()), GateOutcome::Passed, false),
+            TestOutcome::Unavailable,
+        )
+        .expect("must disclose");
+        assert!(n.contains("no test sensor for this language"), "{n}");
+        assert!(n.contains("lower confidence"), "{n}");
+    }
+
+    #[test]
     fn degradation_note_silent_when_all_sensors_live() {
         // Gate ran (either way) and the mapped module has real test signal —
         // nothing to disclose, the fusion result stands on live sensors.
@@ -502,6 +634,56 @@ mod tests {
                 );
             }
         }
+    }
+
+    // Real `tsc` is environment-dependent (needs node + a typescript install)
+    // — excluded from the default suite / CI. Run with `cargo test -- --ignored`.
+    #[cfg(unix)]
+    #[ignore]
+    #[tokio::test]
+    async fn ts_build_check_flags_a_type_error() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"noEmit":true},"include":["src"]}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("src/bad.ts"),
+            "const n: number = \"not a number\";\nexport default n;\n",
+        )
+        .unwrap();
+
+        // Borrow the workspace's typescript install so the manual run doesn't
+        // need a global tsc (apps/desktop has one as a devDependency).
+        let repo_ts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../node_modules/typescript");
+        if repo_ts.exists() {
+            std::fs::create_dir_all(dir.path().join("node_modules")).unwrap();
+            std::os::unix::fs::symlink(
+                repo_ts.canonicalize().unwrap(),
+                dir.path().join("node_modules/typescript"),
+            )
+            .unwrap();
+        }
+
+        let r = TsProvider.build_check(dir.path()).await;
+        assert!(r.available, "needs node + typescript (local or PATH)");
+        assert!(!r.ok, "a type error must fail the gate");
+        assert!(
+            r.diagnostics.iter().any(|l| l.contains("TS2322")),
+            "diagnostics should carry the tsc error: {:?}",
+            r.diagnostics
+        );
+
+        // And a clean file passes the same gate.
+        std::fs::write(
+            dir.path().join("src/bad.ts"),
+            "const n: number = 42;\nexport default n;\n",
+        )
+        .unwrap();
+        let ok = TsProvider.build_check(dir.path()).await;
+        assert!(ok.available && ok.ok, "clean project should pass the gate");
     }
 
     // Real `cargo check` is environment-dependent and slow — excluded from the
