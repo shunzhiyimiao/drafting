@@ -42,8 +42,8 @@ export const THEME_META: Record<
   },
   gilded: {
     label: "Gilded",
-    description: "鎏金白 — warm ivory & liquid gold",
-    swatch: "#f5ecd7",
+    description: "鎏金白 — white ground, light gold accents",
+    swatch: "#fdfcf9",
   },
 };
 
