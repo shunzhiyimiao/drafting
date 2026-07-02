@@ -199,7 +199,8 @@ pub async fn run_check(
     // Both are project-level and may be slow / unavailable (degrade gracefully).
     use crate::blueprint::language_provider as lp;
     let capability = lp::select_provider(&project_root).map(|p| p.capability());
-    let gate = lp::run_gate(&project_root).await;
+    let gate_report = lp::run_gate(&project_root).await;
+    let gate = gate_report.outcome;
     let test_report = lp::run_rust_tests(&project_root).await;
     // "Effective sensor = capability ∩ toolchain" — feeds the honest
     // degradation annotation per criterion below (§2 graceful degradation).
@@ -239,10 +240,26 @@ pub async fn run_check(
         // moved the verdict so the UI doesn't show the LLM's rationale next to a
         // gate/test-driven result.
         let explanation = if gate_downgraded {
-            format!(
-                "[compile gate] project does not build — LLM pass downgraded to unclear. {}",
-                item.explanation
-            )
+            // "The diagnostic IS the reason" (§3): surface the first compiler
+            // lines right where the downgrade is announced.
+            let head = gate_report
+                .diagnostics
+                .iter()
+                .take(3)
+                .map(|l| l.trim())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            if head.is_empty() {
+                format!(
+                    "[compile gate] project does not build — LLM pass downgraded to unclear. {}",
+                    item.explanation
+                )
+            } else {
+                format!(
+                    "[compile gate] project does not build ({head}) — LLM pass downgraded to unclear. {}",
+                    item.explanation
+                )
+            }
         } else if test_failed {
             format!(
                 "[tests] mapped module has failing tests — verdict is Fail. {}",
@@ -259,13 +276,28 @@ pub async fn run_check(
             Some(note) => format!("{explanation} [sensors] {note}"),
             None => explanation,
         };
+        // S4.5 evidence trail: gate diagnostics (project-level, shared by all
+        // criteria) + the provenance of this criterion's own bound artifacts.
+        let artifact_provenance: Vec<(String, String)> =
+            crate::blueprint::bindings::artifacts_for(&criteria[item.index], &bp)
+                .into_iter()
+                .filter_map(|f| {
+                    bundle
+                        .provenance
+                        .iter()
+                        .find(|(p, _)| *p == f)
+                        .map(|(_, label)| (f, label.clone()))
+                })
+                .collect();
+        let references = build_references(&gate_report.diagnostics, &artifact_provenance);
+
         let result = CheckResult {
             blueprint_id: blueprint_id.clone(),
             criterion_id: criteria[item.index].id.clone(),
             verdict,
             explanation,
             suggestion: item.suggestion.clone(),
-            references: Vec::new(),
+            references,
             checked_at: now,
             stale: false,
             blueprint_hash: blueprint_hash.clone(),
@@ -306,6 +338,37 @@ struct CodeBundle {
     included: Vec<String>,
     /// Files excluded by the privacy filter: (path, reason).
     blocked: Vec<(String, String)>,
+    /// S1 provenance of each included file, as (path, label) with label one
+    /// of "human" / "ai(model)" / "derived(generator)" — the S4.5 evidence
+    /// trail records whether checked code is user-written or generated.
+    provenance: Vec<(String, String)>,
+}
+
+fn provenance_label(source: &crate::editor::types::ProvenanceSource) -> String {
+    use crate::editor::types::ProvenanceSource;
+    match source {
+        ProvenanceSource::Human => "human".to_string(),
+        ProvenanceSource::Ai { model } => format!("ai({model})"),
+        ProvenanceSource::Derived { generator } => format!("derived({generator})"),
+    }
+}
+
+/// Compose a criterion's evidence references: gate diagnostics (capped so N
+/// criteria don't multiply 50 lines each into the check-results files) then
+/// the provenance of the criterion's bound artifacts.
+fn build_references(
+    gate_diagnostics: &[String],
+    artifact_provenance: &[(String, String)],
+) -> Vec<String> {
+    let mut refs: Vec<String> = gate_diagnostics
+        .iter()
+        .take(10)
+        .map(|d| format!("gate: {}", d.trim()))
+        .collect();
+    for (path, label) in artifact_provenance {
+        refs.push(format!("provenance: {path} = {label}"));
+    }
+    refs
 }
 
 fn load_related_code(project_root: &Path, files: &[String]) -> CodeBundle {
@@ -315,6 +378,7 @@ fn load_related_code(project_root: &Path, files: &[String]) -> CodeBundle {
             hash: hash_str(""),
             included: Vec::new(),
             blocked: Vec::new(),
+            provenance: Vec::new(),
         };
     }
     let mut out = String::new();
@@ -322,6 +386,7 @@ fn load_related_code(project_root: &Path, files: &[String]) -> CodeBundle {
     let mut total = 0usize;
     let mut included = Vec::new();
     let mut blocked = Vec::new();
+    let mut provenance = Vec::new();
     for rel in files {
         if total >= MAX_TOTAL_CODE_BYTES {
             out.push_str(&format!(
@@ -357,6 +422,13 @@ fn load_related_code(project_root: &Path, files: &[String]) -> CodeBundle {
                 hasher.update(b"\n");
                 hasher.update(content.as_bytes());
                 total += truncated.len();
+                provenance.push((
+                    rel.clone(),
+                    provenance_label(
+                        &crate::editor::identity::provenance_of(project_root, rel, &content)
+                            .source,
+                    ),
+                ));
                 included.push(rel.clone());
             }
             Err(_) => {
@@ -372,6 +444,7 @@ fn load_related_code(project_root: &Path, files: &[String]) -> CodeBundle {
         hash: code_hash,
         included,
         blocked,
+        provenance,
     }
 }
 
@@ -462,4 +535,52 @@ fn current_millis() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn references_cap_gate_lines_and_carry_provenance() {
+        let diags: Vec<String> = (0..20).map(|i| format!("error {i}")).collect();
+        let prov = vec![("src/a.ts".to_string(), "human".to_string())];
+        let refs = build_references(&diags, &prov);
+        // 10 capped gate lines (not all 20) + the artifact's provenance.
+        assert_eq!(refs.len(), 11);
+        assert_eq!(refs[0], "gate: error 0");
+        assert_eq!(refs[9], "gate: error 9");
+        assert_eq!(refs[10], "provenance: src/a.ts = human");
+
+        // A green gate contributes nothing; provenance still recorded.
+        let refs = build_references(&[], &prov);
+        assert_eq!(refs, vec!["provenance: src/a.ts = human".to_string()]);
+    }
+
+    #[test]
+    fn load_related_code_captures_provenance_labels() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/human.ts"), "export const x = 1;\n").unwrap();
+        std::fs::write(dir.path().join("src/gen.ts"), "// AUTO-GENERATED\nexport {};\n")
+            .unwrap();
+
+        let bundle = load_related_code(
+            dir.path(),
+            &["src/human.ts".to_string(), "src/gen.ts".to_string()],
+        );
+
+        assert_eq!(
+            bundle.provenance,
+            vec![
+                ("src/human.ts".to_string(), "human".to_string()),
+                ("src/gen.ts".to_string(), "derived(codegen)".to_string()),
+            ]
+        );
+        // Missing files are recorded in neither included nor provenance.
+        let bundle = load_related_code(dir.path(), &["src/nope.ts".to_string()]);
+        assert!(bundle.provenance.is_empty());
+        assert!(bundle.included.is_empty());
+    }
 }

@@ -36,6 +36,22 @@ pub fn compute_identity(project_root: &Path, rel_path: &str, content: &str) -> F
     }
 }
 
+/// Provenance alone (S1) for a file whose content is already in hand — the
+/// cheap subset of `compute_identity` (marker scans + one stat, no
+/// blueprint-index walking). Used by the Blueprint check's evidence trail
+/// (S4.5), which reads every bound artifact anyway.
+pub fn provenance_of(project_root: &Path, rel_path: &str, content: &str) -> FileProvenance {
+    let is_generated = detect_generated(content);
+    let tool_owned = rel_path.starts_with("packages/sockets/")
+        || rel_path.starts_with("packages/wiring/");
+    compute_provenance(
+        project_root,
+        rel_path,
+        is_generated || tool_owned,
+        detect_adapter_id(content).is_some(),
+    )
+}
+
 /// File-level provenance inference (S1). Source from generation markers; "when"
 /// from file mtime. Honest about its limits: the `Ai` source is never produced
 /// here (no AI-stamping convention yet), and adapter files are really
@@ -195,6 +211,30 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let id = compute_identity(dir.path(), "src/app.ts", "export const x = 1;\n");
         assert_eq!(id.provenance.source, ProvenanceSource::Human);
+    }
+
+    #[test]
+    fn provenance_of_matches_full_identity_inference() {
+        let dir = TempDir::new().unwrap();
+        // Generated marker → derived(codegen), same as compute_identity.
+        let p = provenance_of(dir.path(), "src/gen.ts", "// AUTO-GENERATED\n");
+        assert_eq!(
+            p.source,
+            ProvenanceSource::Derived {
+                generator: "codegen".to_string()
+            }
+        );
+        // Adapter marker → derived(patchboard).
+        let p = provenance_of(dir.path(), "src/M.ts", "// @adapter-id: 01A\n");
+        assert_eq!(
+            p.source,
+            ProvenanceSource::Derived {
+                generator: "patchboard".to_string()
+            }
+        );
+        // Plain file → human.
+        let p = provenance_of(dir.path(), "src/app.ts", "export const x = 1;\n");
+        assert_eq!(p.source, ProvenanceSource::Human);
     }
 
     #[test]

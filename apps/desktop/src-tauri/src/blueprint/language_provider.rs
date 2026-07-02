@@ -43,9 +43,8 @@ pub struct BuildResult {
     pub available: bool,
     /// Did the project compile? (only meaningful when `available`)
     pub ok: bool,
-    /// Short diagnostic lines on failure. Feeds the S4.5/S6 evidence trail;
-    /// unread until that lands.
-    #[allow(dead_code)]
+    /// Short diagnostic lines on failure (S4.5 evidence: they ride the
+    /// GateReport into CheckResult.references and the gate-red explanation).
     pub diagnostics: Vec<String>,
 }
 
@@ -186,20 +185,36 @@ pub fn select_provider(project_root: &Path) -> Option<Box<dyn LanguageProvider>>
     None
 }
 
-/// Run the compile gate for a project, collapsing to a `GateOutcome`.
-pub async fn run_gate(project_root: &Path) -> GateOutcome {
+/// The compile gate's outcome plus its evidence — "the diagnostic IS the
+/// reason" (design §3): a red gate carries the compiler lines that made it
+/// red instead of collapsing them away.
+pub struct GateReport {
+    pub outcome: GateOutcome,
+    /// Diagnostic lines when the gate failed (capped at 50 by the provider).
+    pub diagnostics: Vec<String>,
+}
+
+/// Run the compile gate for a project.
+pub async fn run_gate(project_root: &Path) -> GateReport {
     match select_provider(project_root) {
         Some(provider) => {
             let r = provider.build_check(project_root).await;
-            if !r.available {
+            let outcome = if !r.available {
                 GateOutcome::Unavailable
             } else if r.ok {
                 GateOutcome::Passed
             } else {
                 GateOutcome::Failed
+            };
+            GateReport {
+                outcome,
+                diagnostics: r.diagnostics,
             }
         }
-        None => GateOutcome::Unavailable,
+        None => GateReport {
+            outcome: GateOutcome::Unavailable,
+            diagnostics: Vec::new(),
+        },
     }
 }
 
