@@ -9,6 +9,7 @@ import {
 } from "../../stores/headquarters-store";
 import type { BlueprintIndexEntry } from "../../types/blueprint-types";
 import { useT } from "../../lib/i18n";
+import { Dropdown } from "../../components/Dropdown";
 
 const priorityWeight: Record<string, number> = {
   critical: 4,
@@ -190,16 +191,16 @@ function SortMenu({
 }) {
   const tt = useT();
   return (
-    <select
+    <Dropdown
       value={sort}
-      onChange={(e) => onChange(e.target.value as FeatureSort)}
-      className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted hover:text-text-secondary focus:outline-none"
-    >
-      <option value="priority">{tt("hq.sort.priority")}</option>
-      <option value="progress">{tt("hq.sort.progress")}</option>
-      <option value="updated">{tt("hq.sort.updated")}</option>
-      <option value="name">{tt("hq.sort.name")}</option>
-    </select>
+      options={[
+        { value: "priority", label: tt("hq.sort.priority") },
+        { value: "progress", label: tt("hq.sort.progress") },
+        { value: "updated", label: tt("hq.sort.updated") },
+        { value: "name", label: tt("hq.sort.name") },
+      ]}
+      onChange={(v) => onChange(v as FeatureSort)}
+    />
   );
 }
 
@@ -214,18 +215,18 @@ function FilterMenu({
 }) {
   const tt = useT();
   return (
-    <select
+    <Dropdown
       value={filter}
-      onChange={(e) => onChange(e.target.value as FeatureFilter)}
-      className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted hover:text-text-secondary focus:outline-none"
-    >
-      <option value="all">{tt("hq.filter.all")}</option>
-      <option value="in-progress">{tt("hq.filter.inProgress")}</option>
-      <option value="with-alerts">{tt("hq.filter.withAlerts")}</option>
-      <option value="stalled">{tt("hq.filter.stalled")}</option>
-      <option value="empty">{tt("hq.filter.empty")}</option>
-      <option value="completed">{tt("hq.filter.completed")}</option>
-    </select>
+      options={[
+        { value: "all", label: tt("hq.filter.all") },
+        { value: "in-progress", label: tt("hq.filter.inProgress") },
+        { value: "with-alerts", label: tt("hq.filter.withAlerts") },
+        { value: "stalled", label: tt("hq.filter.stalled") },
+        { value: "empty", label: tt("hq.filter.empty") },
+        { value: "completed", label: tt("hq.filter.completed") },
+      ]}
+      onChange={(v) => onChange(v as FeatureFilter)}
+    />
   );
 }
 

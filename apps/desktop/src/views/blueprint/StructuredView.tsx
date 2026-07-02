@@ -3,6 +3,7 @@ import { Sparkles } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { AcceptanceCriteriaEditor } from "./AcceptanceCriteriaEditor";
 import { AiGenerateDialog } from "../../components/AiGenerateDialog";
+import { Dropdown } from "../../components/Dropdown";
 import { subscribeSyncBus } from "../../lib/sync-bus";
 import type {
   Blueprint,
@@ -131,45 +132,36 @@ export function StructuredView() {
               />
             </Field>
             <Field label="Status">
-              <select
+              <Dropdown
+                className="w-full"
                 value={fm.status}
-                onChange={(e) =>
-                  updateField("status", e.target.value as BlueprintStatus)
-                }
-                className="w-full px-2 py-1 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
-              >
-                <option value="draft">draft</option>
-                <option value="in-progress">in-progress</option>
-                <option value="completed">completed</option>
-                <option value="deprecated">deprecated</option>
-              </select>
+                options={["draft", "in-progress", "completed", "deprecated"].map(
+                  (v) => ({ value: v, label: v }),
+                )}
+                onChange={(v) => updateField("status", v as BlueprintStatus)}
+              />
             </Field>
             <Field label="Priority">
-              <select
+              <Dropdown
+                className="w-full"
                 value={fm.priority}
-                onChange={(e) =>
-                  updateField("priority", e.target.value as BlueprintPriority)
-                }
-                className="w-full px-2 py-1 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
-              >
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="critical">critical</option>
-              </select>
+                options={["low", "medium", "high", "critical"].map((v) => ({
+                  value: v,
+                  label: v,
+                }))}
+                onChange={(v) => updateField("priority", v as BlueprintPriority)}
+              />
             </Field>
             <Field label="Owner">
-              <select
+              <Dropdown
+                className="w-full"
                 value={fm.owner}
-                onChange={(e) =>
-                  updateField("owner", e.target.value as typeof fm.owner)
-                }
-                className="w-full px-2 py-1 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
-              >
-                <option value="human">human</option>
-                <option value="ai">ai</option>
-                <option value="collaborative">collaborative</option>
-              </select>
+                options={["human", "ai", "collaborative"].map((v) => ({
+                  value: v,
+                  label: v,
+                }))}
+                onChange={(v) => updateField("owner", v as typeof fm.owner)}
+              />
             </Field>
             <Field label="Tags">
               <input

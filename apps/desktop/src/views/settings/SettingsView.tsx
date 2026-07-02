@@ -165,18 +165,19 @@ function AppearanceTab() {
       </div>
 
       <SettingsRow label={t("settings.fontFamily")}>
-        <select
+        <Dropdown
+          className="w-56"
           value={appearance.fontFamily}
-          onChange={(e) => updateAppearance({ fontFamily: e.target.value })}
-          className="w-56 px-2 py-1.5 text-xs rounded-lg"
-        >
-          <option value="JetBrains Mono, ui-monospace, monospace">JetBrains Mono</option>
-          <option value="Fira Code, ui-monospace, monospace">Fira Code</option>
-          <option value="SF Mono, ui-monospace, monospace">SF Mono</option>
-          <option value="Menlo, ui-monospace, monospace">Menlo</option>
-          <option value="Cascadia Code, ui-monospace, monospace">Cascadia Code</option>
-          <option value="ui-monospace, monospace">System Mono</option>
-        </select>
+          options={[
+            { value: "JetBrains Mono, ui-monospace, monospace", label: "JetBrains Mono" },
+            { value: "Fira Code, ui-monospace, monospace", label: "Fira Code" },
+            { value: "SF Mono, ui-monospace, monospace", label: "SF Mono" },
+            { value: "Menlo, ui-monospace, monospace", label: "Menlo" },
+            { value: "Cascadia Code, ui-monospace, monospace", label: "Cascadia Code" },
+            { value: "ui-monospace, monospace", label: "System Mono" },
+          ]}
+          onChange={(v) => updateAppearance({ fontFamily: v })}
+        />
       </SettingsRow>
 
       <SettingsRow label={t("settings.uiFontSize")}>
@@ -899,18 +900,17 @@ function ProfileEditorDialog({
           </Field>
 
           <Field label={t("settings.ai.editor.protocol")}>
-            <select
+            <Dropdown
+              className="w-full"
               value={draft.protocol}
-              onChange={(e) =>
-                setDraft({ ...draft, protocol: e.target.value as Protocol })
-              }
-              className="text-xs px-2 py-1 rounded w-full"
               disabled={profile.builtin}
-            >
-              <option value="anthropic">{t("settings.ai.protocol.anthropicOpt")}</option>
-              <option value="openai-compatible">{t("settings.ai.protocol.openaiOpt")}</option>
-              <option value="ollama">{t("settings.ai.protocol.ollamaOpt")}</option>
-            </select>
+              options={[
+                { value: "anthropic", label: t("settings.ai.protocol.anthropicOpt") },
+                { value: "openai-compatible", label: t("settings.ai.protocol.openaiOpt") },
+                { value: "ollama", label: t("settings.ai.protocol.ollamaOpt") },
+              ]}
+              onChange={(v) => setDraft({ ...draft, protocol: v as Protocol })}
+            />
           </Field>
 
           <Field label={t("settings.ai.editor.baseUrl")}>
@@ -1035,22 +1035,22 @@ function AuthSchemeEditor({
   const t = useT();
   return (
     <div className="flex items-center gap-2">
-      <select
+      <Dropdown
         value={value.kind}
-        onChange={(e) => {
-          const kind = e.target.value as AuthScheme["kind"];
+        options={[
+          { value: "anthropic-key", label: t("settings.ai.auth.anthropic") },
+          { value: "bearer", label: t("settings.ai.auth.bearer") },
+          { value: "custom-header", label: t("settings.ai.auth.custom") },
+          { value: "none", label: t("settings.ai.auth.none") },
+        ]}
+        onChange={(v) => {
+          const kind = v as AuthScheme["kind"];
           if (kind === "custom-header") onChange({ kind, name: "X-API-Key" });
           else if (kind === "anthropic-key") onChange({ kind: "anthropic-key" });
           else if (kind === "bearer") onChange({ kind: "bearer" });
           else onChange({ kind: "none" });
         }}
-        className="text-xs px-2 py-1 rounded"
-      >
-        <option value="anthropic-key">{t("settings.ai.auth.anthropic")}</option>
-        <option value="bearer">{t("settings.ai.auth.bearer")}</option>
-        <option value="custom-header">{t("settings.ai.auth.custom")}</option>
-        <option value="none">{t("settings.ai.auth.none")}</option>
-      </select>
+      />
       {value.kind === "custom-header" && (
         <input
           value={value.name}
@@ -1087,11 +1087,16 @@ function EditorTab() {
     <div className="flex flex-col gap-6">
       <SectionTitle>{t("settings.tab.editor")}</SectionTitle>
       <SettingsRow label={t("settings.editor.tabSize")}>
-        <select value={appearance.editorTabSize}
-          onChange={(e) => updateAppearance({ editorTabSize: parseInt(e.target.value) })}
-          className="w-20 px-2 py-1.5 text-xs rounded-lg">
-          <option value="2">2</option><option value="4">4</option><option value="8">8</option>
-        </select>
+        <Dropdown
+          className="w-20"
+          value={String(appearance.editorTabSize)}
+          options={[
+            { value: "2", label: "2" },
+            { value: "4", label: "4" },
+            { value: "8", label: "8" },
+          ]}
+          onChange={(v) => updateAppearance({ editorTabSize: parseInt(v) })}
+        />
       </SettingsRow>
       <SettingsRow label={t("settings.editor.wordWrap")}>
         <button onClick={() => updateAppearance({ editorWordWrap: !appearance.editorWordWrap })}>

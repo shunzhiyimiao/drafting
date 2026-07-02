@@ -18,6 +18,7 @@ import { allNodeIds, findNode, useSketchStore } from "../../stores/sketch-store"
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { getBlueprint, updateBlueprintStructured } from "../../lib/blueprint-api";
 import type { Blueprint } from "../../types/blueprint-types";
+import { Dropdown } from "../../components/Dropdown";
 
 /** The §7 Inspector: every control is an enumerated dropdown/toggle over the
  *  finite alphabet — the editor structurally cannot produce an off-token or
@@ -67,11 +68,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-const selectCls =
-  "w-full text-[11px] bg-bg-primary border border-border rounded px-1.5 py-1 text-text-secondary focus:outline-none";
 const inputCls =
-  "w-full text-[11px] px-1.5 py-1 rounded border border-border bg-bg-primary text-text-secondary focus:outline-none";
+  "w-full text-xs px-2 py-1.5 min-h-[28px] rounded-md border border-border bg-bg-primary text-text-secondary focus:border-accent focus:outline-none";
 
+/** All Inspector selectors ride the portal Dropdown — native <select> popups
+ *  get clipped by any backdrop-filter ancestor in WebKit (the exact bug the
+ *  Dropdown component exists to solve), and every Inspector control sits
+ *  inside a glass panel. */
 function TokenSelect<T extends string>({
   value,
   options,
@@ -84,20 +87,15 @@ function TokenSelect<T extends string>({
   allowNone?: boolean;
 }) {
   return (
-    <select
-      className={selectCls}
+    <Dropdown
+      className="w-full"
       value={value ?? "__none__"}
-      onChange={(e) =>
-        onChange(e.target.value === "__none__" ? undefined : (e.target.value as T))
-      }
-    >
-      {allowNone && <option value="__none__">—</option>}
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
+      options={[
+        ...(allowNone ? [{ value: "__none__", label: "—" }] : []),
+        ...options.map((o) => ({ value: o, label: o })),
+      ]}
+      onChange={(v) => onChange(v === "__none__" ? undefined : (v as T))}
+    />
   );
 }
 
@@ -110,23 +108,24 @@ function SizeControl({
 }) {
   return (
     <div className="flex gap-1">
-      <select
-        className={selectCls}
+      <Dropdown
+        className="flex-1"
         value={value.mode}
-        onChange={(e) => {
-          const mode = e.target.value as Size["mode"];
+        options={[
+          { value: "hug", label: "hug" },
+          { value: "fill", label: "fill" },
+          { value: "fixed", label: "fixed" },
+        ]}
+        onChange={(v) => {
+          const mode = v as Size["mode"];
           onChange(mode === "fixed" ? { mode, px: 100 } : { mode });
         }}
-      >
-        <option value="hug">hug</option>
-        <option value="fill">fill</option>
-        <option value="fixed">fixed</option>
-      </select>
+      />
       {value.mode === "fixed" && (
         <input
           type="number"
           min={1}
-          className={`${inputCls} w-16`}
+          className={`${inputCls} w-16 shrink-0`}
           value={value.px}
           onChange={(e) => onChange({ mode: "fixed", px: Math.max(1, Number(e.target.value) || 1) })}
         />
@@ -153,22 +152,17 @@ function SketchSection() {
         />
       </Row>
       <Row label="blueprint">
-        <select
-          className={selectCls}
+        <Dropdown
+          className="w-full"
           value={active.blueprintRef ?? "__none__"}
-          onChange={(e) =>
-            updateSketchMeta({
-              blueprintRef: e.target.value === "__none__" ? null : e.target.value,
-            })
+          options={[
+            { value: "__none__", label: "— unbound" },
+            ...features.map((f) => ({ value: f.blueprintId, label: f.displayName })),
+          ]}
+          onChange={(v) =>
+            updateSketchMeta({ blueprintRef: v === "__none__" ? null : v })
           }
-        >
-          <option value="__none__">— unbound</option>
-          {features.map((f) => (
-            <option key={f.blueprintId} value={f.blueprintId}>
-              {f.displayName}
-            </option>
-          ))}
-        </select>
+        />
       </Row>
     </Section>
   );
@@ -206,38 +200,31 @@ function NodeSection({ node }: { node: SketchNode }) {
             />
           </Row>
           <Row label="gap">
-            <select
-              className={selectCls}
-              value={node.layout.gap}
-              onChange={(e) =>
-                up((n) => n.kind === "stack" && (n.layout.gap = Number(e.target.value) as SpacingStep))
+            <Dropdown
+              className="w-full"
+              value={String(node.layout.gap)}
+              options={SPACING_STEPS.map((s) => ({ value: String(s), label: String(s) }))}
+              onChange={(v) =>
+                up((n) => n.kind === "stack" && (n.layout.gap = Number(v) as SpacingStep))
               }
-            >
-              {SPACING_STEPS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
+            />
           </Row>
           <Row label="padding">
-            <select
-              className={selectCls}
-              value={node.layout.padding.top}
-              onChange={(e) =>
+            <Dropdown
+              className="w-full"
+              value={String(node.layout.padding.top)}
+              options={SPACING_STEPS.map((s) => ({
+                value: String(s),
+                label: `${s} (all)`,
+              }))}
+              onChange={(v) =>
                 up((n) => {
                   if (n.kind !== "stack") return;
-                  const step = Number(e.target.value) as SpacingStep;
+                  const step = Number(v) as SpacingStep;
                   n.layout.padding = { top: step, right: step, bottom: step, left: step };
                 })
               }
-            >
-              {SPACING_STEPS.map((s) => (
-                <option key={s} value={s}>
-                  {s} (all)
-                </option>
-              ))}
-            </select>
+            />
           </Row>
           <Row label="mainAxis">
             <TokenSelect
@@ -292,42 +279,40 @@ function NodeSection({ node }: { node: SketchNode }) {
             />
           </Row>
           <Row label="intent">
-            <select
-              className={selectCls}
+            <Dropdown
+              className="w-full"
               value={node.intent?.kind ?? "none"}
-              onChange={(e) =>
+              options={[
+                { value: "none", label: "none" },
+                { value: "submit", label: "submit" },
+                { value: "navigate", label: "navigate" },
+              ]}
+              onChange={(v) =>
                 up((n) => {
                   if (n.kind !== "button") return;
-                  const kind = e.target.value as "none" | "submit" | "navigate";
+                  const kind = v as "none" | "submit" | "navigate";
                   n.intent = kind === "navigate" ? { kind, to: null } : { kind };
                 })
               }
-            >
-              <option value="none">none</option>
-              <option value="submit">submit</option>
-              <option value="navigate">navigate</option>
-            </select>
+            />
           </Row>
           {node.intent?.kind === "navigate" && (
             <Row label="→ sketch">
-              <select
-                className={selectCls}
+              <Dropdown
+                className="w-full"
                 value={node.intent.to ?? "__none__"}
-                onChange={(e) =>
+                options={[
+                  { value: "__none__", label: "—" },
+                  ...sketches.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+                onChange={(v) =>
                   up((n) => {
                     if (n.kind === "button" && n.intent?.kind === "navigate") {
-                      n.intent.to = e.target.value === "__none__" ? null : e.target.value;
+                      n.intent.to = v === "__none__" ? null : v;
                     }
                   })
                 }
-              >
-                <option value="__none__">—</option>
-                {sketches.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+              />
             </Row>
           )}
         </Section>
@@ -399,12 +384,17 @@ function NodeSection({ node }: { node: SketchNode }) {
         </Row>
         <Row label="border">
           <div className="flex gap-1">
-            <select
-              className={selectCls}
+            <Dropdown
+              className="flex-1"
               value={node.style?.border?.width ?? "none"}
-              onChange={(e) =>
+              options={[
+                { value: "none", label: "none" },
+                { value: "thin", label: "thin" },
+                { value: "thick", label: "thick" },
+              ]}
+              onChange={(v) =>
                 up((n) => {
-                  const width = e.target.value as "none" | "thin" | "thick";
+                  const width = v as "none" | "thin" | "thick";
                   const color = n.style?.border?.color ?? "border";
                   n.style = {
                     ...(n.style ?? {}),
@@ -412,11 +402,7 @@ function NodeSection({ node }: { node: SketchNode }) {
                   };
                 })
               }
-            >
-              <option value="none">none</option>
-              <option value="thin">thin</option>
-              <option value="thick">thick</option>
-            </select>
+            />
             {node.style?.border && (
               <TokenSelect<ColorToken>
                 value={node.style.border.color}

@@ -8,6 +8,7 @@ import {
 } from "../../stores/headquarters-store";
 import { useNavigationStore, type ViewId } from "../../stores/navigation-store";
 import { useT } from "../../lib/i18n";
+import { Dropdown } from "../../components/Dropdown";
 
 const severityConfig: Record<
   AlertSeverity,
@@ -206,15 +207,15 @@ function AlertModeSelector({
 }) {
   const tt = useT();
   return (
-    <select
+    <Dropdown
       value={mode}
-      onChange={(e) => onChange(e.target.value as AlertDisplayMode)}
-      className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted hover:text-text-secondary focus:outline-none"
-    >
-      <option value="expanded">{tt("hq.alertMode.expanded")}</option>
-      <option value="collapsed">{tt("hq.alertMode.collapsed")}</option>
-      <option value="badge">{tt("hq.alertMode.badge")}</option>
-    </select>
+      options={[
+        { value: "expanded", label: tt("hq.alertMode.expanded") },
+        { value: "collapsed", label: tt("hq.alertMode.collapsed") },
+        { value: "badge", label: tt("hq.alertMode.badge") },
+      ]}
+      onChange={(v) => onChange(v as AlertDisplayMode)}
+    />
   );
 }
 

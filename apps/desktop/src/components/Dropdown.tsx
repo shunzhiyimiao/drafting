@@ -88,12 +88,14 @@ export function Dropdown({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className={`inline-flex items-center justify-between gap-1.5 bg-bg-primary border border-border rounded text-text-primary hover:border-accent/50 focus:border-accent focus:outline-none disabled:opacity-50 ${className}`}
+        // Base ergonomics first so callers' classes can still override:
+        // real padding, a minimum hit target, and readable text by default.
+        className={`inline-flex items-center justify-between gap-1.5 px-2.5 py-1.5 min-h-[28px] text-xs bg-bg-primary border border-border rounded-md text-text-primary hover:border-accent/50 focus:border-accent focus:outline-none disabled:opacity-50 ${className}`}
       >
         <span className="truncate text-left">
           {selected?.label ?? <span className="text-text-muted">{placeholder}</span>}
         </span>
-        <ChevronDown size={10} className="shrink-0 opacity-60" />
+        <ChevronDown size={11} className="shrink-0 opacity-60" />
       </button>
 
       {open &&
@@ -111,7 +113,7 @@ export function Dropdown({
             className="glass-thick rounded-lg overflow-hidden max-h-64 overflow-y-auto py-1"
           >
             {options.length === 0 && (
-              <div className="px-3 py-1.5 text-xs text-text-muted">No options</div>
+              <div className="px-3 py-2 text-xs text-text-muted">No options</div>
             )}
             {options.map((opt) => {
               const isSelected = opt.value === value;
@@ -129,7 +131,7 @@ export function Dropdown({
                     onChange(opt.value);
                     setOpen(false);
                   }}
-                  className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 hover:bg-white/10 ${markerCls}`}
+                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/10 ${markerCls}`}
                 >
                   <span className="w-3 shrink-0">
                     {isSelected && <Check size={10} />}

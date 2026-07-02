@@ -12,6 +12,7 @@ import {
 import { useSketchStore, type NodeKind } from "../../stores/sketch-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { getProjectRoot } from "../../lib/app-bootstrap";
+import { Dropdown } from "../../components/Dropdown";
 import { SketchOutline } from "./Outline";
 import { SketchCanvas } from "./Canvas";
 import { SketchInspector } from "./Inspector";
@@ -153,17 +154,12 @@ export function SketchView() {
             </button>
             <PenTool size={12} className="text-accent" />
             <span className="text-text-primary font-medium">{active.name}</span>
-            <select
+            <Dropdown
+              className="min-w-32"
               value={active.id}
-              onChange={(e) => void openSketch(e.target.value)}
-              className="text-[10px] bg-bg-primary border border-border rounded px-1 py-0.5 text-text-muted"
-            >
-              {sketches.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              options={sketches.map((s) => ({ value: s.id, label: s.name }))}
+              onChange={(v) => void openSketch(v)}
+            />
             <button
               onClick={() => void closeSketch()}
               title="Back to the list to create a new sketch"
