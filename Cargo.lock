@@ -943,6 +943,7 @@ dependencies = [
  "futures-util",
  "git2",
  "keyring",
+ "libc",
  "log",
  "portable-pty",
  "regex",

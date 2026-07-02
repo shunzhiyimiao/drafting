@@ -524,6 +524,17 @@ pub fn run() {
             lsp::commands::lsp_definition,
             lsp::commands::lsp_references,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Part 11 constraint 15: graceful terminal shutdown on app
+                // exit — SIGTERM every session's process group, wait up to
+                // 10s for them to leave, SIGKILL whatever remains.
+                let manager = app_handle.state::<TerminalManager>();
+                tauri::async_runtime::block_on(
+                    manager.shutdown_all(std::time::Duration::from_secs(10)),
+                );
+            }
+        });
 }
