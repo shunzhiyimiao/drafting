@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  ArrowLeft,
   BoxSelect,
   Image as ImageIcon,
   MousePointerClick,
@@ -35,6 +36,7 @@ export function SketchView() {
   const initialize = useSketchStore((s) => s.initialize);
   const createSketch = useSketchStore((s) => s.createSketch);
   const openSketch = useSketchStore((s) => s.openSketch);
+  const closeSketch = useSketchStore((s) => s.closeSketch);
   const addNode = useSketchStore((s) => s.addNode);
 
   useEffect(() => {
@@ -142,6 +144,13 @@ export function SketchView() {
       <div className="flex-1 flex flex-col gap-2 min-w-0">
         <div className="glass-panel px-3 py-1.5 flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={() => void closeSketch()}
+              title="Back to sketches (saves first)"
+              className="text-text-muted hover:text-accent"
+            >
+              <ArrowLeft size={13} />
+            </button>
             <PenTool size={12} className="text-accent" />
             <span className="text-text-primary font-medium">{active.name}</span>
             <select
@@ -156,10 +165,8 @@ export function SketchView() {
               ))}
             </select>
             <button
-              onClick={() => {
-                const name = prompt("New sketch name");
-                if (name?.trim()) void createSketch(name.trim(), null);
-              }}
+              onClick={() => void closeSketch()}
+              title="Back to the list to create a new sketch"
               className="text-[10px] text-accent hover:text-accent-hover"
             >
               + new

@@ -31,6 +31,9 @@ interface SketchState {
   refresh: () => Promise<void>;
   createSketch: (name: string, blueprintRef: string | null) => Promise<void>;
   openSketch: (sketchId: string) => Promise<void>;
+  /** Back to the list/create screen. Flushes a pending autosave first so
+   *  closing never loses an edit. */
+  closeSketch: () => Promise<void>;
   selectNode: (nodeId: string | null) => void;
 
   /** Tree edits — all clone-mutate-set + schedule autosave. */
@@ -189,6 +192,17 @@ export const useSketchStore = create<SketchState>((set, get) => {
       } catch (e) {
         set({ lastError: String(e) });
       }
+    },
+
+    closeSketch: async () => {
+      if (autosaveTimer) {
+        clearTimeout(autosaveTimer);
+        autosaveTimer = null;
+      }
+      if (get().dirty) {
+        await get().saveNow();
+      }
+      set({ active: null, selectedNodeId: null });
     },
 
     selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
