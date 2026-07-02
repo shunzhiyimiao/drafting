@@ -42,6 +42,16 @@ export function generateAdapterSkeleton(
       importedTypes.add(name);
     }
   }
+  // Socket-typed constructor params need their interfaces imported too — an
+  // adapter may depend on sockets it does not implement.
+  for (const p of adapter.constructorParams) {
+    if (p.paramType.kind === "socketDep") {
+      const socket = socketMap.get(p.paramType.socketId ?? "");
+      if (socket) {
+        importedTypes.add(getInterfaceName(socket.fullName));
+      }
+    }
+  }
 
   if (importedTypes.size > 0) {
     content += `import type { ${[...importedTypes].join(", ")} } from "${scopeName}/sockets";\n\n`;

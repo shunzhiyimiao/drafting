@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "tsx src/index.ts",
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "tsx --test src/codegen.test.ts"
   },
   "dependencies": {
     "ts-morph": "^25.0.1",

@@ -61,6 +61,17 @@ jobs:
       - name: Install JS deps
         run: pnpm install --frozen-lockfile
 
+      # Tests run on one platform: they are platform-independent, and the
+      # three-platform matrix exists for the build, not the suite.
+      - name: Rust tests
+        if: matrix.platform == 'ubuntu-latest'
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+
+      - name: codegen-server tests
+        if: matrix.platform == 'ubuntu-latest'
+        run: pnpm --filter @drafting/codegen-server test
+
       - name: Build Tauri app
         working-directory: apps/desktop
         run: pnpm tauri build ${{ matrix.args }}
