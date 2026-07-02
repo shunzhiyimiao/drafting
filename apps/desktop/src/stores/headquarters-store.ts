@@ -2,6 +2,10 @@ import { create } from "zustand";
 import { useBlueprintStore } from "./blueprint-store";
 import { usePatchboardStore } from "./patchboard-store";
 import type { BlueprintIndexEntry } from "../types/blueprint-types";
+import type { SyncBusEvent } from "../types/sync-bus-events";
+import { subscribeSyncBus } from "../lib/sync-bus";
+import { getConfig } from "../lib/ai-api";
+import { getProjectRoot } from "../lib/app-bootstrap";
 
 export type HealthStatus = "healthy" | "attention" | "risk" | "alert";
 
@@ -15,6 +19,24 @@ export interface Alert {
   source: "blueprint" | "patchboard" | "git" | "ai";
   actionLabel?: string;
   actionTarget?: string; // view id
+  /** The feature this alert is about, when it is about one — drives the
+   *  feature list's "with-alerts" filter and per-card alert markers. */
+  blueprintId?: string;
+}
+
+/** One line of the recent-activity stream (session-scoped: fed by Sync Bus
+ *  events as they arrive; nothing persists an activity log yet). */
+export interface ActivityEntry {
+  id: string;
+  timestamp: number;
+  text: string;
+}
+
+/** Compact AI-routing summary for the auxiliary panel. */
+export interface AiSummary {
+  enabled: boolean;
+  profileCount: number;
+  routes: { taskId: string; model: string }[];
 }
 
 export interface TodoItem {
@@ -63,6 +85,10 @@ interface HeadquartersState {
   // Todos
   todos: TodoItem[];
 
+  // Auxiliary info
+  activity: ActivityEntry[];
+  aiSummary: AiSummary | null;
+
   // Feature view prefs
   featureSort: FeatureSort;
   featureFilter: FeatureFilter;
@@ -71,8 +97,12 @@ interface HeadquartersState {
   setAlertDisplayMode: (mode: AlertDisplayMode) => void;
   setFeatureSort: (sort: FeatureSort) => void;
   setFeatureFilter: (filter: FeatureFilter) => void;
+  pushActivity: (text: string, timestamp?: number) => void;
+  loadAiSummary: () => Promise<void>;
   recompute: () => void;
 }
+
+const MAX_ACTIVITY = 10;
 
 export const useHeadquartersStore = create<HeadquartersState>((set, get) => ({
   totalFeatures: 0,
@@ -89,12 +119,44 @@ export const useHeadquartersStore = create<HeadquartersState>((set, get) => ({
   alerts: [],
   alertDisplayMode: "expanded",
   todos: [],
+  activity: [],
+  aiSummary: null,
   featureSort: "priority",
   featureFilter: "all",
 
   setAlertDisplayMode: (mode) => set({ alertDisplayMode: mode }),
   setFeatureSort: (sort) => set({ featureSort: sort }),
   setFeatureFilter: (filter) => set({ featureFilter: filter }),
+
+  pushActivity: (text, timestamp) => {
+    const ts = timestamp ?? Date.now();
+    const prev = get().activity[0];
+    // Collapse bursts (e.g. one DriftDetected per criterion) into one line.
+    if (prev && prev.text === text && ts - prev.timestamp < 3000) return;
+    const entry: ActivityEntry = {
+      id: `${ts}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: ts,
+      text,
+    };
+    set({ activity: [entry, ...get().activity].slice(0, MAX_ACTIVITY) });
+  },
+
+  loadAiSummary: async () => {
+    try {
+      const root = await getProjectRoot();
+      const cfg = await getConfig(root);
+      set({
+        aiSummary: {
+          enabled: cfg.globalEnabled,
+          profileCount: cfg.profiles.length,
+          routes: cfg.routes.map((r) => ({ taskId: r.taskId, model: r.model })),
+        },
+      });
+    } catch {
+      // Panel degrades to its empty state — never break Headquarters over this.
+      set({ aiSummary: null });
+    }
+  },
 
   recompute: () => {
     const blueprintStore = useBlueprintStore.getState();
@@ -122,6 +184,7 @@ export const useHeadquartersStore = create<HeadquartersState>((set, get) => ({
           source: "blueprint",
           actionLabel: "Open",
           actionTarget: "blueprint",
+          blueprintId: f.blueprintId,
         });
       }
       if (f.status === "deprecated") {
@@ -130,6 +193,7 @@ export const useHeadquartersStore = create<HeadquartersState>((set, get) => ({
           severity: "info",
           title: `"${f.displayName}" is deprecated`,
           source: "blueprint",
+          blueprintId: f.blueprintId,
         });
       }
     }
@@ -279,4 +343,72 @@ useBlueprintStore.subscribe(() => {
 });
 usePatchboardStore.subscribe(() => {
   useHeadquartersStore.getState().recompute();
+});
+
+function featureName(id: string): string {
+  const entry = useBlueprintStore
+    .getState()
+    .index?.blueprints.find((b) => b.blueprintId === id);
+  return entry?.displayName ?? id.slice(0, 8);
+}
+
+/** Translate a Sync Bus event into a recent-activity line; null = not
+ *  activity-worthy (high-frequency editor noise stays out). */
+function describeEvent(e: SyncBusEvent): string | null {
+  switch (e.domain) {
+    case "Git":
+      switch (e.event.type) {
+        case "CommitCreated": {
+          const msg = e.event.data.message.split("\n")[0];
+          return `Commit: ${msg.length > 60 ? `${msg.slice(0, 60)}…` : msg}`;
+        }
+        case "BranchCheckedOut":
+          return `Checked out ${e.event.data.to}`;
+        case "PushCompleted":
+          return `Pushed ${e.event.data.commits_pushed} commit(s) to ${e.event.data.to}`;
+        case "PullCompleted":
+          return `Pulled ${e.event.data.commits_received} commit(s)`;
+        case "OperationFailed":
+          return `Git ${e.event.data.operation} failed`;
+        default:
+          return null;
+      }
+    case "Blueprint":
+      switch (e.event.type) {
+        case "CheckCompleted":
+          return `AI check on "${featureName(e.event.data.feature_id)}" ${
+            e.event.data.passed ? "passed" : "found issues"
+          }`;
+        case "DriftDetected":
+          return `Drift detected in "${featureName(e.event.data.feature_id)}"`;
+        case "FeatureCreated":
+          return `Blueprint "${featureName(e.event.data.feature_id)}" created`;
+        default:
+          return null;
+      }
+    case "Patchboard":
+      return e.event.type === "CodeGenerated"
+        ? `Generated ${e.event.data.files.length} file(s) from canvas`
+        : null;
+    case "AiProvider":
+      switch (e.event.type) {
+        case "PrivacyViolationBlocked":
+          return `Privacy filter blocked ${e.event.data.file}`;
+        case "BudgetWarning":
+          return `AI budget at ${Math.round(e.event.data.percent)}%`;
+        default:
+          return null;
+      }
+    default:
+      return null;
+  }
+}
+
+// Feed the session-scoped activity stream from the Sync Bus (constraint 8's
+// incremental path for this block — no polling, no persisted log yet).
+void subscribeSyncBus((env) => {
+  const text = describeEvent(env.payload as SyncBusEvent);
+  if (text) {
+    useHeadquartersStore.getState().pushActivity(text, env.timestamp);
+  }
 });

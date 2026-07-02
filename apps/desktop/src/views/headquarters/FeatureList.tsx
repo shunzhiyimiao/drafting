@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { FileText } from "lucide-react";
+import { AlertTriangle, FileText } from "lucide-react";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { useNavigationStore } from "../../stores/navigation-store";
 import {
@@ -25,14 +25,23 @@ export function FeatureList() {
   const featureFilter = useHeadquartersStore((s) => s.featureFilter);
   const setFeatureSort = useHeadquartersStore((s) => s.setFeatureSort);
   const setFeatureFilter = useHeadquartersStore((s) => s.setFeatureFilter);
+  const alerts = useHeadquartersStore((s) => s.alerts);
 
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const alertedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const a of alerts) {
+      if (a.blueprintId) ids.add(a.blueprintId);
+    }
+    return ids;
+  }, [alerts]);
+
   const features = useMemo(() => {
     const all = (index?.blueprints ?? []).filter((b) => b.type === "feature");
-    const filtered = applyFilter(all, featureFilter);
+    const filtered = applyFilter(all, featureFilter, alertedIds);
     return applySort(filtered, featureSort);
-  }, [index, featureFilter, featureSort]);
+  }, [index, featureFilter, featureSort, alertedIds]);
 
   const handleOpen = async (e: BlueprintIndexEntry) => {
     await loadBlueprint(e.blueprintId);
@@ -85,6 +94,9 @@ export function FeatureList() {
                     {f.displayName}
                   </span>
                   <div className="flex items-center gap-1.5">
+                    {alertedIds.has(f.blueprintId) && (
+                      <AlertTriangle size={10} className="text-warning" />
+                    )}
                     <StatusBadge status={f.status} />
                     <PriorityBadge priority={f.priority} />
                   </div>
@@ -116,6 +128,7 @@ export function FeatureList() {
 function applyFilter(
   features: BlueprintIndexEntry[],
   filter: FeatureFilter,
+  alertedIds: Set<string>,
 ): BlueprintIndexEntry[] {
   switch (filter) {
     case "in-progress":
@@ -130,7 +143,7 @@ function applyFilter(
         return f.status === "in-progress" && days > 7;
       });
     case "with-alerts":
-      return features.filter((f) => f.criteriaTotal === 0);
+      return features.filter((f) => alertedIds.has(f.blueprintId));
     default:
       return features;
   }

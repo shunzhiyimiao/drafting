@@ -135,6 +135,7 @@ function AlertItem({
 }
 
 function AlertsCollapsed({ alerts }: { alerts: Alert[] }) {
+  const setActiveView = useNavigationStore((s) => s.setActiveView);
   const grouped = alerts.reduce<Record<AlertSeverity, Alert[]>>(
     (acc, a) => {
       if (!acc[a.severity]) acc[a.severity] = [];
@@ -179,7 +180,13 @@ function AlertsCollapsed({ alerts }: { alerts: Alert[] }) {
               {open && (
                 <div className="pl-2 pb-1">
                   {items.map((a) => (
-                    <AlertItem key={a.id} alert={a} onAction={() => {}} />
+                    <AlertItem
+                      key={a.id}
+                      alert={a}
+                      onAction={() =>
+                        a.actionTarget && setActiveView(a.actionTarget as ViewId)
+                      }
+                    />
                   ))}
                 </div>
               )}
