@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ThemeVariant = "dark" | "light" | "soft" | "blossom" | "mist";
+export type ThemeVariant = "dark" | "light" | "soft" | "blossom" | "mist" | "gilded";
 
 export const THEME_ORDER: ThemeVariant[] = [
   "dark",
@@ -8,6 +8,7 @@ export const THEME_ORDER: ThemeVariant[] = [
   "soft",
   "blossom",
   "mist",
+  "gilded",
 ];
 
 export const THEME_META: Record<
@@ -38,6 +39,11 @@ export const THEME_META: Record<
     label: "Mist",
     description: "Lavender blue #C5CEF9",
     swatch: "#C5CEF9",
+  },
+  gilded: {
+    label: "Gilded",
+    description: "鎏金白 — warm ivory & liquid gold",
+    swatch: "#f5ecd7",
   },
 };
 

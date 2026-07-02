@@ -225,6 +225,7 @@ function SwatchPreview({ variant }: { variant: ThemeVariant }) {
     soft: "linear-gradient(135deg, #b4c8e6, #dcbed2, #bedcd2, #c8b4dc)",
     blossom: "linear-gradient(135deg, #ffdee7, #ffc8dc, #ffebf0)",
     mist: "linear-gradient(135deg, #c5cef9, #b4c3f5, #d2dcfc)",
+    gilded: "linear-gradient(135deg, #f9f4e8, #e9c878, #b08a24)",
   };
   return (
     <span
