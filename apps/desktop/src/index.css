@@ -598,6 +598,94 @@ body::before {
   }
 }
 
+/* Uniform-speed flow. The conic ring above sweeps by ANGLE, and on a wide
+   short button constant angular speed means the head crawls along the long
+   edges and whips around the ends. Where motion paths are supported, the
+   two heads become streaks traveling `offset-path: border-box` — percent
+   of PATH LENGTH, so linear animation is constant perimeter speed by
+   construction. The conic ring stays as the fallback. */
+@supports (offset-path: border-box) {
+  .glass-button::before,
+  .glass-button-primary::before,
+  .glass-button-error::before,
+  .glass-button::after,
+  .glass-button-primary::after,
+  .glass-button-error::after {
+    content: "";
+    position: absolute;
+    /* neutralize the conic-ring styling from the fallback ::after */
+    inset: auto;
+    padding: 0;
+    -webkit-mask: none;
+    mask: none;
+    top: 0;
+    left: 0;
+    width: 22px;
+    height: 3px;
+    border-radius: 999px;
+    offset-path: border-box;
+    offset-rotate: auto;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+  }
+
+  .glass-button::before,
+  .glass-button-primary::before,
+  .glass-button-error::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(var(--glow-rgb, var(--color-accent-rgb)), 0.95),
+      rgba(255, 255, 255, 0.98),
+      rgba(var(--glow-rgb, var(--color-accent-rgb)), 0.95),
+      transparent
+    );
+    box-shadow: 0 0 8px 1px rgba(var(--glow-rgb, var(--color-accent-rgb)), 0.55);
+  }
+
+  .glass-button::after,
+  .glass-button-primary::after,
+  .glass-button-error::after {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(var(--glow-alt-rgb, 255, 255, 255), 0.95),
+      rgba(255, 255, 255, 0.98),
+      rgba(var(--glow-alt-rgb, 255, 255, 255), 0.95),
+      transparent
+    );
+    box-shadow: 0 0 8px 1px rgba(var(--glow-alt-rgb, 255, 255, 255), 0.55);
+  }
+
+  .glass-button:hover:not(:disabled)::before,
+  .glass-button-primary:hover:not(:disabled)::before,
+  .glass-button-error:hover:not(:disabled)::before,
+  .glass-button:hover:not(:disabled)::after,
+  .glass-button-primary:hover:not(:disabled)::after,
+  .glass-button-error:hover:not(:disabled)::after {
+    opacity: 1;
+    animation: btn-flow 1.8s linear infinite;
+  }
+
+  /* The alt head runs the SAME path half a period behind — 180° apart in
+     path distance at every moment. */
+  .glass-button:hover:not(:disabled)::after,
+  .glass-button-primary:hover:not(:disabled)::after,
+  .glass-button-error:hover:not(:disabled)::after {
+    animation-delay: -0.9s;
+  }
+}
+
+@keyframes btn-flow {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+
 .glass-button {
   background: var(--surface-2);
   backdrop-filter: var(--blur-sm);
