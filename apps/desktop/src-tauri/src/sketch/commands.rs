@@ -79,6 +79,14 @@ pub async fn sketch_save(
 }
 
 #[tauri::command]
+pub async fn sketch_delete(project_root: String, sketch_id: String) -> Result<(), String> {
+    let root = Path::new(&project_root);
+    storage::delete(root, &sketch_id)?;
+    index::rebuild(root)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn sketch_rebuild_index(project_root: String) -> Result<SketchIndex, String> {
     index::rebuild(Path::new(&project_root))
 }

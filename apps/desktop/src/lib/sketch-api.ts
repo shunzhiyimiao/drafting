@@ -27,3 +27,9 @@ export async function createSketch(
 export async function saveSketch(projectRoot: string, sketch: Sketch): Promise<void> {
   return invoke("sketch_save", { projectRoot, sketch });
 }
+
+/** Deletes the sketch and its tool-owned generated half; the user-owned
+ *  sibling stays, and bound criteria go dangling (§6 — signal, not cascade). */
+export async function deleteSketch(projectRoot: string, sketchId: string): Promise<void> {
+  return invoke("sketch_delete", { projectRoot, sketchId });
+}

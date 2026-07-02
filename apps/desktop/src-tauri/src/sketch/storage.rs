@@ -98,6 +98,30 @@ pub fn find_by_id(root: &Path, sketch_id: &str) -> Option<(PathBuf, Sketch)> {
     list(root).into_iter().find(|(_, s)| s.id == sketch_id)
 }
 
+/// Delete a sketch by id. The generated React half goes with it (tool-owned,
+/// regenerated wholesale — its source is gone); the user-owned sibling is
+/// never touched: its now-dead import becomes a tsc error, which is the
+/// honest signal to the owner. Criteria bound to this sketch go dangling
+/// per §6 — a signal, never a cascade.
+pub fn delete(root: &Path, sketch_id: &str) -> Result<(), String> {
+    let (path, _) = find_by_id(root, sketch_id)
+        .ok_or_else(|| format!("sketch {sketch_id} not found"))?;
+    std::fs::remove_file(&path).map_err(|e| format!("delete {}: {e}", path.display()))?;
+    if let Some(slug) = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_suffix(".sketch.json"))
+    {
+        let generated = root.join(format!("packages/ui/src/generated/{slug}.generated.tsx"));
+        if generated.exists() {
+            if let Err(e) = std::fs::remove_file(&generated) {
+                log::warn!("sketch delete: generated half not removed: {e}");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn slugify(name: &str) -> String {
     let slug: String = name
         .to_lowercase()
@@ -275,6 +299,29 @@ mod tests {
         )
         .unwrap();
         assert!(load(&bad).is_err());
+    }
+
+    #[test]
+    fn delete_removes_sketch_and_its_generated_half_only() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let (path, sketch) = create(root, "Login", None).unwrap();
+
+        // Simulate the codegen landing: generated (tool-owned) + sibling (user's).
+        let generated = root.join("packages/ui/src/generated/login.generated.tsx");
+        let sibling = root.join("packages/ui/src/login.tsx");
+        std::fs::create_dir_all(generated.parent().unwrap()).unwrap();
+        std::fs::write(&generated, "// generated\n").unwrap();
+        std::fs::write(&sibling, "// USER\n").unwrap();
+
+        delete(root, &sketch.id).unwrap();
+        assert!(!path.exists(), "sketch file removed");
+        assert!(!generated.exists(), "tool-owned generated half removed");
+        assert!(sibling.exists(), "user-owned sibling untouched");
+        assert!(find_by_id(root, &sketch.id).is_none());
+
+        // Unknown id is a clear error, not a silent no-op.
+        assert!(delete(root, "nope").is_err());
     }
 
     #[test]

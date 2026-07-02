@@ -564,6 +564,7 @@ pub fn run() {
             sketch::commands::sketch_get,
             sketch::commands::sketch_create,
             sketch::commands::sketch_save,
+            sketch::commands::sketch_delete,
             sketch::commands::sketch_rebuild_index,
             blueprint_get_estimates,
             editor::commands::editor_list_dir,

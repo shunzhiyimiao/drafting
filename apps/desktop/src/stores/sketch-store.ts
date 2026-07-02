@@ -31,6 +31,7 @@ interface SketchState {
   refresh: () => Promise<void>;
   createSketch: (name: string, blueprintRef: string | null) => Promise<void>;
   openSketch: (sketchId: string) => Promise<void>;
+  deleteSketchById: (sketchId: string) => Promise<void>;
   /** Back to the list/create screen. Flushes a pending autosave first so
    *  closing never loses an edit. */
   closeSketch: () => Promise<void>;
@@ -189,6 +190,25 @@ export const useSketchStore = create<SketchState>((set, get) => {
       try {
         const sketch = await api.getSketch(projectRoot, sketchId);
         set({ active: sketch, selectedNodeId: sketch.root.id, dirty: false, lastError: null });
+      } catch (e) {
+        set({ lastError: String(e) });
+      }
+    },
+
+    deleteSketchById: async (sketchId) => {
+      const { projectRoot, active } = get();
+      if (!projectRoot) return;
+      try {
+        await api.deleteSketch(projectRoot, sketchId);
+        if (active?.id === sketchId) {
+          if (autosaveTimer) {
+            clearTimeout(autosaveTimer);
+            autosaveTimer = null;
+          }
+          set({ active: null, selectedNodeId: null, dirty: false });
+        }
+        set({ lastError: null });
+        await get().refresh();
       } catch (e) {
         set({ lastError: String(e) });
       }

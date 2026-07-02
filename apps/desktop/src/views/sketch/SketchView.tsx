@@ -7,6 +7,7 @@ import {
   PenTool,
   Plus,
   TextCursorInput,
+  Trash2,
   Type,
 } from "lucide-react";
 import { useSketchStore, type NodeKind } from "../../stores/sketch-store";
@@ -38,6 +39,7 @@ export function SketchView() {
   const createSketch = useSketchStore((s) => s.createSketch);
   const openSketch = useSketchStore((s) => s.openSketch);
   const closeSketch = useSketchStore((s) => s.closeSketch);
+  const deleteSketchById = useSketchStore((s) => s.deleteSketchById);
   const addNode = useSketchStore((s) => s.addNode);
 
   useEffect(() => {
@@ -53,6 +55,10 @@ export function SketchView() {
   }, [initialize]);
 
   const [newName, setNewName] = useState("");
+  // Two-step inline delete confirm — WKWebView has no confirm() dialog, and
+  // deleting a sketch also drops its generated React (bound criteria go
+  // dangling, never cascaded).
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 
   if (!active) {
     return (
@@ -65,16 +71,49 @@ export function SketchView() {
           {sketches.length > 0 && (
             <div className="flex flex-col gap-1 mb-4 max-h-48 overflow-auto">
               {sketches.map((s) => (
-                <button
+                <div
                   key={s.id}
-                  onClick={() => void openSketch(s.id)}
-                  className="text-left text-xs px-2 py-1.5 rounded hover:bg-bg-hover text-text-secondary"
+                  className="group flex items-center gap-1 rounded hover:bg-bg-hover"
                 >
-                  {s.name}
-                  {s.blueprintRef && (
-                    <span className="text-text-muted ml-2">→ {s.blueprintRef.slice(0, 10)}…</span>
+                  <button
+                    onClick={() => void openSketch(s.id)}
+                    className="flex-1 text-left text-xs px-2 py-1.5 text-text-secondary truncate"
+                  >
+                    {s.name}
+                    {s.blueprintRef && (
+                      <span className="text-text-muted ml-2">
+                        → {s.blueprintRef.slice(0, 10)}…
+                      </span>
+                    )}
+                  </button>
+                  {confirmingDelete === s.id ? (
+                    <span className="flex items-center gap-1 pr-1.5 shrink-0">
+                      <button
+                        onClick={() => {
+                          void deleteSketchById(s.id);
+                          setConfirmingDelete(null);
+                        }}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-error/15 text-error hover:bg-error/25"
+                      >
+                        Delete?
+                      </button>
+                      <button
+                        onClick={() => setConfirmingDelete(null)}
+                        className="text-[10px] px-1 text-text-muted hover:text-text-secondary"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmingDelete(s.id)}
+                      title="Delete sketch (generated React goes too; bound criteria go dangling)"
+                      className="pr-2 shrink-0 text-text-muted opacity-0 group-hover:opacity-100 hover:text-error transition-opacity"
+                    >
+                      <Trash2 size={12} />
+                    </button>
                   )}
-                </button>
+                </div>
               ))}
             </div>
           )}
