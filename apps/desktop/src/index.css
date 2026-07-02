@@ -414,11 +414,10 @@
   --color-info: var(--color-info);
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* NO universal reset here. Tailwind v4's preflight already zeroes
+   margin/padding/box-sizing in @layer base — a hand-written UNLAYERED
+   `* { padding: 0 }` outranks every @layer (utilities included) in the
+   cascade, which silently killed ALL p-*/m-* utilities app-wide. */
 
 html,
 body,
