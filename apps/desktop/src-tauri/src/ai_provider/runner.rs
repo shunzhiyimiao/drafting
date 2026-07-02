@@ -133,17 +133,39 @@ impl AiRunner {
         // would bypass the StreamFailed event published below. Surface it on the
         // bus explicitly — otherwise the global error toast misses the most
         // common AI failure (wrong/absent key).
-        let inner = match adapter.stream_chat(&ctx, stream_id.clone(), req).await {
-            Ok(inner) => inner,
-            Err(e) => {
-                sync_bus.publish(
-                    Origin::new("ai_provider"),
-                    SyncBusEvent::AiProvider(AiProviderEvent::StreamFailed {
-                        stream_id: stream_id.clone(),
-                        error: e.clone(),
-                    }),
-                );
-                return Err(e);
+        //
+        // Constraint 25 retry lives here and ONLY here: before the stream is
+        // open, no token has been delivered, so a retry is safe. Mid-stream
+        // failures are not retried — restarting would duplicate output.
+        let mut attempt: u32 = 0;
+        let inner = loop {
+            match adapter
+                .stream_chat(&ctx, stream_id.clone(), req.clone())
+                .await
+            {
+                Ok(inner) => break inner,
+                Err(e) => {
+                    let class = super::retry::classify(&e);
+                    match super::retry::next_delay(&class, attempt) {
+                        Some(delay) => {
+                            attempt += 1;
+                            log::warn!(
+                                "ai: stream establish failed ({class:?}), retry {attempt} in {delay:?}: {e}"
+                            );
+                            tokio::time::sleep(delay).await;
+                        }
+                        None => {
+                            sync_bus.publish(
+                                Origin::new("ai_provider"),
+                                SyncBusEvent::AiProvider(AiProviderEvent::StreamFailed {
+                                    stream_id: stream_id.clone(),
+                                    error: e.clone(),
+                                }),
+                            );
+                            return Err(e);
+                        }
+                    }
+                }
             }
         };
 

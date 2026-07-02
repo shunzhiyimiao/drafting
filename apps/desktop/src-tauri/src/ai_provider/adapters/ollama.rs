@@ -64,8 +64,16 @@ impl ProviderAdapter for OllamaAdapter {
 
         if !resp.status().is_success() {
             let status = resp.status();
+            // Surface Retry-After for the runner's 429 retry — the
+            // establish-error contract is a string (see retry.rs).
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .map(|v| format!(" [retry-after:{v}]"))
+                .unwrap_or_default();
             let text = resp.text().await.unwrap_or_default();
-            return Err(format!("ollama {status}: {text}"));
+            return Err(format!("ollama {status}: {text}{retry_after}"));
         }
 
         let mut bytes_stream = resp.bytes_stream();
