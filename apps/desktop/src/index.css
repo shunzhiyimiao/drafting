@@ -523,6 +523,67 @@ body::before {
   }
 }
 
+/* Flowing-light hover border: a conic highlight sweeping around the button.
+   The ::after paints a 2px ring (two mask layers XORed leave only the
+   padding band) and a registered @property lets the gradient's angle
+   animate. Colors ride --color-accent-rgb, so Gilded flows gold. */
+@property --btn-glow-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.glass-button,
+.glass-button-primary,
+.glass-button-error {
+  position: relative;
+}
+
+.glass-button::after,
+.glass-button-primary::after,
+.glass-button-error::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--btn-glow-angle),
+    transparent 0%,
+    rgba(var(--color-accent-rgb), 0.85) 10%,
+    rgba(255, 255, 255, 0.95) 18%,
+    rgba(var(--color-accent-rgb), 0.85) 26%,
+    transparent 38%,
+    transparent 50%,
+    rgba(var(--color-accent-rgb), 0.5) 62%,
+    transparent 74%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+
+.glass-button:hover:not(:disabled)::after,
+.glass-button-primary:hover:not(:disabled)::after,
+.glass-button-error:hover:not(:disabled)::after {
+  opacity: 1;
+  animation: btn-glow-spin 1.4s linear infinite;
+}
+
+@keyframes btn-glow-spin {
+  to {
+    --btn-glow-angle: 360deg;
+  }
+}
+
 .glass-button {
   background: var(--surface-2);
   backdrop-filter: var(--blur-sm);
