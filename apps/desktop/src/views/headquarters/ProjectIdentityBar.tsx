@@ -1,5 +1,8 @@
+import { useEffect } from "react";
 import { GitBranch } from "lucide-react";
 import { useHeadquartersStore, type HealthStatus } from "../../stores/headquarters-store";
+import { useGitStore } from "../../stores/git-store";
+import { getProjectRoot } from "../../lib/app-bootstrap";
 
 const healthConfig: Record<
   HealthStatus,
@@ -18,8 +21,27 @@ export function ProjectIdentityBar() {
   const overallProgress = useHeadquartersStore((s) => s.overallProgress);
   const health = useHeadquartersStore((s) => s.health);
   const alerts = useHeadquartersStore((s) => s.alerts);
+  const gitStatus = useGitStore((s) => s.status);
+  const initializeGit = useGitStore((s) => s.initialize);
+
+  // The git store is normally initialized by GitView, but Headquarters is the
+  // default view and may render first — load it here too, skipping the
+  // refresh if the store is already on this root.
+  useEffect(() => {
+    getProjectRoot().then((root) => {
+      if (useGitStore.getState().projectRoot !== root) {
+        void initializeGit(root);
+      }
+    });
+  }, [initializeGit]);
 
   const h = healthConfig[health];
+  const changedCount = gitStatus
+    ? gitStatus.modified.length +
+      gitStatus.staged.length +
+      gitStatus.untracked.length +
+      gitStatus.conflicted.length
+    : 0;
 
   return (
     <div className="glass-panel flex items-center justify-between px-5 py-3.5">
@@ -47,10 +69,25 @@ export function ProjectIdentityBar() {
         </div>
       </div>
       <div className="flex items-center gap-3 text-xs text-text-muted">
-        <span className="flex items-center gap-1">
-          <GitBranch size={12} />
-          main
-        </span>
+        {gitStatus &&
+          (gitStatus.isRepo ? (
+            <span className="flex items-center gap-1">
+              <GitBranch size={12} />
+              {gitStatus.branch}
+              {gitStatus.isDetached && " (detached)"}
+              {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
+                <span>
+                  ↑{gitStatus.ahead} ↓{gitStatus.behind}
+                </span>
+              )}
+              {changedCount > 0 && <span>· {changedCount} changed</span>}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 opacity-60">
+              <GitBranch size={12} />
+              no repo
+            </span>
+          ))}
       </div>
     </div>
   );
