@@ -106,6 +106,7 @@ function App() {
         const targets: Record<string, ViewId> = {
           d: "headquarters",
           b: "blueprint",
+          s: "sketch",
           p: "patchboard",
           e: "editor",
           a: "atlas",

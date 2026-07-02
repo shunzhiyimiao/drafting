@@ -6,7 +6,8 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "test": "tsx --test src/sketch-core.test.ts"
+    "test": "tsx --test src/sketch-core.test.ts",
+    "gen-safelist": "tsx scripts/gen-safelist.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.4",

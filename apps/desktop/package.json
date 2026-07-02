@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "gen:sketch-safelist": "pnpm --filter @drafting/sketch-core gen-safelist ../../apps/desktop/src/lib/sketch-safelist.generated.ts"
   },
   "dependencies": {
+    "@drafting/sketch-core": "workspace:*",
     "@monaco-editor/react": "^4.7.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.1",

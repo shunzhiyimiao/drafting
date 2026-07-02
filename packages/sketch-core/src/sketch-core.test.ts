@@ -489,6 +489,38 @@ test("parity: primitive attributes ride both serializers", () => {
   assert.ok(jsx.includes('type="password"'));
 });
 
+// ------------------------------------------------------- class universe --
+
+test("classUniverse enumerates the emittable set with no arbitrary values", async () => {
+  const { classUniverse } = await import("./emit.js");
+  const universe = classUniverse(defaultTheme);
+  // Families present end-to-end.
+  for (const c of [
+    "flex",
+    "flex-row",
+    "gap-24",
+    "pl-16",
+    "justify-between",
+    "items-stretch",
+    "flex-1",
+    "self-start",
+    "bg-blue-600",
+    "text-slate-500",
+    "border-red-600",
+    "border-2",
+    "rounded-full",
+    "tracking-tight",
+    "inline-flex",
+    "font-medium",
+  ]) {
+    assert.ok(universe.includes(c), `universe must contain ${c}`);
+  }
+  // The one open hatch stays out — the canvas shims fixed px to inline style.
+  assert.ok(!universe.some((c) => c.includes("[")), "no arbitrary values");
+  // Sorted + deduped (deterministic output for the generated file).
+  assert.deepEqual(universe, [...new Set(universe)].sort());
+});
+
 // ---------------------------------------------- image + nested containers --
 
 test("image emits img with src/alt and nested containers thread their context", () => {

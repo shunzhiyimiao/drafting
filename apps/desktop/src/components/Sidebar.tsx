@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   Home,
   FileText,
+  PenTool,
   CircuitBoard,
   Map,
   Code,
@@ -34,6 +35,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 const topItems: { id: ViewId; icon: typeof Home; labelKey: string }[] = [
   { id: "headquarters", icon: Home, labelKey: "nav.headquarters" },
   { id: "blueprint", icon: FileText, labelKey: "nav.blueprint" },
+  { id: "sketch", icon: PenTool, labelKey: "nav.sketch" },
   { id: "patchboard", icon: CircuitBoard, labelKey: "nav.patchboard" },
   { id: "atlas", icon: Map, labelKey: "nav.atlas" },
   { id: "editor", icon: Code, labelKey: "nav.editor" },

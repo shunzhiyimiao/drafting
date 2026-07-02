@@ -10,6 +10,7 @@ const translations: Record<string, Record<Locale, string>> = {
   // -- Navigation --------------------------------------------------------
   "nav.headquarters": { zh: "司令部", en: "Headquarters" },
   "nav.blueprint": { zh: "蓝图", en: "Blueprint" },
+  "nav.sketch": { zh: "草图", en: "Sketch" },
   "nav.patchboard": { zh: "接线板", en: "Patchboard" },
   "nav.atlas": { zh: "地图集", en: "Atlas" },
   "nav.editor": { zh: "编辑器", en: "Editor" },

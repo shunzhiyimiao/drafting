@@ -253,6 +253,34 @@ export function sketchToIR(sketch: Sketch, theme: Theme): IRNode {
   return toIR(sketch.root, ROOT_CTX, theme);
 }
 
+/** Every class the fold can emit — EXCEPT fixed-px arbitrary values
+ *  (`w-[Npx]`/`h-[Npx]`, the one open hatch), which the editor canvas shims
+ *  to inline style because Tailwind cannot see runtime-composed arbitrary
+ *  values. This is the §7 safelist source: Drafting's own tailwind build
+ *  embeds these names so the canvas (which composes classes at runtime)
+ *  renders. K2's finiteness is what makes this enumerable at all. */
+export function classUniverse(theme: Theme): string[] {
+  const out = new Set<string>();
+  const add = (...cs: string[]) => cs.forEach((c) => out.add(c));
+
+  // container statics + sizing statics
+  add("flex", "flex-row", "flex-col", "shrink-0", "flex-1", "self-start", "self-stretch");
+  // spacing families over the ramp
+  for (const s of [0, 1, 2, 3, 4, 6, 8, 12, 16, 24]) {
+    add(`gap-${s}`, `p-${s}`, `px-${s}`, `py-${s}`, `pt-${s}`, `pr-${s}`, `pb-${s}`, `pl-${s}`);
+  }
+  add("justify-start", "justify-center", "justify-end", "justify-between");
+  add("items-start", "items-center", "items-end", "items-stretch");
+  // token families over the theme bindings
+  for (const c of Object.values(theme.colors)) add(`bg-${c}`, `text-${c}`, `border-${c}`);
+  add("border", "border-2");
+  for (const r of Object.values(theme.radius)) add(r);
+  for (const t of Object.values(theme.type)) add(...t);
+  // primitive chrome
+  add(...BUTTON_BASE);
+  return [...out].sort();
+}
+
 /** All handler-carrying node ids, in document order — the literal-key set of
  *  the generated `SketchHandlers` type. */
 export function collectHandlerIds(ir: IRNode): string[] {
