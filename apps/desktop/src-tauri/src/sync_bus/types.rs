@@ -40,4 +40,27 @@ impl EventEnvelope {
             payload,
         }
     }
+
+    /// The constraint-17 guard: a subscriber that also publishes must skip
+    /// envelopes it published itself (`if env.is_from(&my_origin) { continue }`)
+    /// so no event can loop back into its own producer.
+    pub fn is_from(&self, origin: &Origin) -> bool {
+        self.origin == *origin
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sync_bus::events::{BlueprintEvent, SyncBusEvent};
+
+    #[test]
+    fn is_from_matches_only_the_publishing_origin() {
+        let env = EventEnvelope::new(
+            Origin::new("estimator"),
+            SyncBusEvent::Blueprint(BlueprintEvent::IndexChanged),
+        );
+        assert!(env.is_from(&Origin::new("estimator")));
+        assert!(!env.is_from(&Origin::new("blueprint")));
+    }
 }

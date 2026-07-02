@@ -389,8 +389,14 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 use sync_bus::events::{BlueprintEvent, EditorEvent, SyncBusEvent};
                 use sync_bus::types::Origin;
+                // This loop publishes as "estimator" (DriftDetected below), so
+                // constraint 17 applies: skip anything it published itself —
+                // today's match arms don't form a cycle, but the guard keeps
+                // future arms from ever creating one.
+                let self_origin = Origin::new("estimator");
                 loop {
                     match est_rx.recv().await {
+                        Ok(env) if env.is_from(&self_origin) => {}
                         Ok(env) => match env.payload {
                             SyncBusEvent::Blueprint(BlueprintEvent::CheckCompleted {
                                 feature_id,
@@ -415,7 +421,7 @@ pub fn run() {
                                 );
                                 for (criterion_id, feature_id) in drifted {
                                     drift_bus.publish(
-                                        Origin::new("estimator"),
+                                        self_origin.clone(),
                                         SyncBusEvent::Blueprint(BlueprintEvent::DriftDetected {
                                             feature_id,
                                             criterion_id,
