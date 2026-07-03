@@ -38,6 +38,23 @@ const FIXTURE: Sketch = {
         intent: { kind: "none" },
         sizing: { width: { mode: "hug" }, height: { mode: "hug" } },
       },
+      {
+        kind: "stack",
+        id: "row1",
+        layout: {
+          direction: "row",
+          gap: 4,
+          padding: { top: 2, right: 2, bottom: 2, left: 2 },
+          mainAxis: "start",
+          crossAxis: "center",
+        },
+        sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
+        children: [
+          { kind: "button", id: "r1", label: "One", variant: "secondary", sizing: { width: { mode: "hug" }, height: { mode: "hug" } } },
+          { kind: "button", id: "r2", label: "Two", variant: "secondary", sizing: { width: { mode: "hug" }, height: { mode: "hug" } } },
+          { kind: "button", id: "r3", label: "Three", variant: "secondary", sizing: { width: { mode: "hug" }, height: { mode: "hug" } } },
+        ],
+      },
     ],
   },
 };
