@@ -8,20 +8,41 @@ interface Props {
   onClose: () => void;
 }
 
+/** "displayName" → "Display Name", "table_name" → "Table name". */
+function humanizePlaceholder(name: string): string {
+  const spaced = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export function TemplatePickerDialog({ onClose }: Props) {
   const t = useT();
   const templates = useBlueprintStore((s) => s.templates);
   const createFromTemplate = useBlueprintStore((s) => s.createFromTemplate);
 
   const [selected, setSelected] = useState<TemplateInfo | null>(null);
-  const [displayName, setDisplayName] = useState("");
+  // One value per placeholder the template declares (displayName always
+  // among them). Humanized labels; displayName drives the fallback for any
+  // left blank, so a template never ships raw {{…}}.
+  const [values, setValues] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
+  const pickTemplate = (t: TemplateInfo) => {
+    setSelected(t);
+    setValues(Object.fromEntries(t.placeholders.map((p) => [p, ""])));
+  };
+
+  const displayName = values.displayName ?? "";
+
   const handleCreate = async () => {
-    if (!selected || !displayName) return;
+    if (!selected || !displayName.trim()) return;
     setLoading(true);
     try {
-      await createFromTemplate(selected.name, { displayName });
+      // Send only non-empty fields; the backend backstops the rest to
+      // displayName so nothing is left unsubstituted.
+      const filled = Object.fromEntries(
+        Object.entries(values).filter(([, v]) => v.trim() !== ""),
+      );
+      await createFromTemplate(selected.name, filled);
       onClose();
     } finally {
       setLoading(false);
@@ -55,7 +76,7 @@ export function TemplatePickerDialog({ onClose }: Props) {
               {templates.map((t) => (
                 <button
                   key={t.name}
-                  onClick={() => setSelected(t)}
+                  onClick={() => pickTemplate(t)}
                   className="flex flex-col gap-1 text-left p-3 bg-bg-primary border border-border rounded hover:border-accent transition-colors"
                 >
                   <div className="flex items-center gap-2">
@@ -76,20 +97,28 @@ export function TemplatePickerDialog({ onClose }: Props) {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-[10px] uppercase tracking-wider text-text-muted">
-                  Display Name
-                </label>
-                <input
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder={t("blueprint.featureNamePlaceholder")}
-                  autoFocus
-                  className="w-full mt-1 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
-                />
-              </div>
+              {Object.keys(values).map((name) => (
+                <div key={name}>
+                  <label className="text-[10px] uppercase tracking-wider text-text-muted">
+                    {humanizePlaceholder(name)}
+                  </label>
+                  <input
+                    value={values[name] ?? ""}
+                    onChange={(e) =>
+                      setValues((v) => ({ ...v, [name]: e.target.value }))
+                    }
+                    placeholder={
+                      name === "displayName"
+                        ? t("blueprint.featureNamePlaceholder")
+                        : undefined
+                    }
+                    autoFocus={name === "displayName"}
+                    className="w-full mt-1 px-2 py-1.5 text-xs bg-bg-primary border border-border rounded text-text-primary focus:border-accent focus:outline-none"
+                  />
+                </div>
+              ))}
               <p className="text-[10px] text-text-muted">
-                Additional fields can be filled in after creation.
+                Blank fields fall back to the display name.
               </p>
             </div>
           )}

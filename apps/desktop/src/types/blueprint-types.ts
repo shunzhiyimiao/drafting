@@ -135,6 +135,10 @@ export interface TemplateInfo {
   displayName: string;
   description: string;
   type: BlueprintType;
+  /** The `{{placeholder}}` keys this template needs filled (blueprintId
+   *  excluded). The create dialog renders an input per entry so nothing is
+   *  left unsubstituted. */
+  placeholders: string[];
 }
 
 export interface ValidationResult {

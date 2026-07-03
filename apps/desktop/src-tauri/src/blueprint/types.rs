@@ -303,7 +303,7 @@ pub struct CheckResult {
 // Template info
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateInfo {
     pub name: String,
@@ -311,6 +311,11 @@ pub struct TemplateInfo {
     pub description: String,
     #[serde(rename = "type")]
     pub template_type: BlueprintType,
+    /// The `{{placeholder}}` keys this template declares (excluding the
+    /// auto-minted blueprintId), so the create dialog can prompt for each
+    /// and nothing is left unsubstituted. Filled by `list_templates`.
+    #[serde(default)]
+    pub placeholders: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
