@@ -8,6 +8,8 @@ import type {
 import * as api from "../lib/git-api";
 import { t } from "../lib/i18n";
 import { notify } from "./notification-store";
+import { subscribeSyncBus } from "../lib/sync-bus";
+import type { SyncBusEvent } from "../types/sync-bus-events";
 
 interface GitState {
   projectRoot: string | null;
@@ -22,6 +24,7 @@ interface GitState {
   error: string | null;
 
   initialize: (projectRoot: string) => Promise<void>;
+  initRepo: () => Promise<void>;
   refresh: () => Promise<void>;
   selectFile: (path: string) => Promise<void>;
   stage: (path: string) => Promise<void>;
@@ -49,6 +52,27 @@ export const useGitStore = create<GitState>((set, get) => ({
   initialize: async (projectRoot) => {
     set({ projectRoot });
     await get().refresh();
+  },
+
+  initRepo: async () => {
+    const { projectRoot } = get();
+    if (!projectRoot) return;
+    set({ loading: true, error: null });
+    try {
+      const status = await api.initRepo(projectRoot);
+      set({ status });
+      notify({
+        severity: "info",
+        title: t("git.init.done.title"),
+        message: t("git.init.done.detail"),
+        dedupeKey: "git-init",
+      });
+      await get().refresh();
+    } catch (err) {
+      set({ error: String(err) });
+    } finally {
+      set({ loading: false });
+    }
   },
 
   refresh: async () => {
@@ -210,3 +234,22 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 }));
+
+// Design #23: refresh git status when files change, instead of only on manual
+// 🔄 / post-action. FileSaved (editor + sketch writes) and file-status changes
+// on the bus trigger a debounced refresh — coalesced so a burst of saves costs
+// one status scan. Guarded to an initialized repo to stay cheap and quiet.
+let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+void subscribeSyncBus((env) => {
+  const e = env.payload as SyncBusEvent;
+  const relevant =
+    (e.domain === "Editor" && e.event.type === "FileSaved") ||
+    (e.domain === "Git" && e.event.type === "FileStatusChanged");
+  if (!relevant) return;
+  const { projectRoot, status, remoteBusy } = useGitStore.getState();
+  if (!projectRoot || !status?.isRepo || remoteBusy) return;
+  if (gitRefreshTimer) clearTimeout(gitRefreshTimer);
+  gitRefreshTimer = setTimeout(() => {
+    void useGitStore.getState().refresh();
+  }, 400);
+});

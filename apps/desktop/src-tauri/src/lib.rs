@@ -584,6 +584,7 @@ pub fn run() {
             terminal::commands::terminal_history_list,
             terminal::commands::terminal_history_search,
             git::commands::git_status,
+            git::commands::git_init,
             git::commands::git_branches,
             git::commands::git_log,
             git::commands::git_diff_file,

@@ -96,6 +96,38 @@ mod tests {
     }
 }
 
+/// Initialize a git repo at the project root, and seed .gitignore with the
+/// Drafting/tool-local dirs so a fresh repo never stages caches. Refuses if a
+/// repo already exists here (idempotent for the caller — the UI only offers
+/// this on the no-repo page).
+pub fn init(project_root: &Path) -> Result<(), String> {
+    if open_repo(project_root).is_ok() {
+        return Err("a git repository already exists here".to_string());
+    }
+    Repository::init(project_root).map_err(|e| format!("git init failed: {e}"))?;
+    ensure_gitignore(project_root);
+    Ok(())
+}
+
+/// Append Drafting's tool-local dirs to .gitignore once, preserving any
+/// existing content (the auto-maintenance the design calls for).
+fn ensure_gitignore(project_root: &Path) {
+    const ENTRIES: [&str; 4] = [".drafting/", ".atlas/", ".blueprint/", ".sketch-index.json"];
+    let path = project_root.join(".gitignore");
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    let missing: Vec<&str> = ENTRIES
+        .iter()
+        .copied()
+        .filter(|e| !current.lines().any(|l| l.trim() == *e))
+        .collect();
+    if missing.is_empty() {
+        return;
+    }
+    let sep = if current.is_empty() || current.ends_with('\n') { "" } else { "\n" };
+    let block = format!("{sep}\n# Drafting tool-local (not versioned)\n{}\n", missing.join("\n"));
+    let _ = std::fs::write(&path, current + &block);
+}
+
 pub fn status(project_root: &Path) -> Result<GitStatus, String> {
     let repo = match open_repo(project_root) {
         Ok(r) => r,

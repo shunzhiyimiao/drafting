@@ -24,6 +24,7 @@ export function GitView() {
   const activeDiff = useGitStore((s) => s.activeDiff);
   const loading = useGitStore((s) => s.loading);
   const initialize = useGitStore((s) => s.initialize);
+  const initRepo = useGitStore((s) => s.initRepo);
   const refresh = useGitStore((s) => s.refresh);
   const selectFile = useGitStore((s) => s.selectFile);
   const stage = useGitStore((s) => s.stage);
@@ -55,8 +56,19 @@ export function GitView() {
         <h2 className="text-lg font-medium text-text-primary mb-2">
           {t("git.notARepo")}
         </h2>
-        <p className="text-sm text-text-muted max-w-md">
+        <p className="text-sm text-text-muted max-w-md mb-5">
           {t("git.notARepoDesc")}
+        </p>
+        <button
+          onClick={() => void initRepo()}
+          disabled={loading}
+          className="glass-button-primary font-medium disabled:opacity-50"
+        >
+          <GitBranch size={13} />
+          {t("git.init.button")}
+        </button>
+        <p className="text-[10px] text-text-muted mt-2 max-w-sm">
+          {t("git.init.hint")}
         </p>
       </div>
     );

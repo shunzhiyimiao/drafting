@@ -9,6 +9,10 @@ import type {
   PushResult,
 } from "../types/git-types";
 
+export async function initRepo(projectRoot: string): Promise<GitStatus> {
+  return invoke("git_init", { projectRoot });
+}
+
 export async function getStatus(projectRoot: string): Promise<GitStatus> {
   return invoke("git_status", { projectRoot });
 }

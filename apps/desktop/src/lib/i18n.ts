@@ -366,6 +366,16 @@ const translations: Record<string, Record<Locale, string>> = {
 
   // -- Git --------------------------------------------------------------
   "git.loadingStatus": { zh: "正在加载 Git 状态...", en: "Loading Git status..." },
+  "git.init.button": { zh: "初始化 Git 仓库", en: "Initialize Git repository" },
+  "git.init.hint": {
+    zh: "在当前工作目录运行 git init,并自动忽略 .drafting/ .atlas/ .blueprint/ 等工具缓存。",
+    en: "Runs git init here and auto-ignores tool caches (.drafting/, .atlas/, .blueprint/, …).",
+  },
+  "git.init.done.title": { zh: "仓库已初始化", en: "Repository initialized" },
+  "git.init.done.detail": {
+    zh: "已创建 Git 仓库并写入 .gitignore。",
+    en: "Created the Git repository and seeded .gitignore.",
+  },
   "git.notARepo": { zh: "不是 Git 仓库", en: "Not a Git repository" },
   "git.notARepoDesc": {
     zh: "当前工作目录不是 Git 仓库。",

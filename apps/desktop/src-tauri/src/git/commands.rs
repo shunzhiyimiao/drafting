@@ -19,6 +19,29 @@ pub fn git_status(project_root: String) -> Result<GitStatus, String> {
 }
 
 #[tauri::command]
+pub fn git_init(
+    project_root: String,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<GitStatus, String> {
+    let root = Path::new(&project_root);
+    ops::init(root)?;
+    let status = ops::status(root)?;
+    // A brand-new repo is a status change like any other — let Headquarters'
+    // git summary and any listeners refresh.
+    sync_bus.publish(
+        git_origin(),
+        SyncBusEvent::Git(GitEvent::StatusChanged {
+            modified: status.modified.len() as u32,
+            added: status.staged.len() as u32,
+            deleted: 0,
+            untracked: status.untracked.len() as u32,
+            conflicted: status.conflicted.len() as u32,
+        }),
+    );
+    Ok(status)
+}
+
+#[tauri::command]
 pub fn git_branches(project_root: String) -> Result<Vec<BranchInfo>, String> {
     ops::list_branches(Path::new(&project_root))
 }
