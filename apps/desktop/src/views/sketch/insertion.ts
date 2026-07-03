@@ -46,6 +46,29 @@ export interface Insertion {
   targetBoxId: string;
 }
 
+/**
+ * Where a drop lands (Rev 3 §7.1 side-drop amendment): either an ordinary
+ * gap insertion, or the ONE sanctioned structure creation — wrapping a leaf
+ * sibling and the dragged node in a single perpendicular stack, decided
+ * purely by pointer geometry (the outer SIDE_ZONE of the leaf's cross axis),
+ * never by layout analysis.
+ */
+export type DropPlan =
+  | ({ kind: "insert" } & Insertion)
+  | {
+      kind: "wrap";
+      /** The leaf being joined side-by-side. */
+      targetNodeId: string;
+      targetBoxId: string;
+      /** Dragged node lands before (left/top) or after (right/bottom). */
+      side: "before" | "after";
+      /** Wrapper direction — perpendicular to the parent container's. */
+      direction: "row" | "col";
+    };
+
+/** Outer fraction of a leaf's cross-axis extent that triggers a wrap. */
+export const SIDE_ZONE = 0.25;
+
 function contains(rect: Rect, p: Point): boolean {
   return p.x >= rect.x && p.x <= rect.x + rect.width && p.y >= rect.y && p.y <= rect.y + rect.height;
 }
@@ -61,13 +84,12 @@ function contains(rect: Rect, p: Point): boolean {
  * `excludeNodeIds` removes the dragged subtree's containers from candidacy
  * (a node can't be dropped into itself or a descendant).
  */
-export function computeInsertion(
+function deepestContainer(
   point: Point,
   boxes: LayoutBox[],
+  byId: Map<string, LayoutBox>,
   excludeNodeIds?: ReadonlySet<string>,
-): Insertion | null {
-  const byId = new Map(boxes.map((b) => [b.boxId, b]));
-
+): LayoutBox | null {
   const depthOf = (b: LayoutBox): number => {
     let depth = 0;
     let cur = b;
@@ -92,9 +114,11 @@ export function computeInsertion(
       targetDepth = depth;
     }
   }
-  if (!target) return null;
+  return target;
+}
 
-  // Nearest gap: count children whose main-axis midpoint precedes the point.
+/** Nearest gap: count children whose main-axis midpoint precedes the point. */
+function gapIndex(point: Point, target: LayoutBox, byId: Map<string, LayoutBox>): number {
   const axis = target.container!.direction === "row" ? point.x : point.y;
   let index = 0;
   for (const childId of target.childBoxIds) {
@@ -106,7 +130,95 @@ export function computeInsertion(
         : child.rect.y + child.rect.height / 2;
     if (axis > mid) index += 1;
   }
-  return { containerId: target.nodeId, index, targetBoxId: target.boxId };
+  return index;
+}
+
+export function computeInsertion(
+  point: Point,
+  boxes: LayoutBox[],
+  excludeNodeIds?: ReadonlySet<string>,
+): Insertion | null {
+  const byId = new Map(boxes.map((b) => [b.boxId, b]));
+  const target = deepestContainer(point, boxes, byId, excludeNodeIds);
+  if (!target) return null;
+  return {
+    containerId: target.nodeId,
+    index: gapIndex(point, target, byId),
+    targetBoxId: target.boxId,
+  };
+}
+
+/**
+ * The full drop decision: gap insertion, plus the side-drop wrap. A point in
+ * the outer SIDE_ZONE of a LEAF child's cross axis (left/right in a col
+ * parent, top/bottom in a row parent) means "place the dragged node beside
+ * this one" → wrap exactly {target, dragged} in one perpendicular stack.
+ * Containers never trigger it (a point inside a non-excluded container makes
+ * that container the deeper insertion target instead), and the dragged
+ * subtree can't be its own wrap partner.
+ */
+export function computeDrop(
+  point: Point,
+  boxes: LayoutBox[],
+  excludeNodeIds?: ReadonlySet<string>,
+): DropPlan | null {
+  const byId = new Map(boxes.map((b) => [b.boxId, b]));
+  const target = deepestContainer(point, boxes, byId, excludeNodeIds);
+  if (!target) return null;
+
+  const sidesAreHorizontal = target.container!.direction === "col"; // cross axis
+  for (const childId of target.childBoxIds) {
+    const child = byId.get(childId);
+    if (!child || !contains(child.rect, point)) continue;
+    // Only leaves wrap; the dragged subtree never wraps with itself.
+    if (child.container || excludeNodeIds?.has(child.nodeId)) break;
+    const [lo, size, p] = sidesAreHorizontal
+      ? [child.rect.x, child.rect.width, point.x]
+      : [child.rect.y, child.rect.height, point.y];
+    const direction = sidesAreHorizontal ? "row" : "col";
+    if (p < lo + size * SIDE_ZONE) {
+      return { kind: "wrap", targetNodeId: child.nodeId, targetBoxId: child.boxId, side: "before", direction };
+    }
+    if (p > lo + size * (1 - SIDE_ZONE)) {
+      return { kind: "wrap", targetNodeId: child.nodeId, targetBoxId: child.boxId, side: "after", direction };
+    }
+    break; // middle band → ordinary gap semantics
+  }
+
+  return {
+    kind: "insert",
+    containerId: target.nodeId,
+    index: gapIndex(point, target, byId),
+    targetBoxId: target.boxId,
+  };
+}
+
+/** Indicator for a full DropPlan: the gap line for insertions (null → the
+ *  caller rings the empty container), or the target's joined half for a
+ *  side-drop wrap — rendered as a translucent zone, not a line. */
+export function indicatorFor(
+  plan: DropPlan,
+  boxes: LayoutBox[],
+): { rect: Rect; kind: "line" | "zone" } | null {
+  if (plan.kind === "insert") {
+    const rect = indicatorRect(plan, boxes);
+    return rect ? { rect, kind: "line" } : null;
+  }
+  const target = boxes.find((b) => b.boxId === plan.targetBoxId);
+  if (!target) return null;
+  const r = target.rect;
+  if (plan.direction === "row") {
+    const w = r.width / 2;
+    return {
+      rect: { x: plan.side === "before" ? r.x : r.x + w, y: r.y, width: w, height: r.height },
+      kind: "zone",
+    };
+  }
+  const h = r.height / 2;
+  return {
+    rect: { x: r.x, y: plan.side === "before" ? r.y : r.y + h, width: r.width, height: h },
+    kind: "zone",
+  };
 }
 
 /**

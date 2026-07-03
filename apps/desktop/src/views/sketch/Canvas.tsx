@@ -8,9 +8,9 @@ import {
 } from "@drafting/sketch-core";
 import { allNodeIds, findNode, useSketchStore, type NodeKind } from "../../stores/sketch-store";
 import {
-  computeInsertion,
-  indicatorRect,
-  type Insertion,
+  computeDrop,
+  indicatorFor,
+  type DropPlan,
   type LayoutBox,
 } from "./insertion";
 
@@ -32,7 +32,7 @@ interface ActiveDrag {
   /** What the ghost chip says while following the cursor. */
   label: string;
   boxes: LayoutBox[];
-  insertion: Insertion | null;
+  plan: DropPlan | null;
   /** Cursor position relative to the surface — drives the ghost chip. */
   pointer: { x: number; y: number };
 }
@@ -89,6 +89,8 @@ export function SketchCanvas() {
   const selectNode = useSketchStore((s) => s.selectNode);
   const insertNodeAt = useSketchStore((s) => s.insertNodeAt);
   const moveNodeTo = useSketchStore((s) => s.moveNodeTo);
+  const insertNodeBeside = useSketchStore((s) => s.insertNodeBeside);
+  const moveNodeBeside = useSketchStore((s) => s.moveNodeBeside);
   const paletteDrag = useSketchStore((s) => s.paletteDrag);
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
 
@@ -142,7 +144,7 @@ export function SketchCanvas() {
             source: { nodeId: pending.nodeId, exclude: new Set(allNodeIds(hit.node)) },
             label: hit.node.kind,
             boxes: measureBoxes(surface, active.root),
-            insertion: null,
+            plan: null,
             pointer: surfacePoint(e),
           };
           pendingRef.current = null;
@@ -151,7 +153,7 @@ export function SketchCanvas() {
             source: { paletteKind: paletteDrag },
             label: paletteDrag,
             boxes: measureBoxes(surface, active.root),
-            insertion: null,
+            plan: null,
             pointer: surfacePoint(e),
           };
         } else {
@@ -161,8 +163,8 @@ export function SketchCanvas() {
 
       const point = surfacePoint(e);
       const exclude = "exclude" in current.source ? current.source.exclude : undefined;
-      const insertion = computeInsertion(point, current.boxes, exclude);
-      const next = { ...current, insertion, pointer: point };
+      const plan = computeDrop(point, current.boxes, exclude);
+      const next = { ...current, plan, pointer: point };
       // Keep the ref current synchronously — move events can arrive before
       // React commits, and re-measuring boxes per event would be wasteful.
       dragRef.current = next;
@@ -175,12 +177,18 @@ export function SketchCanvas() {
       if (paletteDrag) setPaletteDrag(null);
       if (!current) return;
       setDrag(null);
-      if (!current.insertion) return; // empty-canvas drop = no-op, never invents structure
-      const { containerId, index } = current.insertion;
-      if ("paletteKind" in current.source) {
-        insertNodeAt(containerId, index, current.source.paletteKind);
+      const plan = current.plan;
+      if (!plan) return; // off-sheet drop = no-op
+      if (plan.kind === "insert") {
+        if ("paletteKind" in current.source) {
+          insertNodeAt(plan.containerId, plan.index, current.source.paletteKind);
+        } else {
+          moveNodeTo(current.source.nodeId, plan.containerId, plan.index);
+        }
+      } else if ("paletteKind" in current.source) {
+        insertNodeBeside(plan.targetNodeId, plan.side, plan.direction, current.source.paletteKind);
       } else {
-        moveNodeTo(current.source.nodeId, containerId, index);
+        moveNodeBeside(current.source.nodeId, plan.targetNodeId, plan.side, plan.direction);
       }
     };
 
@@ -190,14 +198,14 @@ export function SketchCanvas() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [active, paletteDrag, insertNodeAt, moveNodeTo, setPaletteDrag]);
+  }, [active, paletteDrag, insertNodeAt, moveNodeTo, insertNodeBeside, moveNodeBeside, setPaletteDrag]);
 
   if (!active) return null;
 
-  const indicator = drag?.insertion ? indicatorRect(drag.insertion, drag.boxes) : null;
+  const indicator = drag?.plan ? indicatorFor(drag.plan, drag.boxes) : null;
   const ringBox =
-    drag?.insertion && !indicator
-      ? drag.boxes.find((b) => b.boxId === drag.insertion!.targetBoxId)
+    drag?.plan && !indicator
+      ? drag.boxes.find((b) => b.boxId === drag.plan!.targetBoxId)
       : null;
 
   return (
@@ -237,12 +245,16 @@ export function SketchCanvas() {
         {element}
         {indicator && (
           <div
-            className="absolute bg-blue-500 rounded pointer-events-none z-10"
+            className={`absolute pointer-events-none z-10 rounded ${
+              indicator.kind === "line"
+                ? "bg-blue-500"
+                : "bg-blue-500/25 border border-blue-500"
+            }`}
             style={{
-              left: indicator.x,
-              top: indicator.y,
-              width: indicator.width,
-              height: indicator.height,
+              left: indicator.rect.x,
+              top: indicator.rect.y,
+              width: indicator.rect.width,
+              height: indicator.rect.height,
             }}
           />
         )}

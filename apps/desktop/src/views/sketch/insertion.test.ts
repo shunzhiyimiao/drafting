@@ -7,7 +7,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { computeInsertion, indicatorRect, type LayoutBox } from "./insertion.js";
+import {
+  computeDrop,
+  computeInsertion,
+  indicatorFor,
+  indicatorRect,
+  type LayoutBox,
+} from "./insertion.js";
 
 /** A row container [a | b | c] with children at x = 0..40, 50..90, 100..140. */
 function rowBoxes(): LayoutBox[] {
@@ -167,6 +173,122 @@ test("template instances: several boxes, one nodeId — any instance targets the
   assert.equal(first?.targetBoxId, "tmpl@0");
   assert.equal(second?.containerId, "mail-row");
   assert.equal(second?.targetBoxId, "tmpl@1");
+});
+
+// ------------------------------------------------- side-drop wrap (§7.1) --
+
+/** A col container with one full-width leaf child: x 0..200, child y 10..50. */
+function colWithLeaf(): LayoutBox[] {
+  return [
+    {
+      boxId: "root",
+      nodeId: "root",
+      rect: { x: 0, y: 0, width: 200, height: 100 },
+      container: { direction: "col" },
+      parentBoxId: null,
+      childBoxIds: ["leaf"],
+    },
+    { boxId: "leaf", nodeId: "leaf", rect: { x: 0, y: 10, width: 200, height: 40 }, parentBoxId: "root", childBoxIds: [] },
+  ];
+}
+
+test("side-drop: outer quarters of a leaf in a col parent wrap into a row", () => {
+  const boxes = colWithLeaf();
+  // Left 25% (x < 50) → wrap, dragged goes before.
+  assert.deepEqual(computeDrop({ x: 30, y: 30 }, boxes), {
+    kind: "wrap",
+    targetNodeId: "leaf",
+    targetBoxId: "leaf",
+    side: "before",
+    direction: "row",
+  });
+  // Right 25% (x > 150) → wrap, dragged goes after.
+  assert.deepEqual(computeDrop({ x: 170, y: 30 }, boxes), {
+    kind: "wrap",
+    targetNodeId: "leaf",
+    targetBoxId: "leaf",
+    side: "after",
+    direction: "row",
+  });
+  // Middle band keeps the ordinary gap semantics (midpoint rule).
+  assert.deepEqual(computeDrop({ x: 100, y: 20 }, boxes), {
+    kind: "insert",
+    containerId: "root",
+    index: 0,
+    targetBoxId: "root",
+  });
+  assert.equal(computeDrop({ x: 100, y: 40 }, boxes)?.kind, "insert");
+  // Off the leaf entirely → plain insert too.
+  assert.equal(computeDrop({ x: 30, y: 80 }, boxes)?.kind, "insert");
+});
+
+test("side-drop: in a row parent the wrap sides are top/bottom and the wrapper is a col", () => {
+  const boxes: LayoutBox[] = [
+    {
+      boxId: "row",
+      nodeId: "row",
+      rect: { x: 0, y: 0, width: 200, height: 100 },
+      container: { direction: "row" },
+      parentBoxId: null,
+      childBoxIds: ["leaf"],
+    },
+    { boxId: "leaf", nodeId: "leaf", rect: { x: 20, y: 0, width: 60, height: 100 }, parentBoxId: "row", childBoxIds: [] },
+  ];
+  assert.deepEqual(computeDrop({ x: 50, y: 10 }, boxes), {
+    kind: "wrap",
+    targetNodeId: "leaf",
+    targetBoxId: "leaf",
+    side: "before",
+    direction: "col",
+  });
+  const bottom = computeDrop({ x: 50, y: 90 }, boxes);
+  assert.ok(bottom?.kind === "wrap" && bottom.side === "after", "bottom zone wraps after");
+  assert.equal(computeDrop({ x: 50, y: 50 }, boxes)?.kind, "insert");
+});
+
+test("side-drop: the dragged subtree and containers never become wrap targets", () => {
+  const boxes = colWithLeaf();
+  // The leaf IS the dragged node → its side zones fall through to gaps.
+  const excluded = computeDrop({ x: 30, y: 30 }, boxes, new Set(["leaf"]));
+  assert.equal(excluded?.kind, "insert");
+
+  // A container child absorbs the point as the deeper insertion target.
+  const nested: LayoutBox[] = [
+    {
+      boxId: "root",
+      nodeId: "root",
+      rect: { x: 0, y: 0, width: 200, height: 100 },
+      container: { direction: "col" },
+      parentBoxId: null,
+      childBoxIds: ["inner"],
+    },
+    {
+      boxId: "inner",
+      nodeId: "inner",
+      rect: { x: 0, y: 10, width: 200, height: 40 },
+      container: { direction: "row" },
+      parentBoxId: "root",
+      childBoxIds: [],
+    },
+  ];
+  const intoInner = computeDrop({ x: 10, y: 30 }, nested);
+  assert.deepEqual(intoInner, { kind: "insert", containerId: "inner", index: 0, targetBoxId: "inner" });
+});
+
+test("side-drop indicator: the joined half as a zone; insert plans stay lines", () => {
+  const boxes = colWithLeaf();
+  const wrap = computeDrop({ x: 170, y: 30 }, boxes)!;
+  assert.deepEqual(indicatorFor(wrap, boxes), {
+    rect: { x: 100, y: 10, width: 100, height: 40 },
+    kind: "zone",
+  });
+  const before = computeDrop({ x: 30, y: 30 }, boxes)!;
+  assert.deepEqual(indicatorFor(before, boxes)?.rect, { x: 0, y: 10, width: 100, height: 40 });
+
+  const insert = computeDrop({ x: 100, y: 80 }, boxes)!;
+  const line = indicatorFor(insert, boxes);
+  assert.equal(line?.kind, "line");
+  assert.deepEqual(line?.rect, { x: 0, y: 49, width: 200, height: 2 });
 });
 
 test("indicator geometry: vertical line in a row gap, horizontal in a col gap", () => {
