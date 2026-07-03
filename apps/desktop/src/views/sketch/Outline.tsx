@@ -3,16 +3,18 @@ import {
   ArrowUp,
   BoxSelect,
   Image as ImageIcon,
+  List as ListIcon,
   MousePointerClick,
   TextCursorInput,
   Trash2,
   Type,
 } from "lucide-react";
-import type { SketchNode } from "@drafting/sketch-core";
+import { isBind, type SketchNode } from "@drafting/sketch-core";
 import { useSketchStore } from "../../stores/sketch-store";
 
 const KIND_ICON = {
   stack: BoxSelect,
+  list: ListIcon,
   text: Type,
   button: MousePointerClick,
   input: TextCursorInput,
@@ -23,8 +25,10 @@ function nodeLabel(node: SketchNode): string {
   switch (node.kind) {
     case "stack":
       return `stack · ${node.layout.direction}`;
+    case "list":
+      return `list · ${node.dataKey}`;
     case "text":
-      return node.content || "text";
+      return isBind(node.content) ? `{${node.content.bind}}` : node.content || "text";
     case "button":
       return node.label || "button";
     case "input":
@@ -109,6 +113,13 @@ function OutlineNode({
         node.children.map((child) => (
           <OutlineNode key={child.id} node={child} depth={depth + 1} />
         ))}
+      {/* The template is the list's required single root: it renders as a
+          normal subtree but — like the sketch root — can't be moved or
+          deleted (isRoot hides those controls; findNode gives it a null
+          parent so the ops are no-ops anyway). Its children edit normally. */}
+      {node.kind === "list" && (
+        <OutlineNode key={node.template.id} node={node.template} depth={depth + 1} isRoot />
+      )}
     </div>
   );
 }

@@ -544,6 +544,90 @@ test("sketch: ownership — generated is overwritten, sibling never is", () => {
   });
 });
 
+const LIST_SKETCH_FIXTURE = JSON.stringify({
+  id: "sk_inbox",
+  name: "Inbox",
+  blueprintRef: null,
+  schemaVersion: 2,
+  root: {
+    kind: "stack",
+    id: "root",
+    layout: {
+      direction: "col",
+      gap: 4,
+      padding: { top: 6, right: 6, bottom: 6, left: 6 },
+      mainAxis: "start",
+      crossAxis: "stretch",
+    },
+    sizing: { width: { mode: "fill" }, height: { mode: "fill" } },
+    children: [
+      {
+        kind: "list",
+        id: "mail-list",
+        dataKey: "inbox",
+        itemShape: [
+          { name: "id", type: "string", isKey: true },
+          { name: "subject", type: "string" },
+        ],
+        sampleRows: [{ id: "m1", subject: "Hello" }],
+        template: {
+          kind: "stack",
+          id: "mail-row",
+          layout: {
+            direction: "row",
+            gap: 2,
+            padding: { top: 2, right: 2, bottom: 2, left: 2 },
+            mainAxis: "start",
+            crossAxis: "center",
+          },
+          sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
+          children: [
+            {
+              kind: "text",
+              id: "mail-subject",
+              role: "body",
+              content: { bind: "subject" },
+              sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
+            },
+            {
+              kind: "button",
+              id: "mail-open",
+              label: "Open",
+              variant: "ghost",
+              intent: { kind: "navigate", to: null },
+              sizing: { width: { mode: "hug" }, height: { mode: "hug" } },
+            },
+          ],
+        },
+        sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
+      },
+    ],
+  },
+});
+
+test("sketch: a list emits map/key/item type, and the sibling gets a data stub", () => {
+  withTmpDir((root) => {
+    const rel = "sketches/inbox.sketch.json";
+    fs.mkdirSync(path.join(root, "sketches"), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), LIST_SKETCH_FIXTURE);
+    generateSketch({ projectRoot: root, sketchPath: rel });
+
+    const gen = read(root, "packages/ui/src/generated/inbox.generated.tsx");
+    assert.match(gen, /export type InboxItem = \{/);
+    assert.match(gen, /"mail-open"\?: \(item: InboxItem\) => void;/);
+    assert.match(gen, /data: \{ inbox: InboxItem\[\] \}/);
+    assert.match(gen, /\{data\.inbox\.map\(\(item\) => \(/);
+    assert.match(gen, /key=\{item\.id\}/);
+    assert.match(gen, /\{item\.subject\}/);
+    assert.match(gen, /onClick=\{\(\) => handlers\["mail-open"\]\?\.\(item\)\}/);
+
+    // The sibling is scaffolded with an empty-rows stub — the seam where the
+    // user wires real data (lists only render; data is the sibling's job).
+    const sibling = read(root, "packages/ui/src/inbox.tsx");
+    assert.match(sibling, /<Generated data=\{\{ inbox: \[\] \}\} handlers=\{handlers\} \/>/);
+  });
+});
+
 test("sketch: package scope comes from .patchboard/config.json when present", () => {
   withTmpDir((root) => {
     fs.mkdirSync(path.join(root, ".patchboard"), { recursive: true });

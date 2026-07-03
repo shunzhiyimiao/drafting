@@ -24,6 +24,8 @@ pub struct Sketch {
 pub enum Node {
     #[serde(rename = "stack")]
     Stack(Container),
+    #[serde(rename = "list")]
+    List(ListP),
     #[serde(rename = "text")]
     Text(TextP),
     #[serde(rename = "button")]
@@ -38,6 +40,7 @@ impl Node {
     pub fn id(&self) -> &str {
         match self {
             Node::Stack(n) => &n.id,
+            Node::List(n) => &n.id,
             Node::Text(n) => &n.id,
             Node::Button(n) => &n.id,
             Node::Input(n) => &n.id,
@@ -48,6 +51,7 @@ impl Node {
     pub fn id_mut(&mut self) -> &mut String {
         match self {
             Node::Stack(n) => &mut n.id,
+            Node::List(n) => &mut n.id,
             Node::Text(n) => &mut n.id,
             Node::Button(n) => &mut n.id,
             Node::Input(n) => &mut n.id,
@@ -74,12 +78,68 @@ pub struct Container {
     pub children: Vec<Node>,
 }
 
+/// `string | { bind }` — a literal, or a binding to an itemShape field
+/// (legal only inside a list template; sketch-core's validate() decides
+/// that — this mirror stores either shape verbatim).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BindableString {
+    Literal(String),
+    Bind { bind: String },
+}
+
+/// A repeated region (schema v2). The list only renders; data arrives via the
+/// generated component's `data.<dataKey>` prop, wired in the user's sibling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListP {
+    pub id: String,
+    pub item_shape: Vec<ItemField>,
+    pub data_key: String,
+    /// TS types this as `Container`; the serialized JSON carries
+    /// `kind:"stack"` (same as `Sketch.root`), so the mirror holds a `Node`
+    /// and storage validates stack-ness on load.
+    pub template: Box<Node>,
+    /// Canvas sample data — part of the Spec (reproducible rendering).
+    pub sample_rows: Vec<serde_json::Value>,
+    pub sizing: Sizing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<Style>,
+    /// Unknown fields ride through byte-identically (round-trip safety —
+    /// the Blueprint constraint-23 discipline).
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// One itemShape field. A future spade may add a child-points-to-parent
+/// `blueprintRef` here (shape declared by Blueprint data) — reserved seam.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: ItemFieldType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_key: Option<bool>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ItemFieldType {
+    String,
+    Number,
+    Boolean,
+    Image,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextP {
     pub id: String,
     pub role: TypeToken,
-    pub content: String,
+    pub content: BindableString,
     pub sizing: Sizing,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<Style>,
@@ -122,7 +182,7 @@ pub struct InputP {
 #[serde(rename_all = "camelCase")]
 pub struct ImageP {
     pub id: String,
-    pub src: String,
+    pub src: BindableString,
     pub alt: String,
     pub sizing: Sizing,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   BoxSelect,
   Image as ImageIcon,
+  List as ListIcon,
   MousePointerClick,
   PenTool,
   Plus,
@@ -26,6 +27,7 @@ const TOOLBOX: { kind: NodeKind; label: string; icon: typeof Type }[] = [
   { kind: "button", label: "Button", icon: MousePointerClick },
   { kind: "input", label: "Input", icon: TextCursorInput },
   { kind: "image", label: "Image", icon: ImageIcon },
+  { kind: "list", label: "List", icon: ListIcon },
 ];
 
 export function SketchView() {

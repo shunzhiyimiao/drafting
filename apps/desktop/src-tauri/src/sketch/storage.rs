@@ -9,17 +9,28 @@ use super::types::{
     Container, CrossAxis, Direction, Edges, Layout, MainAxis, Node, Size, Sizing, Sketch,
 };
 
+/// Current Spec schema (mirrors sketch-core's SCHEMA_VERSION). v2 added
+/// `list` + data binding.
+pub const SCHEMA_VERSION: u32 = 2;
+
 pub fn sketches_dir(root: &Path) -> PathBuf {
     root.join("sketches")
 }
 
 /// Node-id stability rule 1 (§6): heal-on-load — any id-less node mints a
 /// ULID (copy of `load_blueprint_self_heals`); ids are stable from first
-/// load. Returns whether anything was minted (→ caller writes back).
+/// load. Also migrates older schema versions forward (v1 → v2 is the
+/// identity migration: v2 only ADDED the `list` kind), riding the same
+/// write-back channel. A version NEWER than this build is left untouched.
+/// Returns whether anything changed (→ caller writes back).
 pub fn heal(sketch: &mut Sketch) -> bool {
     let mut changed = false;
     if sketch.id.is_empty() {
         sketch.id = ulid::Ulid::new().to_string();
+        changed = true;
+    }
+    if sketch.schema_version < SCHEMA_VERSION {
+        sketch.schema_version = SCHEMA_VERSION;
         changed = true;
     }
     heal_node(&mut sketch.root, &mut changed);
@@ -31,10 +42,32 @@ fn heal_node(node: &mut Node, changed: &mut bool) {
         *node.id_mut() = ulid::Ulid::new().to_string();
         *changed = true;
     }
-    if let Some(children) = node.children_mut() {
-        for child in children {
-            heal_node(child, changed);
+    match node {
+        Node::Stack(c) => {
+            for child in &mut c.children {
+                heal_node(child, changed);
+            }
         }
+        // A list's template subtree heals like any other — node-id stability
+        // must reach template nodes (criteria bind to them too).
+        Node::List(l) => heal_node(&mut l.template, changed),
+        _ => {}
+    }
+}
+
+/// Every list's template must be a stack container (the TS Spec types it as
+/// `Container`; the mirror holds a `Node` for the serde tag — same pattern
+/// as `Sketch.root`).
+fn validate_templates(node: &Node) -> Result<(), String> {
+    match node {
+        Node::Stack(c) => c.children.iter().try_for_each(validate_templates),
+        Node::List(l) => {
+            if !matches!(*l.template, Node::Stack(_)) {
+                return Err(format!("list {}: template must be a stack container", l.id));
+            }
+            validate_templates(&l.template)
+        }
+        _ => Ok(()),
     }
 }
 
@@ -52,6 +85,7 @@ pub fn load(path: &Path) -> Result<Sketch, String> {
             path.display()
         ));
     }
+    validate_templates(&sketch.root).map_err(|e| format!("{}: {e}", path.display()))?;
     if heal(&mut sketch) {
         save(path, &sketch)?;
         log::info!("sketch heal-on-load minted ids: {}", path.display());
@@ -157,7 +191,7 @@ pub fn create(root: &Path, name: &str, blueprint_ref: Option<String>) -> Result<
             style: None,
             children: Vec::new(),
         }),
-        schema_version: 1,
+        schema_version: SCHEMA_VERSION,
     };
 
     let dir = sketches_dir(root);
@@ -247,6 +281,142 @@ mod tests {
         assert_eq!(a, b, "serde mirror must not add, drop, or rename fields");
     }
 
+    /// A TS-shaped v2 list fixture — bound text/image inside the template,
+    /// sample rows, and UNKNOWN fields on the list and an itemShape entry
+    /// (round-trip safety, Blueprint constraint 23: what this build doesn't
+    /// know, it must not delete).
+    const LIST_FIXTURE: &str = r#"{
+  "id": "sk_inbox",
+  "name": "Inbox",
+  "blueprintRef": "feat_inbox",
+  "root": {
+    "kind": "stack",
+    "id": "root",
+    "layout": {
+      "direction": "col",
+      "gap": 4,
+      "padding": { "top": 6, "right": 6, "bottom": 6, "left": 6 },
+      "mainAxis": "start",
+      "crossAxis": "stretch"
+    },
+    "sizing": { "width": { "mode": "fill" }, "height": { "mode": "fill" } },
+    "children": [
+      {
+        "kind": "list",
+        "id": "mail-list",
+        "itemShape": [
+          { "name": "id", "type": "string", "isKey": true, "futureRef": "bp_x" },
+          { "name": "subject", "type": "string" },
+          { "name": "avatar", "type": "image" }
+        ],
+        "dataKey": "inbox",
+        "template": {
+          "kind": "stack",
+          "id": "mail-row",
+          "layout": {
+            "direction": "row",
+            "gap": 3,
+            "padding": { "top": 2, "right": 2, "bottom": 2, "left": 2 },
+            "mainAxis": "start",
+            "crossAxis": "center"
+          },
+          "sizing": { "width": { "mode": "fill" }, "height": { "mode": "hug" } },
+          "children": [
+            {
+              "kind": "image",
+              "id": "mail-avatar",
+              "src": { "bind": "avatar" },
+              "alt": "avatar",
+              "sizing": { "width": { "mode": "fixed", "px": 32 }, "height": { "mode": "fixed", "px": 32 } }
+            },
+            {
+              "kind": "text",
+              "id": "mail-subject",
+              "role": "body",
+              "content": { "bind": "subject" },
+              "sizing": { "width": { "mode": "fill" }, "height": { "mode": "hug" } }
+            },
+            {
+              "kind": "button",
+              "id": "mail-open",
+              "label": "Open",
+              "variant": "ghost",
+              "intent": { "kind": "navigate", "to": null },
+              "sizing": { "width": { "mode": "hug" }, "height": { "mode": "hug" } }
+            }
+          ]
+        },
+        "sampleRows": [
+          { "id": "m1", "subject": "Welcome to Drafting", "avatar": "/a1.png" },
+          { "id": "m2", "subject": "Your build is green", "avatar": "/a2.png" }
+        ],
+        "sizing": { "width": { "mode": "fill" }, "height": { "mode": "hug" } },
+        "emptyState": { "future": "field this build does not know" }
+      }
+    ]
+  },
+  "schemaVersion": 2
+}"#;
+
+    #[test]
+    fn serde_mirror_round_trips_a_list_with_unknown_fields() {
+        let sketch: Sketch = serde_json::from_str(LIST_FIXTURE).expect("parse list JSON");
+        let Node::Stack(ref root) = sketch.root else {
+            panic!("root is a stack")
+        };
+        let Node::List(ref list) = root.children[0] else {
+            panic!("child is a list")
+        };
+        assert_eq!(list.data_key, "inbox");
+        assert_eq!(list.item_shape.len(), 3);
+        assert_eq!(list.item_shape[0].is_key, Some(true));
+        assert_eq!(list.sample_rows.len(), 2);
+        // Unknown fields were captured, not dropped.
+        assert!(list.extra.contains_key("emptyState"));
+        assert!(list.item_shape[0].extra.contains_key("futureRef"));
+
+        // Value-identical round-trip: unknown fields ride through and the
+        // enum tag is not duplicated into the flatten map.
+        let out = serde_json::to_string_pretty(&sketch).unwrap();
+        let a: serde_json::Value = serde_json::from_str(LIST_FIXTURE).unwrap();
+        let b: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(a, b, "list mirror must not add, drop, or rename fields");
+    }
+
+    #[test]
+    fn heal_migrates_old_schema_versions_forward_and_reaches_templates() {
+        // v1 → v2 is the identity migration (v2 only added `list`) + version
+        // write-back through the same heal channel as id minting.
+        let mut sketch: Sketch = serde_json::from_str(TS_FIXTURE).unwrap();
+        assert_eq!(sketch.schema_version, 1);
+        assert!(heal(&mut sketch), "migration reports a change to write back");
+        assert_eq!(sketch.schema_version, SCHEMA_VERSION);
+        assert!(!heal(&mut sketch), "second heal is a no-op");
+
+        // Template nodes heal like any other (criteria bind to them too).
+        let mut listed: Sketch = serde_json::from_str(
+            &LIST_FIXTURE
+                .replace(r#""id": "mail-row""#, r#""id": """#)
+                .replace(r#""id": "mail-open""#, r#""id": """#),
+        )
+        .unwrap();
+        assert!(heal(&mut listed));
+        let Node::Stack(root) = &listed.root else {
+            panic!()
+        };
+        let Node::List(list) = &root.children[0] else {
+            panic!()
+        };
+        let Node::Stack(tmpl) = &*list.template else {
+            panic!()
+        };
+        assert!(!tmpl.id.is_empty());
+        let Node::Button(button) = &tmpl.children[2] else {
+            panic!()
+        };
+        assert!(!button.id.is_empty());
+    }
+
     #[test]
     fn load_validates_root_and_heals_missing_ids() {
         let dir = TempDir::new().unwrap();
@@ -299,6 +469,30 @@ mod tests {
         )
         .unwrap();
         assert!(load(&bad).is_err());
+
+        // And so must every list template.
+        let bad_tmpl = sketches_dir(root).join("bad-template.sketch.json");
+        std::fs::write(
+            &bad_tmpl,
+            r#"{ "id": "y", "name": "bad-template", "blueprintRef": null,
+  "root": { "kind": "stack", "id": "r",
+    "layout": { "direction": "col", "gap": 0,
+      "padding": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+      "mainAxis": "start", "crossAxis": "stretch" },
+    "sizing": { "width": { "mode": "hug" }, "height": { "mode": "hug" } },
+    "children": [
+      { "kind": "list", "id": "l", "dataKey": "rows",
+        "itemShape": [ { "name": "id", "type": "string", "isKey": true } ],
+        "sampleRows": [],
+        "template": { "kind": "text", "id": "t", "role": "body", "content": "x",
+          "sizing": { "width": { "mode": "hug" }, "height": { "mode": "hug" } } },
+        "sizing": { "width": { "mode": "fill" }, "height": { "mode": "hug" } } }
+    ]
+  },
+  "schemaVersion": 2 }"#,
+        )
+        .unwrap();
+        assert!(load(&bad_tmpl).is_err());
     }
 
     #[test]

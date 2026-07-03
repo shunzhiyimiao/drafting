@@ -1,6 +1,6 @@
 # Sketch — Design Spec (Drafting v2 subsystem)
 
-**Status:** Design locked across a six-spade pass (Spec → codegen → token → storage → editor → IR split). **Rev 2 (2026-07-02, review pass):** K3 hardened to single-codebase (no Rust port of the class core), `criterion.sketch_node` serialization pinned, generated-file landing + constitution deltas recorded, v1.5 loop seams made explicit (publisher + `artifacts_for`), canvas safelist note, literal-key handlers type, structure-assertion sensor parked, `schemaVersion`/`blueprintRef` edge policies. This is the authoritative spec for building Sketch; it supersedes chat discussion. Positioned as **layer 2** of the v2 four-layer model:
+**Status:** Design locked across a six-spade pass (Spec → codegen → token → storage → editor → IR split). **Rev 2 (2026-07-02, review pass):** K3 hardened to single-codebase (no Rust port of the class core), `criterion.sketch_node` serialization pinned, generated-file landing + constitution deltas recorded, v1.5 loop seams made explicit (publisher + `artifacts_for`), canvas safelist note, literal-key handlers type, structure-assertion sensor parked, `schemaVersion`/`blueprintRef` edge policies. **Rev 3 (2026-07-03, build pass):** `list` + data binding un-parked and shipped (schema v2 — §3.1, §4 repeat rules, §7 validate surface). This is the authoritative spec for building Sketch; it supersedes chat discussion. Positioned as **layer 2** of the v2 four-layer model:
 
 ```
 想清楚      画出来      装起来       看明白
@@ -9,7 +9,7 @@ Blueprint → Sketch  →  Patchboard → Atlas
 (prescriptive ─────────────────►)   (descriptive return edge)
 ```
 
-Reference implementation (TypeScript — and per the K3 corollary, the implementation that *ships*; Rust mirrors only the Spec data model): `emit.ts` / `to-element.ts` / `spec.ts` / `theme.ts` + `emit.test.ts` / `parity.test.ts`. Suite: **30 green** (27 codegen + 3 parity), **141 enumerated finite-alphabet points**.
+Reference implementation (TypeScript — and per the K3 corollary, the implementation that *ships*; Rust mirrors only the Spec data model): `packages/sketch-core` (`spec.ts` / `theme.ts` / `emit.ts` / `to-element.ts` / `validate.ts`). Suite as of Rev 3: **34 green** (codegen + parity incl. repeat + validate), **145 enumerated finite-alphabet points**.
 
 ---
 
@@ -75,7 +75,36 @@ type ColorToken  = "surface"|"raised"|"text"|"muted"|"primary"|"on-primary"|"bor
 type ButtonVariant = "primary"|"secondary"|"ghost";
 ```
 
-**Notes.** `card` is not a primitive — it's a `Container` with padding/border/bg. `list` is parked (needs data-binding/iteration in Blueprint). `text.role` *is* a `TypeToken` directly. Node ids are ULIDs; they survive move/edit and only die on real delete.
+**Notes.** `card` is not a primitive — it's a `Container` with padding/border/bg. `text.role` *is* a `TypeToken` directly. Node ids are ULIDs; they survive move/edit and only die on real delete.
+
+### 3.1 `list` + data binding (schema v2)
+
+`list` shipped in Rev 3 without waiting for Blueprint-side data modeling — the shape is declared **inline** on the node; a future spade may add a child-points-to-parent `blueprintRef` per `ItemField` (shape declared by/checked against Blueprint data). That seam is reserved in comments, not built.
+
+```typescript
+type Node = Container | ListP | Primitive;          // Rev 3: + list
+
+interface ItemField { name: string; type: "string"|"number"|"boolean"|"image"; isKey?: boolean }
+interface ListP {
+  kind: "list"; id: string;
+  itemShape: ItemField[];                            // inline, finite type alphabet
+  dataKey: string;                                   // component reads data.<dataKey>
+  template: Container;                               // the single-root repeated unit
+  sampleRows: Record<string, unknown>[];             // canvas sample data — IN the Spec
+  sizing: Sizing; style?: Style;
+}
+// Binding expressions — legal ONLY inside a template subtree:
+//   text.content / image.src : string | { bind: string }   // bind names an itemShape field
+```
+
+Load-bearing decisions:
+
+- **Boundary: the list only renders.** No fetching, no sorting, no filtering, no pagination — all of it is the user-owned sibling's job, delivered through the generated component's typed `data.<dataKey>` prop. Anything smarter than "map rows through a template" does not belong to Sketch.
+- **`sampleRows` live in the Spec** so the canvas stays a pure function of the file (K2 reproducibility: no runtime randomness/clock on the render path). They are design data, versioned like the rest of the tree.
+- **Item type name is derived, never stored:** `PascalCase(dataKey) + "Item"` (`inbox → InboxItem`). One fewer field to drift.
+- **`schemaVersion` bumped to 2.** v1 → v2 is the identity migration (v2 only *added* a kind); the loader migrates forward and heal-writes the version back through the existing id-healing channel.
+- **Semantic validation is sketch-core's, single-implementation** (`validate(sketch) → ValidationError[]`; Rust stays structural serde). Pinned rules: a bind must name a declared itemShape field; exactly one `isKey` per list; every sampleRow's keys ⊆ itemShape with type-matching values. Decidability prerequisites that ride along: binds outside a template are errors; nested lists are rejected (parked — a nested repeat would shadow the generated `item`); `dataKey`/field names must be JS identifiers and `dataKey` unique per sketch (they become `data.<dataKey>` / `item.<name>` and the derived type name). The editor Inspector surfaces the list; the fold stays total regardless (invalid Specs still fold deterministically and fail tsc downstream).
+- **In-spade parks (explicitly not built):** nested lists, empty-state slot, separators, virtual scrolling.
 
 **Edge policies.** `schemaVersion`: the loader migrates older versions forward on load and heal-writes the migrated form back (the same write-back channel as id healing); a version *newer* than the app understands opens read-only with a warning — never a rewrite. `blueprintRef` dangling mirrors the criterion rule (§6): a deleted feature leaves the sketch in a `dangling` state surfaced in the Inspector for a human to re-bind or null — signal, not error, never cascade.
 
@@ -88,7 +117,9 @@ Full map is in `emit.ts`; the load-bearing rules:
 - **Primitives:** text `role→h2/h3/p/span` + type-token classes; button base + `variant` bundle; input = `<label>` + `<span>` + `<input type>`; image = `<img src alt>`.
 - **Intent → id-keyed handler map, typed with literal keys.** The generated file exports `type SketchHandlers = { "<node-id>"?: () => void; … }` — a literal-key type over exactly the `intent≠none` nodes — and the component takes `handlers: SketchHandlers`; those nodes emit `onClick={handlers["<id>"]}`. Literal keys make stale wiring a **compile error**: delete/recreate a node and the sibling file's dead handler is caught by tsc — i.e. by the v1.5 TS compile gate, not by runtime silence. The Spec does **not** know who handlers connect to. In the MVP the consumer is the **human sibling file**; a Patchboard-side "wire adapter to handler" feature is a *reserved seam* (v2.x) — this is the boundary type, not a claim that Patchboard already plugs in.
 - **Determinism guarantees:** canonical class order + dedup + pinned Prettier (in the existing `codegen-server.cjs`) → byte-stable file. **Generated files are write-only** (`*.generated.tsx`); hand code + handler wiring live in a **sibling** file that imports it → codegen stays a pure function of the Spec; regeneration never touches human code; diffs are meaningful. Every element carries `data-sk={id}` (§6).
-- **Testing discipline:** exhaustive over the finite alphabet (141 points: sizing 72, align 16, gap 10, color 30, radius/type/variant 13) + a handful of goldens + parity. **Assert semantic class-groups, never full HTML strings** (kills brittleness / premature calcification).
+- **Testing discipline:** exhaustive over the finite alphabet (141 points: sizing 72, align 16, gap 10, color 30, radius/type/variant 13; Rev 3 adds the 4-point item-field-type map) + a handful of goldens + parity. **Assert semantic class-groups, never full HTML strings** (kills brittleness / premature calcification).
+- **Repeat (Rev 3).** The IR gains a `repeat` node on the list's wrapper (`flex flex-col` + sizing/style — no Layout by design, so no new classes; row spacing belongs to the template's own padding). Its single child is the template, folded ONCE. Both serializers project the same IR: `toJsxString` emits `{data.<dataKey>.map((item) => (…))}` with `key={item.<keyField>}` and `{item.<field>}` interpolations; `toElement` renders one instance per `sampleRows` row with values substituted. Every instance carries the template node's `data-sk` — **plural addressing**: selection/criteria address the template node, all instances light up. Parity extends: each canvas instance must equal the JSX template's `(tag, className, data-sk)` triples.
+- **Handler payload evolution (Rev 3).** A handler *inside* a template types as `(item: <X>Item) => void` and emits `onClick={() => handlers["<id>"]?.(item)}` — the row is the payload; outside templates the `() => void` form is unchanged. The component signature gains `data` **only when lists exist** (`{ data, handlers }`, `data: { <dataKey>: <X>Item[] }`, one key per distinct list) — a list-free Spec regenerates byte-identically to pre-Rev-3 output. K2 note: `ParentCtx` carries an optional enclosing-repeat marker that feeds handler typing ONLY; class emission still depends on exactly the `{direction, crossAxis}` 2-tuple, so the finite-alphabet decidability argument is untouched.
 
 ## 5. Token system
 

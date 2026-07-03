@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import {
+  collectLists,
   defaultTheme,
   pascalCase,
   toJsxString,
@@ -56,11 +57,23 @@ export function generateSketch(params: GenerateSketchParams): string[] {
   );
 
   // --- the sibling: generated once, then the user's wiring surface ---
+  // Lists ONLY render; the sibling owns the data: fetch/sort/filter/paginate
+  // here (or above) and pass real rows through the `data` prop the generated
+  // component types per-list.
+  const lists = collectLists(sketch.root);
+  const seen = new Set<string>();
+  const dataKeys = lists
+    .map((l) => l.dataKey)
+    .filter((k) => !seen.has(k) && (seen.add(k), true));
+  const dataStub = dataKeys.length > 0 ? ` data={{ ${dataKeys.map((k) => `${k}: []`).join(", ")} }}` : "";
   write(
     `packages/ui/src/${slug}.tsx`,
     [
       `// ${slug}.tsx — yours. Wire node intents to real behavior here; the`,
       `// generated half never touches this file and regenerating never will.`,
+      ...(dataKeys.length > 0
+        ? [`// Lists only render — supply real rows via the data prop below.`]
+        : []),
       `import { ${component} as Generated, type SketchHandlers } from "./generated/${slug}.generated";`,
       ``,
       `const handlers: SketchHandlers = {`,
@@ -68,7 +81,7 @@ export function generateSketch(params: GenerateSketchParams): string[] {
       `};`,
       ``,
       `export function ${component}() {`,
-      `  return <Generated handlers={handlers} />;`,
+      `  return <Generated${dataStub} handlers={handlers} />;`,
       `}`,
       ``,
     ].join("\n"),

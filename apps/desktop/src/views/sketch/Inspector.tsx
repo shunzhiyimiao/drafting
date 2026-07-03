@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Link2, Link2Off } from "lucide-react";
+import { AlertTriangle, Link2, Link2Off, Plus, Trash2 } from "lucide-react";
 import {
   BUTTON_VARIANTS,
   COLOR_TOKENS,
   CROSS_AXES,
+  ITEM_FIELD_TYPES,
   MAIN_AXES,
   RADIUS_TOKENS,
   SPACING_STEPS,
   TYPE_TOKENS,
+  isBind,
+  validate,
+  type BindableString,
   type ColorToken,
+  type ItemFieldType,
+  type ListP,
   type RadiusToken,
   type Size,
   type SketchNode,
   type SpacingStep,
 } from "@drafting/sketch-core";
-import { allNodeIds, findNode, useSketchStore } from "../../stores/sketch-store";
+import { allNodeIds, findEnclosingList, findNode, useSketchStore } from "../../stores/sketch-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { getBlueprint, updateBlueprintStructured } from "../../lib/blueprint-api";
 import type { Blueprint } from "../../types/blueprint-types";
@@ -35,6 +41,7 @@ export function SketchInspector() {
   return (
     <div className="p-3 flex flex-col gap-4">
       <SketchSection />
+      <ProblemsSection />
       {node && (
         <>
           <NodeSection node={node} />
@@ -43,6 +50,30 @@ export function SketchInspector() {
       )}
       <DanglingSection />
     </div>
+  );
+}
+
+/** sketch-core's validate() is the single semantic gate (Rust stays
+ *  structural); the Inspector is where its decidable error list surfaces. */
+function ProblemsSection() {
+  const active = useSketchStore((s) => s.active)!;
+  const selectNode = useSketchStore((s) => s.selectNode);
+  const errors = validate(active);
+  if (errors.length === 0) return null;
+  return (
+    <Section title={`problems (${errors.length})`}>
+      {errors.map((e, i) => (
+        <button
+          key={i}
+          onClick={() => selectNode(e.nodeId)}
+          className="flex items-start gap-1.5 text-left"
+          title="Select the offending node"
+        >
+          <AlertTriangle size={11} className="text-error shrink-0 mt-0.5" />
+          <span className="text-[10px] text-text-secondary leading-snug">{e.message}</span>
+        </button>
+      ))}
+    </Section>
   );
 }
 
@@ -168,10 +199,68 @@ function SketchSection() {
   );
 }
 
+/** literal | bind switch for text.content / image.src. The bind branch only
+ *  exists inside a list template (`list` non-null) — a dropdown over the
+ *  declared itemShape fields, so the control can't produce an undeclared
+ *  bind. Outside a template it stays a plain literal input. */
+function BindableControl({
+  value,
+  list,
+  onChange,
+}: {
+  value: BindableString;
+  list: ListP | null;
+  onChange: (v: BindableString) => void;
+}) {
+  const bound = isBind(value);
+  if (!list) {
+    return (
+      <input
+        className={inputCls}
+        value={bound ? `{${value.bind}}` : value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  return (
+    <div className="flex gap-1">
+      <Dropdown
+        className="w-20 shrink-0"
+        value={bound ? "bind" : "literal"}
+        options={[
+          { value: "literal", label: "literal" },
+          { value: "bind", label: "bind" },
+        ]}
+        onChange={(v) => {
+          if (v === "bind" && !bound) onChange({ bind: list.itemShape[0]?.name ?? "" });
+          if (v === "literal" && bound) onChange("");
+        }}
+      />
+      {bound ? (
+        <Dropdown
+          className="flex-1"
+          value={value.bind}
+          options={list.itemShape.map((f) => ({ value: f.name, label: f.name }))}
+          onChange={(v) => onChange({ bind: v })}
+        />
+      ) : (
+        <input
+          className={inputCls}
+          value={value as string}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
 function NodeSection({ node }: { node: SketchNode }) {
+  const active = useSketchStore((s) => s.active)!;
   const updateNode = useSketchStore((s) => s.updateNode);
   const sketches = useSketchStore((s) => s.sketches);
   const up = (mutate: (n: SketchNode) => void) => updateNode(node.id, mutate);
+  // Binds only resolve inside a list template — the control follows.
+  const enclosingList = findEnclosingList(active.root, node.id);
 
   return (
     <>
@@ -243,6 +332,8 @@ function NodeSection({ node }: { node: SketchNode }) {
         </Section>
       )}
 
+      {node.kind === "list" && <ListSection node={node} />}
+
       {node.kind === "text" && (
         <Section title="text">
           <Row label="role">
@@ -253,10 +344,10 @@ function NodeSection({ node }: { node: SketchNode }) {
             />
           </Row>
           <Row label="content">
-            <input
-              className={inputCls}
+            <BindableControl
               value={node.content}
-              onChange={(e) => up((n) => n.kind === "text" && (n.content = e.target.value))}
+              list={enclosingList}
+              onChange={(v) => up((n) => n.kind === "text" && (n.content = v))}
             />
           </Row>
         </Section>
@@ -349,10 +440,10 @@ function NodeSection({ node }: { node: SketchNode }) {
       {node.kind === "image" && (
         <Section title="image">
           <Row label="src">
-            <input
-              className={inputCls}
+            <BindableControl
               value={node.src}
-              onChange={(e) => up((n) => n.kind === "image" && (n.src = e.target.value))}
+              list={enclosingList}
+              onChange={(v) => up((n) => n.kind === "image" && (n.src = v))}
             />
           </Row>
           <Row label="alt">
@@ -425,6 +516,194 @@ function NodeSection({ node }: { node: SketchNode }) {
             onChange={(v) => up((n) => (n.style = { ...(n.style ?? {}), radius: v }))}
           />
         </Row>
+      </Section>
+    </>
+  );
+}
+
+// ----------------------------------------------------------------- list --
+
+/** The list's data surface: dataKey, the inline itemShape (add/remove/rename
+ *  fields, the four types, single isKey), and the sampleRows table the canvas
+ *  renders from. Renaming a field follows through sampleRows keys and binds —
+ *  a rename must never silently orphan what points at it. */
+function ListSection({ node }: { node: ListP }) {
+  const updateNode = useSketchStore((s) => s.updateNode);
+  const [newField, setNewField] = useState("");
+  const up = (mutate: (l: ListP) => void) =>
+    updateNode(node.id, (n) => {
+      if (n.kind === "list") mutate(n);
+    });
+
+  const renameField = (from: string, to: string) =>
+    up((l) => {
+      const field = l.itemShape.find((f) => f.name === from);
+      if (!field) return;
+      field.name = to;
+      for (const row of l.sampleRows) {
+        if (from in row) {
+          row[to] = row[from];
+          delete row[from];
+        }
+      }
+      const walk = (n: SketchNode) => {
+        if (n.kind === "stack") n.children.forEach(walk);
+        else if (n.kind === "list") walk(n.template);
+        else if (n.kind === "text" && isBind(n.content) && n.content.bind === from)
+          n.content = { bind: to };
+        else if (n.kind === "image" && isBind(n.src) && n.src.bind === from)
+          n.src = { bind: to };
+      };
+      walk(l.template);
+    });
+
+  return (
+    <>
+      <Section title="list · data">
+        <Row label="dataKey">
+          <input
+            className={inputCls}
+            value={node.dataKey}
+            onChange={(e) => up((l) => (l.dataKey = e.target.value))}
+          />
+        </Row>
+      </Section>
+
+      <Section title="item shape">
+        {node.itemShape.map((f, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <input
+              className={`${inputCls} flex-1 min-w-0`}
+              value={f.name}
+              onChange={(e) => renameField(f.name, e.target.value)}
+            />
+            <Dropdown
+              className="w-24 shrink-0"
+              value={f.type}
+              options={ITEM_FIELD_TYPES.map((t) => ({ value: t, label: t }))}
+              onChange={(v) => up((l) => (l.itemShape[i].type = v as ItemFieldType))}
+            />
+            <input
+              type="radio"
+              name={`isKey-${node.id}`}
+              checked={f.isKey === true}
+              title="key field (React key of each row)"
+              onChange={() =>
+                up((l) =>
+                  l.itemShape.forEach((g, j) => {
+                    if (j === i) g.isKey = true;
+                    else delete g.isKey;
+                  }),
+                )
+              }
+              className="shrink-0"
+            />
+            <button
+              onClick={() =>
+                up((l) => {
+                  const name = l.itemShape[i].name;
+                  l.itemShape.splice(i, 1);
+                  for (const row of l.sampleRows) delete row[name];
+                })
+              }
+              title="Remove field (binds pointing at it go red, never silently cleared)"
+              className="shrink-0 text-text-muted hover:text-error"
+            >
+              <Trash2 size={11} />
+            </button>
+          </div>
+        ))}
+        <div className="flex items-center gap-1">
+          <input
+            className={`${inputCls} flex-1 min-w-0`}
+            placeholder="new field…"
+            value={newField}
+            onChange={(e) => setNewField(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newField.trim()) {
+                up((l) => l.itemShape.push({ name: newField.trim(), type: "string" }));
+                setNewField("");
+              }
+            }}
+          />
+          <button
+            onClick={() => {
+              if (!newField.trim()) return;
+              up((l) => l.itemShape.push({ name: newField.trim(), type: "string" }));
+              setNewField("");
+            }}
+            className="shrink-0 text-text-muted hover:text-accent"
+            title="Add field"
+          >
+            <Plus size={12} />
+          </button>
+        </div>
+      </Section>
+
+      <Section title={`sample rows (${node.sampleRows.length})`}>
+        {node.sampleRows.map((row, ri) => (
+          <div key={ri} className="flex items-start gap-1">
+            <div className="flex-1 min-w-0 flex flex-col gap-1">
+              {node.itemShape.map((f) => (
+                <Row key={f.name} label={f.name}>
+                  {f.type === "boolean" ? (
+                    <input
+                      type="checkbox"
+                      checked={row[f.name] === true}
+                      onChange={(e) =>
+                        up((l) => (l.sampleRows[ri][f.name] = e.target.checked))
+                      }
+                    />
+                  ) : f.type === "number" ? (
+                    <input
+                      type="number"
+                      className={inputCls}
+                      value={typeof row[f.name] === "number" ? (row[f.name] as number) : ""}
+                      onChange={(e) =>
+                        up((l) => (l.sampleRows[ri][f.name] = Number(e.target.value) || 0))
+                      }
+                    />
+                  ) : (
+                    <input
+                      className={inputCls}
+                      value={typeof row[f.name] === "string" ? (row[f.name] as string) : ""}
+                      onChange={(e) => up((l) => (l.sampleRows[ri][f.name] = e.target.value))}
+                    />
+                  )}
+                </Row>
+              ))}
+            </div>
+            <button
+              onClick={() => up((l) => l.sampleRows.splice(ri, 1))}
+              title="Remove row"
+              className="shrink-0 mt-1.5 text-text-muted hover:text-error"
+            >
+              <Trash2 size={11} />
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={() =>
+            up((l) => {
+              const row: Record<string, unknown> = {};
+              for (const f of l.itemShape) {
+                row[f.name] =
+                  f.type === "number"
+                    ? 0
+                    : f.type === "boolean"
+                      ? false
+                      : f.isKey
+                        ? String(l.sampleRows.length + 1)
+                        : "";
+              }
+              l.sampleRows.push(row);
+            })
+          }
+          className="flex items-center gap-1 text-[10px] text-accent hover:text-accent-hover"
+        >
+          <Plus size={11} />
+          add row
+        </button>
       </Section>
     </>
   );

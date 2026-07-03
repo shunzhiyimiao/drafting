@@ -4,6 +4,7 @@ import type {
   Container,
   ImageP,
   InputP,
+  ListP,
   Sketch,
   SketchNode,
   TextP,
@@ -49,7 +50,10 @@ interface SketchState {
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Find a node and its parent container in the tree. */
+/** Find a node and its parent container in the tree. A list's template
+ *  subtree is traversed too; the template itself reports a null parent —
+ *  it is the list's required single root, so it can't be moved or deleted
+ *  (its children behave like any container's). */
 export function findNode(
   root: SketchNode,
   nodeId: string,
@@ -62,6 +66,9 @@ export function findNode(
       if (hit) return hit;
     }
   }
+  if (root.kind === "list") {
+    return findNode(root.template, nodeId, null);
+  }
   return null;
 }
 
@@ -70,7 +77,28 @@ export function allNodeIds(root: SketchNode, out: string[] = []): string[] {
   if (root.kind === "stack") {
     for (const child of root.children) allNodeIds(child, out);
   }
+  if (root.kind === "list") allNodeIds(root.template, out);
   return out;
+}
+
+/** The list whose template subtree contains `nodeId` (the list node itself
+ *  doesn't count) — the Inspector's "can this bind?" question. */
+export function findEnclosingList(root: SketchNode, nodeId: string): ListP | null {
+  if (root.kind === "stack") {
+    for (const child of root.children) {
+      const hit = findEnclosingList(child, nodeId);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (root.kind === "list") {
+    // Innermost list wins (nested lists are a validate() error, but the
+    // Inspector should still point at the nearest shape while it's red).
+    const inner = findEnclosingList(root.template, nodeId);
+    if (inner) return inner;
+    return findNode(root.template, nodeId) ? root : null;
+  }
+  return null;
 }
 
 function defaultNode(kind: NodeKind): SketchNode {
@@ -125,6 +153,45 @@ function defaultNode(kind: NodeKind): SketchNode {
         alt: "image",
         sizing: { width: { mode: "fixed", px: 96 }, height: { mode: "fixed", px: 96 } },
       } satisfies ImageP;
+    case "list":
+      // A ready-to-run list: keyed shape, one bound text in the template,
+      // sample rows so the canvas shows something immediately.
+      return {
+        kind: "list",
+        id,
+        dataKey: "items",
+        itemShape: [
+          { name: "id", type: "string", isKey: true },
+          { name: "title", type: "string" },
+        ],
+        sampleRows: [
+          { id: "1", title: "First item" },
+          { id: "2", title: "Second item" },
+          { id: "3", title: "Third item" },
+        ],
+        template: {
+          kind: "stack",
+          id: ulid(),
+          layout: {
+            direction: "row",
+            gap: 2,
+            padding: { top: 2, right: 2, bottom: 2, left: 2 },
+            mainAxis: "start",
+            crossAxis: "center",
+          },
+          sizing: { width: fill, height: hug },
+          children: [
+            {
+              kind: "text",
+              id: ulid(),
+              role: "body",
+              content: { bind: "title" },
+              sizing: { width: fill, height: hug },
+            },
+          ],
+        },
+        sizing: { width: fill, height: hug },
+      } satisfies ListP;
   }
 }
 
