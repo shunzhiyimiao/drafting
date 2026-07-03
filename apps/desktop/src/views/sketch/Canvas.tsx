@@ -29,8 +29,12 @@ const DRAG_THRESHOLD = 4;
 interface ActiveDrag {
   /** Moving an existing node, or dropping a new palette kind. */
   source: { nodeId: string; exclude: Set<string> } | { paletteKind: NodeKind };
+  /** What the ghost chip says while following the cursor. */
+  label: string;
   boxes: LayoutBox[];
   insertion: Insertion | null;
+  /** Cursor position relative to the surface — drives the ghost chip. */
+  pointer: { x: number; y: number };
 }
 
 /** The stack containers of the Spec tree (drop targets), incl. templates. */
@@ -136,15 +140,19 @@ export function SketchCanvas() {
           }
           current = {
             source: { nodeId: pending.nodeId, exclude: new Set(allNodeIds(hit.node)) },
+            label: hit.node.kind,
             boxes: measureBoxes(surface, active.root),
             insertion: null,
+            pointer: surfacePoint(e),
           };
           pendingRef.current = null;
         } else if (paletteDrag) {
           current = {
             source: { paletteKind: paletteDrag },
+            label: paletteDrag,
             boxes: measureBoxes(surface, active.root),
             insertion: null,
+            pointer: surfacePoint(e),
           };
         } else {
           return;
@@ -154,7 +162,7 @@ export function SketchCanvas() {
       const point = surfacePoint(e);
       const exclude = "exclude" in current.source ? current.source.exclude : undefined;
       const insertion = computeInsertion(point, current.boxes, exclude);
-      const next = { ...current, insertion };
+      const next = { ...current, insertion, pointer: point };
       // Keep the ref current synchronously — move events can arrive before
       // React commits, and re-measuring boxes per event would be wasteful.
       dragRef.current = next;
@@ -201,10 +209,16 @@ export function SketchCanvas() {
           ? `[data-sk="${selectedNodeId}"] { outline: 2px solid #3b82f6; outline-offset: 1px; }`
           : ""}
         {`[data-sk] { cursor: default; }`}
+        {drag ? `* { cursor: grabbing !important; }` : ""}
       </style>
+      {/* The surface is a flex column so the root's ROOT_CTX premise holds
+          on the canvas: its fill sizing (flex-1/self-stretch) actually
+          stretches, the root's box covers the whole sheet, and dropping on
+          the visually-empty area IS dropping into the root container — the
+          tree's own insertion rule, not a special case. */}
       <div
         ref={surfaceRef}
-        className="relative mx-auto bg-white text-slate-900 rounded-lg shadow-lg min-h-[420px] max-w-3xl overflow-hidden"
+        className="relative mx-auto flex flex-col bg-white text-slate-900 rounded-lg shadow-lg min-h-[420px] max-w-3xl overflow-hidden"
         onMouseDownCapture={(e) => {
           // Canvas interactions select, never activate (inputs don't focus,
           // buttons don't fire — the sketch is a drawing, not a form).
@@ -242,6 +256,16 @@ export function SketchCanvas() {
               height: ringBox.rect.height,
             }}
           />
+        )}
+        {/* Ghost chip — the "you are dragging X" feedback that follows the
+            cursor. Purely visual; the drop decision is the indicator's. */}
+        {drag && (
+          <div
+            className="absolute z-20 pointer-events-none px-1.5 py-0.5 rounded bg-slate-900/80 text-white text-[10px] leading-tight shadow"
+            style={{ left: drag.pointer.x + 10, top: drag.pointer.y + 12 }}
+          >
+            {drag.label}
+          </div>
         )}
       </div>
     </div>
