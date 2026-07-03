@@ -149,13 +149,21 @@ export function computeInsertion(
 }
 
 /**
- * The full drop decision: gap insertion, plus the side-drop wrap. A point in
- * the outer SIDE_ZONE of a LEAF child's cross axis (left/right in a col
- * parent, top/bottom in a row parent) means "place the dragged node beside
- * this one" → wrap exactly {target, dragged} in one perpendicular stack.
- * Containers never trigger it (a point inside a non-excluded container makes
- * that container the deeper insertion target instead), and the dragged
- * subtree can't be its own wrap partner.
+ * The full drop decision: gap insertion, plus the side-drop wrap — "place
+ * the dragged node beside this one" → wrap exactly {target, dragged} in one
+ * perpendicular stack. Two pointer geometries mean it:
+ *
+ * - ON a leaf child, in the outer SIDE_ZONE of its cross axis (left/right in
+ *   a col parent, top/bottom in a row parent). Containers can't be hit this
+ *   way — a point inside a non-excluded container routes to that deeper
+ *   insertion target instead.
+ * - BESIDE a child: within its main-axis extent but outside its box — the
+ *   empty strip a narrow child (fixed-width image, hug button) leaves on its
+ *   flank belongs to that child's pairing gesture. Unambiguous because
+ *   siblings never overlap on the parent's main axis.
+ *
+ * The dragged subtree never wraps with itself, and the middle band of a
+ * child's own box keeps the ordinary gap semantics.
  */
 export function computeDrop(
   point: Point,
@@ -167,23 +175,50 @@ export function computeDrop(
   if (!target) return null;
 
   const sidesAreHorizontal = target.container!.direction === "col"; // cross axis
+  const direction = sidesAreHorizontal ? "row" : "col";
+  const wrap = (child: LayoutBox, side: "before" | "after"): DropPlan => ({
+    kind: "wrap",
+    targetNodeId: child.nodeId,
+    targetBoxId: child.boxId,
+    side,
+    direction,
+  });
+
+  let beside: DropPlan | null = null;
   for (const childId of target.childBoxIds) {
     const child = byId.get(childId);
-    if (!child || !contains(child.rect, point)) continue;
-    // Only leaves wrap; the dragged subtree never wraps with itself.
-    if (child.container || excludeNodeIds?.has(child.nodeId)) break;
-    const [lo, size, p] = sidesAreHorizontal
-      ? [child.rect.x, child.rect.width, point.x]
-      : [child.rect.y, child.rect.height, point.y];
-    const direction = sidesAreHorizontal ? "row" : "col";
-    if (p < lo + size * SIDE_ZONE) {
-      return { kind: "wrap", targetNodeId: child.nodeId, targetBoxId: child.boxId, side: "before", direction };
+    if (!child) continue;
+    const excluded = excludeNodeIds?.has(child.nodeId) ?? false;
+
+    if (contains(child.rect, point)) {
+      // Only leaves wrap from inside; the dragged subtree never pairs with
+      // itself. Anything else inside a child's box is gap territory.
+      if (child.container || excluded) {
+        beside = null;
+        break;
+      }
+      const [lo, size, p] = sidesAreHorizontal
+        ? [child.rect.x, child.rect.width, point.x]
+        : [child.rect.y, child.rect.height, point.y];
+      if (p < lo + size * SIDE_ZONE) return wrap(child, "before");
+      if (p > lo + size * (1 - SIDE_ZONE)) return wrap(child, "after");
+      beside = null;
+      break; // middle band → ordinary gap semantics
     }
-    if (p > lo + size * (1 - SIDE_ZONE)) {
-      return { kind: "wrap", targetNodeId: child.nodeId, targetBoxId: child.boxId, side: "after", direction };
+
+    if (!beside && !excluded) {
+      // The flank strip: inside the child's main-axis extent, outside its
+      // box on the cross axis.
+      const inBand = sidesAreHorizontal
+        ? point.y >= child.rect.y && point.y <= child.rect.y + child.rect.height
+        : point.x >= child.rect.x && point.x <= child.rect.x + child.rect.width;
+      if (inBand) {
+        const before = sidesAreHorizontal ? point.x < child.rect.x : point.y < child.rect.y;
+        beside = wrap(child, before ? "before" : "after");
+      }
     }
-    break; // middle band → ordinary gap semantics
   }
+  if (beside) return beside;
 
   return {
     kind: "insert",

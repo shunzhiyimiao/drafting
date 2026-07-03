@@ -275,6 +275,60 @@ test("side-drop: the dragged subtree and containers never become wrap targets", 
   assert.deepEqual(intoInner, { kind: "insert", containerId: "inner", index: 0, targetBoxId: "inner" });
 });
 
+test("side-drop: the flank strip beside a narrow leaf pairs with it", () => {
+  // A 96px image-like leaf centered in a 200px col — big empty flanks.
+  const boxes: LayoutBox[] = [
+    {
+      boxId: "root",
+      nodeId: "root",
+      rect: { x: 0, y: 0, width: 200, height: 120 },
+      container: { direction: "col" },
+      parentBoxId: null,
+      childBoxIds: ["img"],
+    },
+    { boxId: "img", nodeId: "img", rect: { x: 52, y: 10, width: 96, height: 40 }, parentBoxId: "root", childBoxIds: [] },
+  ];
+  // Right flank (outside the box, same y band) → pair after.
+  assert.deepEqual(computeDrop({ x: 180, y: 30 }, boxes), {
+    kind: "wrap",
+    targetNodeId: "img",
+    targetBoxId: "img",
+    side: "after",
+    direction: "row",
+  });
+  // Left flank → pair before.
+  const left = computeDrop({ x: 20, y: 30 }, boxes);
+  assert.ok(left?.kind === "wrap" && left.side === "before", "left flank pairs before");
+  // Below the band → ordinary gap insert.
+  assert.equal(computeDrop({ x: 180, y: 80 }, boxes)?.kind, "insert");
+  // The dragged node's own flank never pairs with itself.
+  assert.equal(computeDrop({ x: 180, y: 30 }, boxes, new Set(["img"]))?.kind, "insert");
+});
+
+test("side-drop: flank strips work symmetrically in a row parent", () => {
+  const boxes: LayoutBox[] = [
+    {
+      boxId: "row",
+      nodeId: "row",
+      rect: { x: 0, y: 0, width: 200, height: 120 },
+      container: { direction: "row" },
+      parentBoxId: null,
+      childBoxIds: ["chip"],
+    },
+    { boxId: "chip", nodeId: "chip", rect: { x: 20, y: 40, width: 60, height: 30 }, parentBoxId: "row", childBoxIds: [] },
+  ];
+  // Below the short chip, inside its x band → pair after in a col wrapper.
+  assert.deepEqual(computeDrop({ x: 50, y: 100 }, boxes), {
+    kind: "wrap",
+    targetNodeId: "chip",
+    targetBoxId: "chip",
+    side: "after",
+    direction: "col",
+  });
+  // Beside it on the row's main axis (outside the x band) → gap insert.
+  assert.equal(computeDrop({ x: 150, y: 100 }, boxes)?.kind, "insert");
+});
+
 test("side-drop indicator: the joined half as a zone; insert plans stay lines", () => {
   const boxes = colWithLeaf();
   const wrap = computeDrop({ x: 170, y: 30 }, boxes)!;
