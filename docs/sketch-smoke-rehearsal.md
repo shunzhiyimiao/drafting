@@ -42,6 +42,8 @@
 | B：落点降级 | 非 monorepo 时生成进宿主 `src/ui/generated/` | 改约定本身；摩擦 #6 的三处硬编码要同步改（codegen-server、bindings.rs、storage.rs delete），面大 |
 | C：显式拒绝 | 无 workspace 时报错要求先建 monorepo | 最安全但对 Indie Hacker 单项目场景不友好 |
 
+**拍板（2026-07-04）：A，已实施** —— 摩擦场景原地回放验收：撤掉排练时手工补的 base、删旧 scaffold、重新生成后 tsc 直接绿。顺带一条实证：回放时 tsc 先抓到的是排练误拖造成的绑定逃逸（`{item.subject}` 在 map 外 → TS2304）——validator 在上游、tsc 在下游各自如约拦截，fold 保持 total 的设计成立。
+
 ## 排练执行细节（可复现）
 
 - headless codegen：`printf '<json-rpc>' | node packages/codegen-server/dist/codegen-server.cjs`，方法 `generateSketch`，与 Rust `CodegenProxy::call` 同协议。

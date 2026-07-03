@@ -66,6 +66,10 @@ export function generateSketch(params: GenerateSketchParams): string[] {
     .map((l) => l.dataKey)
     .filter((k) => !seen.has(k) && (seen.add(k), true));
   const dataStub = dataKeys.length > 0 ? ` data={{ ${dataKeys.map((k) => `${k}: []`).join(", ")} }}` : "";
+  // Off-workspace hosts get the wiring instructions in the scaffold itself —
+  // the package name resolves nowhere until they act (smoke-rehearsal
+  // decision A: the landing convention is unchanged; the scaffold adapts).
+  const isWorkspace = fs.existsSync(path.join(projectRoot, "pnpm-workspace.yaml"));
   write(
     `packages/ui/src/${slug}.tsx`,
     [
@@ -74,6 +78,14 @@ export function generateSketch(params: GenerateSketchParams): string[] {
       ...(dataKeys.length > 0
         ? [`// Lists only render — supply real rows via the data prop below.`]
         : []),
+      ...(isWorkspace
+        ? []
+        : [
+            `// NOTE: this project is not a pnpm workspace, so "${scope}/ui" is not`,
+            `// linked into your app. Import this file by relative path, or add a`,
+            `// pnpm-workspace.yaml with packages: ["packages/*"] to use the package`,
+            `// name. Install its deps once: npm install --prefix packages/ui`,
+          ]),
       `import { ${component} as Generated, type SketchHandlers } from "./generated/${slug}.generated";`,
       ``,
       `const handlers: SketchHandlers = {`,
@@ -101,13 +113,34 @@ export function generateSketch(params: GenerateSketchParams): string[] {
     }),
     false,
   );
+  // Monorepo hosts extend their base config; a host without one gets a
+  // self-contained inline config instead — extending a file that doesn't
+  // exist is an instant TS5083 (smoke-rehearsal friction #1, decision A).
+  const hasBaseTsconfig = fs.existsSync(path.join(projectRoot, "tsconfig.base.json"));
   write(
     "packages/ui/tsconfig.json",
-    json({
-      extends: "../../tsconfig.base.json",
-      compilerOptions: { jsx: "react-jsx" },
-      include: ["src"],
-    }),
+    json(
+      hasBaseTsconfig
+        ? {
+            extends: "../../tsconfig.base.json",
+            compilerOptions: { jsx: "react-jsx" },
+            include: ["src"],
+          }
+        : {
+            compilerOptions: {
+              target: "ES2022",
+              lib: ["ES2022", "DOM", "DOM.Iterable"],
+              module: "ESNext",
+              moduleResolution: "bundler",
+              strict: true,
+              skipLibCheck: true,
+              isolatedModules: true,
+              noEmit: true,
+              jsx: "react-jsx",
+            },
+            include: ["src"],
+          },
+    ),
     false,
   );
 

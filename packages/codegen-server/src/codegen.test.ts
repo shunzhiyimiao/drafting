@@ -506,14 +506,20 @@ test("sketch: emits the generated half, sibling, ui scaffolding and tokens", () 
       /import \{ LoginScreen as Generated, type SketchHandlers \} from "\.\/generated\/login-screen\.generated";/,
     );
     assert.match(sibling, /export function LoginScreen\(\)/);
+    // No workspace at the root → the sibling carries the wiring instructions.
+    assert.match(sibling, /not a pnpm workspace/);
 
     // No patchboard config → the ui package lands under the default scope.
     const pkg = JSON.parse(read(root, "packages/ui/package.json"));
     assert.equal(pkg.name, "@app/ui");
 
-    // tsconfig turns on the jsx transform the generated .tsx needs.
+    // tsconfig turns on the jsx transform the generated .tsx needs. This
+    // root has no tsconfig.base.json → the scaffold self-heals to a
+    // standalone inline config instead of extending a missing file.
     const tsconfig = JSON.parse(read(root, "packages/ui/tsconfig.json"));
+    assert.equal(tsconfig.extends, undefined);
     assert.equal(tsconfig.compilerOptions.jsx, "react-jsx");
+    assert.equal(tsconfig.compilerOptions.strict, true);
 
     // tokens.default.json is a complete offline-readable binding table.
     const tokens = JSON.parse(read(root, "tokens.default.json"));
@@ -625,6 +631,23 @@ test("sketch: a list emits map/key/item type, and the sibling gets a data stub",
     // user wires real data (lists only render; data is the sibling's job).
     const sibling = read(root, "packages/ui/src/inbox.tsx");
     assert.match(sibling, /<Generated data=\{\{ inbox: \[\] \}\} handlers=\{handlers\} \/>/);
+  });
+});
+
+test("sketch: a monorepo host keeps the extends-based tsconfig and a bare sibling", () => {
+  withTmpDir((root) => {
+    // A workspace-shaped host: base config + pnpm workspace manifest.
+    fs.writeFileSync(path.join(root, "tsconfig.base.json"), "{}\n");
+    fs.writeFileSync(path.join(root, "pnpm-workspace.yaml"), 'packages:\n  - "packages/*"\n');
+    const rel = seedSketch(root);
+    generateSketch({ projectRoot: root, sketchPath: rel });
+
+    const tsconfig = JSON.parse(read(root, "packages/ui/tsconfig.json"));
+    assert.equal(tsconfig.extends, "../../tsconfig.base.json");
+    assert.equal(tsconfig.compilerOptions.strict, undefined, "base owns the shared options");
+
+    const sibling = read(root, "packages/ui/src/login-screen.tsx");
+    assert.ok(!sibling.includes("not a pnpm workspace"), "no wiring note on a workspace host");
   });
 });
 
