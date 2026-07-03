@@ -8,6 +8,7 @@
     "build": "tsc && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "test": "tsx --test src/views/sketch/insertion.test.ts",
     "gen:sketch-safelist": "pnpm --filter @drafting/sketch-core gen-safelist ../../apps/desktop/src/lib/sketch-safelist.generated.ts"
   },
   "dependencies": {
@@ -29,11 +30,13 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
     "@tauri-apps/cli": "^2",
+    "@types/node": "^22.0.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "cross-env": "^7.0.3",
     "tailwindcss": "^4.2.2",
+    "tsx": "^4.19.4",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
   }

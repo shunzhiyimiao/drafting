@@ -1,6 +1,6 @@
 # Sketch — Design Spec (Drafting v2 subsystem)
 
-**Status:** Design locked across a six-spade pass (Spec → codegen → token → storage → editor → IR split). **Rev 2 (2026-07-02, review pass):** K3 hardened to single-codebase (no Rust port of the class core), `criterion.sketch_node` serialization pinned, generated-file landing + constitution deltas recorded, v1.5 loop seams made explicit (publisher + `artifacts_for`), canvas safelist note, literal-key handlers type, structure-assertion sensor parked, `schemaVersion`/`blueprintRef` edge policies. **Rev 3 (2026-07-03, build pass):** `list` + data binding un-parked and shipped (schema v2 — §3.1, §4 repeat rules, §7 validate surface). This is the authoritative spec for building Sketch; it supersedes chat discussion. Positioned as **layer 2** of the v2 four-layer model:
+**Status:** Design locked across a six-spade pass (Spec → codegen → token → storage → editor → IR split). **Rev 2 (2026-07-02, review pass):** K3 hardened to single-codebase (no Rust port of the class core), `criterion.sketch_node` serialization pinned, generated-file landing + constitution deltas recorded, v1.5 loop seams made explicit (publisher + `artifacts_for`), canvas safelist note, literal-key handlers type, structure-assertion sensor parked, `schemaVersion`/`blueprintRef` edge policies. **Rev 3 (2026-07-03, two-spade build pass):** `list` + data binding un-parked and shipped (schema v2 — §3.1, §4 repeat rules, §7 validate surface); free-drag un-parked at a narrowed scope (drag expresses tree ops, never infers structure — §7.1). This is the authoritative spec for building Sketch; it supersedes chat discussion. Positioned as **layer 2** of the v2 four-layer model:
 
 ```
 想清楚      画出来      装起来       看明白
@@ -168,6 +168,14 @@ Full map is in `emit.ts`; the load-bearing rules:
 - **Canvas Tailwind safelist (implementation note):** the canvas runs `toElement` inside Drafting's own webview, composing classes at *runtime* — invisible to Tailwind's static scan. K2 already contains the fix: the emitted class universe is finite, so Drafting's tailwind config **generates its safelist by enumerating the alphabet** (a build-time script over the same tables the exhaustive tests enumerate). User projects are unaffected — generated files carry literal class strings.
 - **Editor keystone = the IR split (K3):** canvas and ship can't drift.
 
+### 7.1 Free-drag, narrowed (Rev 3)
+
+The parked §9.1 interaction shipped at a deliberately smaller scope. **Scope law: drag only *expresses* tree operations; it never *infers* structure.**
+
+- **In:** palette → canvas insertion; existing-node drag for same-parent reorder and cross-container reparent — one indicator (nearest gap on the target's main axis, deepest stack container under the pointer wins); landing on a primitive means "its parent container, at that child's slot"; an explicit **Wrap in Stack** command on the selection replaces every auto-wrap heuristic.
+- **Out (delete on sight):** dropping on empty canvas creating structure (it's a no-op — `computeInsertion` returns null), marquee selection, auto-wrap / layout inference of any kind.
+- **Mechanics:** the decision is a pure function — `computeInsertion(point, layoutBoxes) → { containerId, index }` (+`indicatorRect`), DOM-free and unit-tested (row/col, edges, nesting, empty containers, subtree exclusion). The event layer only collects the pointer, measures rendered `[data-sk]` boxes once per drag, and dispatches the *existing* tree ops (`insertNodeAt` / `moveNodeTo`). Boxes are per rendered element, so template instances (plural data-sk) resolve to the template container — dropping into any instance edits the template, and all instances update. Pointer events, not HTML5 DnD (the Tauri webview intercepts native drag/drop). Self-nesting is excluded at candidacy (the dragged subtree can't receive itself); the sketch root and template roots don't drag.
+
 ## 8. How Sketch closes into v1.5
 
 Generated React becomes 代码现状 (Atlas) the moment it lands; criteria verify UI acceptance conditions against it via `data-sk`. **Sketch sits *on* the intent↔reality loop, not beside it.** Editor autosave is one more FileSaved producer feeding the same verdict/drift machinery (S2–S6).
@@ -180,7 +188,7 @@ Three seams make this real rather than aspirational (the first is S2's lesson �
 
 ## 9. Parked (explicit, ordered)
 
-1. **Free-drag snap-into-tree** — the Figma Auto-Layout interaction (compute insertion point; new-container-vs-merge). The expensive editor half; **does not gate MVP** (tree-native editor + same `.sketch.json`, grows to Figma-grade later).
+1. **Free-drag snap-into-tree** — ~~parked~~ **shipped in Rev 3 at a narrowed scope** (§7.1: drag expresses tree ops; no structure inference). Still parked from the original ambition: new-container-vs-merge drop heuristics, marquee selection, drag-drawn containers.
 2. **AI input chain** — hand-draw → geometry recognition → AI semantics → `proposed` + Inspector reconcile. The **only** probabilistic cell in Sketch; upstream and **optional** (preset primitives skip it, landing directly in the Spec).
 3. **typed-patch undo** — vs snapshot (see §10). Aligns with the Polaris typed-model motif.
 4. **sketch-embeds-sketch component reuse**; multi-feature dashboard pages (compose via sketch composition, since binding is sketch-level).

@@ -27,6 +27,11 @@ interface SketchState {
   dirty: boolean;
   saving: boolean;
   lastError: string | null;
+  /** Transient: a palette item being dragged toward the canvas (never
+   *  persisted). The palette arms it on pointerdown; the canvas's drag
+   *  controller consumes it. */
+  paletteDrag: NodeKind | null;
+  setPaletteDrag: (kind: NodeKind | null) => void;
 
   initialize: (projectRoot: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -43,6 +48,11 @@ interface SketchState {
   updateNode: (nodeId: string, mutate: (node: SketchNode) => void) => void;
   deleteNode: (nodeId: string) => void;
   moveNode: (nodeId: string, direction: "up" | "down") => void;
+  /** Drag ops (§7.1) — drags only EXPRESS these; nothing is inferred. */
+  insertNodeAt: (containerId: string, index: number, kind: NodeKind) => void;
+  moveNodeTo: (nodeId: string, containerId: string, index: number) => void;
+  /** The explicit wrap command — replaces every auto-wrap heuristic. */
+  wrapInStack: (nodeId: string) => void;
   updateSketchMeta: (patch: { name?: string; blueprintRef?: string | null }) => void;
 
   saveNow: () => Promise<void>;
@@ -221,6 +231,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
     dirty: false,
     saving: false,
     lastError: null,
+    paletteDrag: null,
+    setPaletteDrag: (kind) => set({ paletteDrag: kind }),
 
     initialize: async (projectRoot) => {
       set({ projectRoot });
@@ -336,6 +348,73 @@ export const useSketchStore = create<SketchState>((set, get) => {
         if (index < 0 || target < 0 || target >= siblings.length) return;
         [siblings[index], siblings[target]] = [siblings[target], siblings[index]];
       });
+    },
+
+    insertNodeAt: (containerId, index, kind) => {
+      const child = defaultNode(kind);
+      let inserted = false;
+      editActive((draft) => {
+        const hit = findNode(draft.root, containerId);
+        if (hit?.node.kind !== "stack") return;
+        const at = Math.max(0, Math.min(index, hit.node.children.length));
+        hit.node.children.splice(at, 0, child);
+        inserted = true;
+      });
+      if (inserted) set({ selectedNodeId: child.id });
+    },
+
+    moveNodeTo: (nodeId, containerId, index) => {
+      const { active } = get();
+      if (!active) return;
+      // Pre-checks on current state so a same-place drop never dirties.
+      const hit = findNode(active.root, nodeId);
+      if (!hit?.parent) return; // root and template roots are locked
+      if (allNodeIds(hit.node).includes(containerId)) return; // no self-nesting
+      const target = findNode(active.root, containerId);
+      if (target?.node.kind !== "stack") return;
+      const from = hit.parent.children.findIndex((c) => c.id === nodeId);
+      const sameParent = hit.parent.id === containerId;
+      const clamped = Math.max(0, Math.min(index, target.node.children.length));
+      const adjusted = sameParent && from < clamped ? clamped - 1 : clamped;
+      if (sameParent && adjusted === from) return;
+
+      editActive((draft) => {
+        const dHit = findNode(draft.root, nodeId);
+        const dTarget = findNode(draft.root, containerId);
+        if (!dHit?.parent || dTarget?.node.kind !== "stack") return;
+        const i = dHit.parent.children.findIndex((c) => c.id === nodeId);
+        dHit.parent.children.splice(i, 1);
+        dTarget.node.children.splice(adjusted, 0, dHit.node);
+      });
+    },
+
+    wrapInStack: (nodeId) => {
+      const { active } = get();
+      if (!active) return;
+      const check = findNode(active.root, nodeId);
+      if (!check?.parent) return; // can't wrap the root or a template root
+      const wrapperId = ulid();
+      editActive((draft) => {
+        const hit = findNode(draft.root, nodeId);
+        if (!hit?.parent) return;
+        const i = hit.parent.children.findIndex((c) => c.id === nodeId);
+        // The wrapper adopts the child's sizing so the layout stays put; the
+        // child keeps its own (a fill child fills the wrapper).
+        hit.parent.children[i] = {
+          kind: "stack",
+          id: wrapperId,
+          layout: {
+            direction: "col",
+            gap: 2,
+            padding: { top: 0, right: 0, bottom: 0, left: 0 },
+            mainAxis: "start",
+            crossAxis: "stretch",
+          },
+          sizing: structuredClone(hit.node.sizing),
+          children: [hit.node],
+        } satisfies Container;
+      });
+      set({ selectedNodeId: wrapperId });
     },
 
     updateSketchMeta: (patch) => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   BoxSelect,
+  Group,
   Image as ImageIcon,
   List as ListIcon,
   MousePointerClick,
@@ -11,7 +12,7 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
-import { useSketchStore, type NodeKind } from "../../stores/sketch-store";
+import { findNode, useSketchStore, type NodeKind } from "../../stores/sketch-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { getProjectRoot } from "../../lib/app-bootstrap";
 import { Dropdown } from "../../components/Dropdown";
@@ -43,6 +44,8 @@ export function SketchView() {
   const closeSketch = useSketchStore((s) => s.closeSketch);
   const deleteSketchById = useSketchStore((s) => s.deleteSketchById);
   const addNode = useSketchStore((s) => s.addNode);
+  const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
+  const wrapInStack = useSketchStore((s) => s.wrapInStack);
 
   useEffect(() => {
     void getProjectRoot().then(async (root) => {
@@ -167,8 +170,12 @@ export function SketchView() {
               <button
                 key={kind}
                 onClick={() => selectedNodeId && addNode(selectedNodeId, kind)}
+                // Drag-to-canvas (§7.1): arm the palette drag; the canvas's
+                // controller measures/points/inserts. A plain click (pointer
+                // released on the button) still adds into the selection.
+                onPointerDown={() => setPaletteDrag(kind)}
                 disabled={!selectedNodeId}
-                title={`Add ${label} into the selected container`}
+                title={`Add ${label} into the selected container — or drag it onto the canvas`}
                 className="flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-40"
               >
                 <Icon size={12} />
@@ -176,6 +183,21 @@ export function SketchView() {
               </button>
             ))}
           </div>
+          {/* The explicit structure command (§7.1): wrapping is never
+              inferred from a drop — it is asked for, on the selection. */}
+          <button
+            onClick={() => selectedNodeId && wrapInStack(selectedNodeId)}
+            disabled={
+              !selectedNodeId ||
+              !active ||
+              !findNode(active.root, selectedNodeId)?.parent
+            }
+            title="Wrap the selected node in a new Stack"
+            className="mt-1 w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-40"
+          >
+            <Group size={12} />
+            Wrap in Stack
+          </button>
         </div>
         <div className="glass-panel flex-1 overflow-auto p-2">
           <h3 className="text-[10px] uppercase tracking-wider text-text-muted px-1 mb-1.5">

@@ -85,6 +85,10 @@ jobs:
         if: matrix.platform == 'ubuntu-latest'
         run: pnpm --filter @drafting/sketch-core test
 
+      - name: desktop unit tests
+        if: matrix.platform == 'ubuntu-latest'
+        run: pnpm --filter @drafting/desktop test
+
       - name: Build Tauri app
         working-directory: apps/desktop
         run: pnpm tauri build ${{ matrix.args }}
