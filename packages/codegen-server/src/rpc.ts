@@ -4,6 +4,7 @@ import { generateAdapterSkeleton } from "./generators/adapter-skeleton.js";
 import { generateWiring } from "./generators/wiring-generator.js";
 import { generateScaffolding } from "./generators/scaffolding.js";
 import { generateSketch } from "./generators/sketch-generator.js";
+import { migrateSketches } from "./generators/sketch-migrator.js";
 
 type Handler = (params: any) => unknown;
 
@@ -34,6 +35,8 @@ const handlers: Record<string, Handler> = {
     const files = generateSketch(params);
     return { files };
   },
+
+  migrateSketches: (params) => migrateSketches(params),
 };
 
 export function handleRequest(request: JsonRpcRequest): JsonRpcResponse {

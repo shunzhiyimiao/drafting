@@ -16,6 +16,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { generateSockets } from "./generators/socket-generator.js";
+import { migrateSketches } from "./generators/sketch-migrator.js";
 import { generateAdapterSkeleton } from "./generators/adapter-skeleton.js";
 import { generateWiring } from "./generators/wiring-generator.js";
 import { generateScaffolding } from "./generators/scaffolding.js";
@@ -659,6 +660,155 @@ test("sketch: package scope comes from .patchboard/config.json when present", ()
     generateSketch({ projectRoot: root, sketchPath: rel });
     const pkg = JSON.parse(read(root, "packages/ui/package.json"));
     assert.equal(pkg.name, "@myapp/ui");
+  });
+});
+
+// -------------------------------------------------------------- migration --
+
+const V2_INBOX_JSON = JSON.stringify(
+  {
+    id: "sk_inbox",
+    name: "Inbox",
+    blueprintRef: "01FEAT",
+    schemaVersion: 2,
+    root: {
+      kind: "stack",
+      id: "root",
+      layout: {
+        direction: "col",
+        gap: 4,
+        // non-uniform padding — the per-edge migration-fidelity case
+        padding: { top: 6, right: 2, bottom: 6, left: 2 },
+        mainAxis: "start",
+        crossAxis: "stretch",
+      },
+      sizing: { width: { mode: "fill" }, height: { mode: "fill" } },
+      style: { border: { width: "thin", color: "border" }, radius: "md" },
+      children: [
+        {
+          kind: "button",
+          id: "go",
+          label: "Go",
+          variant: "ghost",
+          // navigate WITH target — the intent:to fidelity case
+          intent: { kind: "navigate", to: "sk_next" },
+          sizing: { width: { mode: "hug" }, height: { mode: "hug" } },
+        },
+        {
+          kind: "list",
+          id: "mail-list",
+          dataKey: "inbox",
+          itemShape: [
+            { name: "id", type: "string", isKey: true },
+            { name: "unread", type: "boolean" },
+          ],
+          sampleRows: [{ id: "m1", unread: true }],
+          template: {
+            kind: "stack",
+            id: "row",
+            layout: {
+              direction: "row",
+              gap: 2,
+              padding: { top: 2, right: 2, bottom: 2, left: 2 },
+              mainAxis: "start",
+              crossAxis: "center",
+            },
+            sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
+            children: [
+              {
+                kind: "text",
+                id: "subj",
+                role: "body",
+                content: { bind: "id" },
+                sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
+              },
+            ],
+          },
+          sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
+        },
+      ],
+    },
+  },
+  null,
+  2,
+);
+
+function seedV2(root: string, name: string, json: string): string {
+  fs.mkdirSync(path.join(root, "sketches"), { recursive: true });
+  fs.writeFileSync(path.join(root, "sketches", name), json);
+  return `sketches/${name}`;
+}
+
+test("migration: a v2 document becomes verified .sketch markup with a .bak left behind", () => {
+  withTmpDir((root) => {
+    seedV2(root, "inbox.sketch.json", V2_INBOX_JSON);
+    const report = migrateSketches({ projectRoot: root });
+    assert.deepEqual(report.migrated, ["sketches/inbox.sketch.json"]);
+    assert.deepEqual(report.failed, []);
+
+    const markup = read(root, "sketches/inbox.sketch");
+    // Entity + fidelity spot checks: per-edge pad, border, navigate target,
+    // typed sample rows, bind, and every ULID preserved as sk:id.
+    assert.match(markup, /<Sketch sk:id="sk_inbox" name="Inbox" blueprintRef="01FEAT" schemaVersion=\{3\}>/);
+    assert.match(markup, /pad="6 2"/);
+    assert.match(markup, /border="thin border"/);
+    assert.match(markup, /intent="navigate:sk_next"/);
+    assert.match(markup, /<d:Sample id="m1" unread="true" \/>/);
+    assert.match(markup, /\{Bind id\}/);
+    assert.match(markup, /sk:id="mail-list"/);
+
+    assert.ok(fs.existsSync(path.join(root, "sketches/inbox.sketch.json.bak")), "original kept as .bak");
+    assert.ok(!fs.existsSync(path.join(root, "sketches/inbox.sketch.json")), "json renamed away");
+
+    // Idempotent: a second run skips (the .sketch already exists — even if
+    // someone restores the .bak to .json).
+    fs.copyFileSync(
+      path.join(root, "sketches/inbox.sketch.json.bak"),
+      path.join(root, "sketches/inbox.sketch.json"),
+    );
+    const again = migrateSketches({ projectRoot: root });
+    assert.deepEqual(again.migrated, []);
+    assert.deepEqual(again.skipped, ["sketches/inbox.sketch.json"]);
+  });
+});
+
+test("migration: refusals are loud and leave the original untouched", () => {
+  withTmpDir((root) => {
+    // A semantics field — the dialect has no spelling for it.
+    const withSemantics = JSON.parse(V2_INBOX_JSON);
+    withSemantics.root.children[0].semantics = { declared: "button" };
+    seedV2(root, "sem.sketch.json", JSON.stringify(withSemantics));
+    // Unparsable JSON.
+    seedV2(root, "broken.sketch.json", "{ not json");
+
+    const report = migrateSketches({ projectRoot: root });
+    assert.deepEqual(report.migrated, []);
+    assert.equal(report.failed.length, 2);
+    const reasons = Object.fromEntries(report.failed.map((f) => [f.file, f.reason]));
+    assert.match(reasons["sketches/sem.sketch.json"], /semantics/);
+    assert.match(reasons["sketches/broken.sketch.json"], /JSON 解析失败/);
+
+    // Originals untouched, no partial outputs.
+    assert.ok(fs.existsSync(path.join(root, "sketches/sem.sketch.json")));
+    assert.ok(fs.existsSync(path.join(root, "sketches/broken.sketch.json")));
+    assert.ok(!fs.existsSync(path.join(root, "sketches/sem.sketch")));
+    assert.ok(!fs.existsSync(path.join(root, "sketches/broken.sketch")));
+  });
+});
+
+test("migration: v2 spelling variants canonicalize instead of failing equivalence", () => {
+  withTmpDir((root) => {
+    const variants = JSON.parse(V2_INBOX_JSON);
+    delete variants.root.children[0].intent; // absent intent ≡ none
+    variants.root.style = { border: { width: "none", color: "border" } }; // none-border ≡ no border
+    seedV2(root, "variants.sketch.json", JSON.stringify(variants));
+
+    const report = migrateSketches({ projectRoot: root });
+    assert.deepEqual(report.failed, []);
+    assert.deepEqual(report.migrated, ["sketches/variants.sketch.json"]);
+    const markup = read(root, "sketches/variants.sketch");
+    assert.ok(!markup.includes("intent="), "canonical none-intent is omitted");
+    assert.ok(!markup.includes("border="), "none-border is omitted");
   });
 });
 

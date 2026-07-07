@@ -896,6 +896,49 @@ export function printSketchMarkup(sketch: Sketch): string {
   ].join("\n");
 }
 
+// ---------------------------------------------------------- canonical form --
+
+/**
+ * The dialect's value-canonical Spec form: v2 JSON allowed several spellings
+ * that the markup can only express one way. Canonicalizing before the
+ * migration equivalence check (`json tree ≡ parse(print(json tree))`) makes
+ * those spellings compare equal instead of failing the migration:
+ *
+ * - button `intent` absent ≡ `{ kind: "none" }` (the dialect always knows)
+ * - `style.border` with width `"none"` ≡ no border
+ * - input `placeholder: ""` ≡ no placeholder
+ * - an emptied `style: {}` ≡ no style
+ *
+ * Pure and total; `semantics` is deliberately NOT handled here — the
+ * migrator refuses such files loudly (the dialect has no spelling for it,
+ * and constraint 23 forbids dropping it silently).
+ */
+export function canonicalizeForMarkup(sketch: Sketch): Sketch {
+  const node = (n: SketchNode): SketchNode => {
+    const out: SketchNode = { ...n };
+    if (out.style) {
+      const style: Style = { ...out.style };
+      if (style.border && style.border.width === "none") delete style.border;
+      if (Object.keys(style).length === 0) delete out.style;
+      else out.style = style;
+    }
+    if (out.kind === "button" && out.intent === undefined) {
+      out.intent = { kind: "none" };
+    }
+    if (out.kind === "input" && out.placeholder === "") {
+      delete out.placeholder;
+    }
+    if (out.kind === "stack") {
+      out.children = out.children.map(node);
+    }
+    if (out.kind === "list") {
+      out.template = node(out.template) as Container;
+    }
+    return out;
+  };
+  return { ...sketch, root: node(sketch.root) as Container };
+}
+
 // -------------------------------------------------------------- law helper --
 
 /** Structural equality helper modulo session-temp ids: temp ids are
