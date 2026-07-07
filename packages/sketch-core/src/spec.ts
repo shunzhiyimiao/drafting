@@ -9,10 +9,11 @@
 export type SketchId = string;
 export type FeatureId = string;
 
-/** Current Spec schema. v2 added `list` + data binding; the loader migrates
- *  older versions forward and heal-writes the migrated form back (§3 edge
- *  policy — the same write-back channel as id healing). */
-export const SCHEMA_VERSION = 2;
+/** Current Spec schema. v2 added `list` + data binding; v3 is text-as-truth
+ *  (the `.sketch` markup dialect replaces `.sketch.json` — Rev 4). The loader
+ *  migrates older versions forward and heal-writes the migrated form back
+ *  (§3 edge policy — the same write-back channel as id healing). */
+export const SCHEMA_VERSION = 3;
 
 /** A Sketch = one screen, bound to a Blueprint feature (child-points-to-parent). */
 export interface Sketch {
