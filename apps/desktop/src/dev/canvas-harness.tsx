@@ -61,8 +61,11 @@ const FIXTURE: Sketch = {
 
 useSketchStore.setState({
   projectRoot: "/dev/null",
-  sketches: [FIXTURE],
+  sketches: [
+    { file: "sketches/harness.sketch", id: FIXTURE.id, name: FIXTURE.name, blueprintRef: null },
+  ],
   active: FIXTURE,
+  activeFile: "sketches/harness.sketch",
   selectedNodeId: "root",
 });
 

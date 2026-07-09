@@ -17,6 +17,7 @@ import * as path from "node:path";
 
 import { generateSockets } from "./generators/socket-generator.js";
 import { migrateSketches } from "./generators/sketch-migrator.js";
+import { printNewSketch, scanSketches } from "./generators/sketch-scan.js";
 import { generateAdapterSkeleton } from "./generators/adapter-skeleton.js";
 import { generateWiring } from "./generators/wiring-generator.js";
 import { generateScaffolding } from "./generators/scaffolding.js";
@@ -441,36 +442,14 @@ test("scaffolding: user-owned once created — skip-if-exists, never overwrites"
 
 // ----------------------------------------------------------------- sketch --
 
-const SKETCH_FIXTURE = JSON.stringify({
-  id: "sk_login",
-  name: "Login Screen",
-  blueprintRef: "feat_login",
-  schemaVersion: 1,
-  root: {
-    kind: "stack",
-    id: "root",
-    layout: {
-      direction: "col",
-      gap: 6,
-      padding: { top: 6, right: 6, bottom: 6, left: 6 },
-      mainAxis: "start",
-      crossAxis: "stretch",
-    },
-    sizing: { width: { mode: "fill" }, height: { mode: "fill" } },
-    children: [
-      {
-        kind: "button",
-        id: "submit",
-        label: "Sign in",
-        variant: "primary",
-        intent: { kind: "submit" },
-        sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
-      },
-    ],
-  },
-});
+const SKETCH_FIXTURE = `<Sketch sk:id="sk_login" name="Login Screen" blueprintRef="feat_login" schemaVersion={3}>
+  <Stack sk:id="root" gap={6} pad={6} h="fill">
+    <Button sk:id="submit" variant="primary" intent="submit" w="fill">Sign in</Button>
+  </Stack>
+</Sketch>
+`;
 
-function seedSketch(root: string, rel = "sketches/login-screen.sketch.json"): string {
+function seedSketch(root: string, rel = "sketches/login-screen.sketch"): string {
   fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
   fs.writeFileSync(path.join(root, rel), SKETCH_FIXTURE);
   return rel;
@@ -495,7 +474,7 @@ test("sketch: emits the generated half, sibling, ui scaffolding and tokens", () 
     const gen = read(root, "packages/ui/src/generated/login-screen.generated.tsx");
     assert.match(gen, /AUTO-GENERATED/);
     // Provenance comment points at the REAL file, not a name-derived guess.
-    assert.match(gen, /from sketches\/login-screen\.sketch\.json/);
+    assert.match(gen, /from sketches\/login-screen\.sketch/);
     assert.match(gen, /export function LoginScreen\(/);
     assert.match(gen, /export type SketchHandlers = \{/);
     assert.match(gen, /"submit"\?: \(\) => void;/);
@@ -551,70 +530,28 @@ test("sketch: ownership — generated is overwritten, sibling never is", () => {
   });
 });
 
-const LIST_SKETCH_FIXTURE = JSON.stringify({
-  id: "sk_inbox",
-  name: "Inbox",
-  blueprintRef: null,
-  schemaVersion: 2,
-  root: {
-    kind: "stack",
-    id: "root",
-    layout: {
-      direction: "col",
-      gap: 4,
-      padding: { top: 6, right: 6, bottom: 6, left: 6 },
-      mainAxis: "start",
-      crossAxis: "stretch",
-    },
-    sizing: { width: { mode: "fill" }, height: { mode: "fill" } },
-    children: [
-      {
-        kind: "list",
-        id: "mail-list",
-        dataKey: "inbox",
-        itemShape: [
-          { name: "id", type: "string", isKey: true },
-          { name: "subject", type: "string" },
-        ],
-        sampleRows: [{ id: "m1", subject: "Hello" }],
-        template: {
-          kind: "stack",
-          id: "mail-row",
-          layout: {
-            direction: "row",
-            gap: 2,
-            padding: { top: 2, right: 2, bottom: 2, left: 2 },
-            mainAxis: "start",
-            crossAxis: "center",
-          },
-          sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
-          children: [
-            {
-              kind: "text",
-              id: "mail-subject",
-              role: "body",
-              content: { bind: "subject" },
-              sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
-            },
-            {
-              kind: "button",
-              id: "mail-open",
-              label: "Open",
-              variant: "ghost",
-              intent: { kind: "navigate", to: null },
-              sizing: { width: { mode: "hug" }, height: { mode: "hug" } },
-            },
-          ],
-        },
-        sizing: { width: { mode: "fill" }, height: { mode: "hug" } },
-      },
-    ],
-  },
-});
+const LIST_SKETCH_FIXTURE = `<Sketch sk:id="sk_inbox" name="Inbox" schemaVersion={3}>
+  <Stack sk:id="root" gap={4} pad={6} h="fill">
+    <List sk:id="mail-list" dataKey="inbox">
+      <ItemShape>
+        <Field name="id" type="string" key />
+        <Field name="subject" type="string" />
+      </ItemShape>
+      <d:Sample id="m1" subject="Hello" />
+      <Template>
+        <Stack sk:id="mail-row" dir="row" gap={2} pad={2} cross="center">
+          <Text sk:id="mail-subject">{Bind subject}</Text>
+          <Button sk:id="mail-open" variant="ghost" intent="navigate">Open</Button>
+        </Stack>
+      </Template>
+    </List>
+  </Stack>
+</Sketch>
+`;
 
 test("sketch: a list emits map/key/item type, and the sibling gets a data stub", () => {
   withTmpDir((root) => {
-    const rel = "sketches/inbox.sketch.json";
+    const rel = "sketches/inbox.sketch";
     fs.mkdirSync(path.join(root, "sketches"), { recursive: true });
     fs.writeFileSync(path.join(root, rel), LIST_SKETCH_FIXTURE);
     generateSketch({ projectRoot: root, sketchPath: rel });
@@ -649,6 +586,37 @@ test("sketch: a monorepo host keeps the extends-based tsconfig and a bare siblin
 
     const sibling = read(root, "packages/ui/src/login-screen.tsx");
     assert.ok(!sibling.includes("not a pnpm workspace"), "no wiring note on a workspace host");
+  });
+});
+
+test("scanSketches returns entity meta per file and names unparsable ones", () => {
+  withTmpDir((root) => {
+    seedSketch(root);
+    fs.writeFileSync(path.join(root, "sketches/broken.sketch"), "<Panel />");
+    const report = scanSketches({ projectRoot: root });
+    assert.deepEqual(report.entries, [
+      {
+        file: "sketches/login-screen.sketch",
+        id: "sk_login",
+        name: "Login Screen",
+        blueprintRef: "feat_login",
+      },
+    ]);
+    assert.equal(report.failed.length, 1);
+    assert.equal(report.failed[0].file, "sketches/broken.sketch");
+    assert.match(report.failed[0].reason, /根元素必须是 <Sketch>/);
+  });
+});
+
+test("printNewSketch emits canonical v3 markup that scans back", () => {
+  withTmpDir((root) => {
+    const { markup } = printNewSketch({ sketchId: "sk_new", name: "Fresh", blueprintRef: "01F" });
+    assert.match(markup, /<Sketch sk:id="sk_new" name="Fresh" blueprintRef="01F" schemaVersion=\{3\}>/);
+    assert.match(markup, /<Stack gap=\{4\} pad=\{4\} h="fill" \/>/);
+    fs.mkdirSync(path.join(root, "sketches"), { recursive: true });
+    fs.writeFileSync(path.join(root, "sketches/fresh.sketch"), markup);
+    const report = scanSketches({ projectRoot: root });
+    assert.equal(report.entries[0].id, "sk_new");
   });
 });
 

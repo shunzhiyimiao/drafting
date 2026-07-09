@@ -36,9 +36,12 @@ pub fn artifacts_for(_criterion: &AcceptanceCriterion, bp: &Blueprint) -> Vec<St
 /// and the estimator treat a sketch edit exactly like a code edit — no
 /// changes needed on their side.
 ///
-/// Resolving `sketch_id → file` scans `sketches/*.sketch.json` as plain JSON
-/// values — a FILE-level cross-domain read (the Headquarters aggregation
-/// precedent), deliberately not an import of the sketch module's code.
+/// Since text-as-truth (Rev 4) the sketch entities live in `.sketch` markup
+/// whose only parser is sketch-core, so `sketch_id → file` reads the
+/// `.sketch-index.json` CACHE — still a file-level cross-domain read (the
+/// Headquarters aggregation precedent), never an import of sketch code. A
+/// missing/stale cache degrades to no sketch artifacts (the dangling signal
+/// surfaces elsewhere), it never errors.
 pub fn artifacts_for_with_root(
     criterion: &AcceptanceCriterion,
     bp: &Blueprint,
@@ -57,35 +60,17 @@ pub fn artifacts_for_with_root(
     out
 }
 
-/// `sketch_id` → (sketch file, generated file), both project-relative. The
-/// generated path mirrors the codegen-server's landing rule:
-/// `packages/ui/src/generated/<slug>.generated.tsx` where slug = the sketch
-/// file's basename. None when no sketch carries the id (dangling — a signal
-/// surfaced elsewhere, not an error here).
+/// `sketch_id` → (sketch file, generated file), both project-relative, via
+/// the sketch index cache. The generated path mirrors the codegen-server's
+/// landing rule: `packages/ui/src/generated/<slug>.generated.tsx` where
+/// slug = the `.sketch` file's basename.
 fn resolve_sketch_artifacts(root: &Path, sketch_id: &str) -> Option<(String, String)> {
-    let entries = std::fs::read_dir(root.join("sketches")).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let Some(slug) = name.strip_suffix(".sketch.json") else {
-            continue;
-        };
-        let Ok(raw) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-            continue;
-        };
-        if value.get("id").and_then(|i| i.as_str()) == Some(sketch_id) {
-            return Some((
-                format!("sketches/{name}"),
-                format!("packages/ui/src/generated/{slug}.generated.tsx"),
-            ));
-        }
-    }
-    None
+    let raw = std::fs::read_to_string(root.join(".sketch-index.json")).ok()?;
+    let index: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let file = index.get("idToFile")?.get(sketch_id)?.as_str()?.to_string();
+    let slug = file.strip_prefix("sketches/")?.strip_suffix(".sketch")?;
+    let generated = format!("packages/ui/src/generated/{slug}.generated.tsx");
+    Some((file.clone(), generated))
 }
 
 /// Blueprint-level artifact set: `target_file ∪ related_files`, de-duplicated,
@@ -199,10 +184,11 @@ mod tests {
     fn sketch_bound_criterion_binds_to_sketch_and_generated_files() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
-        std::fs::create_dir_all(root.join("sketches")).unwrap();
+        // Resolution reads the sketch index CACHE (text-as-truth: Rust never
+        // parses the markup) — seed it the way rebuild_from_entries writes it.
         std::fs::write(
-            root.join("sketches/login-screen.sketch.json"),
-            r#"{"id":"sk_login","name":"Login"}"#,
+            root.join(".sketch-index.json"),
+            r#"{"byFeature":{},"idToFile":{"sk_login":"sketches/login-screen.sketch"},"criteriaByNode":{},"dangling":[]}"#,
         )
         .unwrap();
 
@@ -216,7 +202,7 @@ mod tests {
             artifacts_for_with_root(&c, &b, root),
             vec![
                 "a.ts",
-                "sketches/login-screen.sketch.json",
+                "sketches/login-screen.sketch",
                 "packages/ui/src/generated/login-screen.generated.tsx",
             ]
         );

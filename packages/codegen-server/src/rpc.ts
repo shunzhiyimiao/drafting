@@ -5,6 +5,7 @@ import { generateWiring } from "./generators/wiring-generator.js";
 import { generateScaffolding } from "./generators/scaffolding.js";
 import { generateSketch } from "./generators/sketch-generator.js";
 import { migrateSketches } from "./generators/sketch-migrator.js";
+import { printNewSketch, scanSketches } from "./generators/sketch-scan.js";
 
 type Handler = (params: any) => unknown;
 
@@ -37,6 +38,10 @@ const handlers: Record<string, Handler> = {
   },
 
   migrateSketches: (params) => migrateSketches(params),
+
+  scanSketches: (params) => scanSketches(params),
+
+  printNewSketch: (params) => printNewSketch(params),
 };
 
 export function handleRequest(request: JsonRpcRequest): JsonRpcResponse {

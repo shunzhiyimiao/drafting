@@ -364,6 +364,20 @@ const translations: Record<string, Record<Locale, string>> = {
     en: '"{path}" has unsaved changes. Close anyway?',
   },
 
+  // -- Sketch -------------------------------------------------------------
+  "sketch.migration.title": {
+    zh: "Sketch 迁移：{n} 个已迁移到 .sketch 文本",
+    en: "Sketch migration: {n} migrated to .sketch text",
+  },
+  "sketch.migration.bak": {
+    zh: "原文件保留为 .sketch.json.bak。",
+    en: "Originals kept as .sketch.json.bak.",
+  },
+  "sketch.migration.failed": {
+    zh: "{n} 个失败（原文件未改动）：{files}",
+    en: "{n} failed (originals untouched): {files}",
+  },
+
   // -- Git --------------------------------------------------------------
   "git.loadingStatus": { zh: "正在加载 Git 状态...", en: "Loading Git status..." },
   "git.init.button": { zh: "初始化 Git 仓库", en: "Initialize Git repository" },

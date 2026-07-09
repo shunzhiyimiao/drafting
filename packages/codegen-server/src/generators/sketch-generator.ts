@@ -3,13 +3,13 @@ import * as fs from "node:fs";
 import {
   collectLists,
   defaultTheme,
+  parseSketchMarkup,
   pascalCase,
   toJsxString,
   RADIUS_TOKENS,
   SPACING_STEPS,
   TYPE_TOKENS,
   COLOR_TOKENS,
-  type Sketch,
 } from "@drafting/sketch-core";
 
 /**
@@ -24,7 +24,8 @@ import {
  */
 export interface GenerateSketchParams {
   projectRoot: string;
-  /** Project-relative path, e.g. "sketches/login-screen.sketch.json". */
+  /** Project-relative path, e.g. "sketches/login-screen.sketch" (v3 markup —
+   *  the text IS the document; parseSketchMarkup is the only reader). */
   sketchPath: string;
   /** Package scope for the ui package name; defaults from
    *  .patchboard/config.json, then "@app". */
@@ -36,8 +37,8 @@ export function generateSketch(params: GenerateSketchParams): string[] {
   const scope = params.scopeName ?? detectScope(projectRoot);
 
   const raw = fs.readFileSync(path.join(projectRoot, sketchPath), "utf8");
-  const sketch = JSON.parse(raw) as Sketch;
-  const slug = path.basename(sketchPath).replace(/\.sketch\.json$/, "");
+  const sketch = parseSketchMarkup(raw).sketch;
+  const slug = path.basename(sketchPath).replace(/\.sketch$/, "");
   const component = pascalCase(sketch.name);
 
   const written: string[] = [];

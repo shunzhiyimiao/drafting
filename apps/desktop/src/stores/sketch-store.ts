@@ -1,14 +1,17 @@
 import { create } from "zustand";
-import type {
-  ButtonP,
-  Container,
-  ImageP,
-  InputP,
-  ListP,
-  Sizing,
-  Sketch,
-  SketchNode,
-  TextP,
+import {
+  ensurePersistentIds,
+  parseSketchMarkup,
+  printSketchMarkup,
+  type ButtonP,
+  type Container,
+  type ImageP,
+  type InputP,
+  type ListP,
+  type Sizing,
+  type Sketch,
+  type SketchNode,
+  type TextP,
 } from "@drafting/sketch-core";
 import * as api from "../lib/sketch-api";
 import { ulid } from "../lib/ulid";
@@ -22,8 +25,11 @@ export type NodeKind = SketchNode["kind"];
 
 interface SketchState {
   projectRoot: string | null;
-  sketches: Sketch[];
+  sketches: api.SketchMeta[];
   active: Sketch | null;
+  /** The open sketch's project-relative `.sketch` file — the document the
+   *  tree edits print back into (text-as-truth). */
+  activeFile: string | null;
   selectedNodeId: string | null;
   dirty: boolean;
   saving: boolean;
@@ -251,6 +257,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
     projectRoot: null,
     sketches: [],
     active: null,
+    activeFile: null,
     selectedNodeId: null,
     dirty: false,
     saving: false,
@@ -278,21 +285,49 @@ export const useSketchStore = create<SketchState>((set, get) => {
       const { projectRoot } = get();
       if (!projectRoot) return;
       try {
-        const sketch = await api.createSketch(projectRoot, name, blueprintRef);
+        const meta = await api.createSketch(projectRoot, name, blueprintRef);
         set({ lastError: null });
         await get().refresh();
-        set({ active: sketch, selectedNodeId: sketch.root.id, dirty: false });
+        await get().openSketch(meta.id);
       } catch (e) {
         set({ lastError: String(e) });
       }
     },
 
     openSketch: async (sketchId) => {
-      const { projectRoot } = get();
+      const { projectRoot, sketches } = get();
       if (!projectRoot) return;
+      const meta = sketches.find((m) => m.id === sketchId);
+      if (!meta) {
+        set({ lastError: `sketch ${sketchId} not in the list — refresh?` });
+        return;
+      }
       try {
-        const sketch = await api.getSketch(projectRoot, sketchId);
-        set({ active: sketch, selectedNodeId: sketch.root.id, dirty: false, lastError: null });
+        // Text-as-truth: read the document, parse locally (sketch-core is
+        // the frontend's own dependency — no Spec tree crosses Tauri).
+        const text = await api.readSketchText(projectRoot, meta.file);
+        const { sketch } = parseSketchMarkup(text);
+        // Entity heal moved editor-side: a hand-written file without sk:id
+        // gets one on open and the autosave writes it back.
+        if (sketch.id === "") {
+          sketch.id = ulid();
+          set({
+            active: sketch,
+            activeFile: meta.file,
+            selectedNodeId: sketch.root.id,
+            dirty: true,
+            lastError: null,
+          });
+          scheduleAutosave();
+          return;
+        }
+        set({
+          active: sketch,
+          activeFile: meta.file,
+          selectedNodeId: sketch.root.id,
+          dirty: false,
+          lastError: null,
+        });
       } catch (e) {
         set({ lastError: String(e) });
       }
@@ -308,7 +343,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
             clearTimeout(autosaveTimer);
             autosaveTimer = null;
           }
-          set({ active: null, selectedNodeId: null, dirty: false });
+          set({ active: null, activeFile: null, selectedNodeId: null, dirty: false });
         }
         set({ lastError: null });
         await get().refresh();
@@ -325,7 +360,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
       if (get().dirty) {
         await get().saveNow();
       }
-      set({ active: null, selectedNodeId: null });
+      set({ active: null, activeFile: null, selectedNodeId: null });
     },
 
     selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
@@ -477,11 +512,20 @@ export const useSketchStore = create<SketchState>((set, get) => {
     },
 
     saveNow: async () => {
-      const { projectRoot, active, saving } = get();
-      if (!projectRoot || !active || saving) return;
+      const { projectRoot, active, activeFile, saving } = get();
+      if (!projectRoot || !active || !activeFile || saving) return;
       set({ saving: true });
       try {
-        await api.saveSketch(projectRoot, active);
+        // persist-on-need (Rev 4 §6): the save chokepoint mints sk:id for
+        // every node the tree says needs one (intent≠none, template binds).
+        // Case (a) — criterion binding — mints at the bind action instead.
+        const ensured = ensurePersistentIds(active, ulid);
+        if (ensured.minted.length > 0) {
+          set({ active: ensured.sketch });
+        }
+        // Text-as-truth: the document IS the canonical print of the tree.
+        const text = printSketchMarkup(ensured.sketch);
+        await api.saveSketchText(projectRoot, activeFile, text);
         set({ dirty: false, lastError: null });
         // Keep the list's names/refs in sync (cheap; list is small).
         await get().refresh();

@@ -1,6 +1,7 @@
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { subscribeSyncBus, type EventEnvelope } from "./sync-bus";
 import { notify } from "../stores/notification-store";
+import type { SketchMigrationReport } from "./sketch-api";
 import { t } from "./i18n";
 
 /**
@@ -20,7 +21,24 @@ interface BusPayload {
  * Returns an unlisten function for cleanup.
  */
 export async function startNotificationBridge(): Promise<UnlistenFn> {
-  return subscribeSyncBus((envelope: EventEnvelope) => {
+  // Sketch v2→v3 migration report (Rev 4, A2 obligation: user-visible).
+  const unlistenMigration = await listen<SketchMigrationReport>("sketch:migration", (e) => {
+    const r = e.payload;
+    if (r.migrated.length === 0 && r.failed.length === 0) return;
+    notify({
+      severity: r.failed.length > 0 ? "warning" : "success",
+      title: t("sketch.migration.title").replace("{n}", String(r.migrated.length)),
+      message:
+        r.failed.length > 0
+          ? t("sketch.migration.failed")
+              .replace("{n}", String(r.failed.length))
+              .replace("{files}", r.failed.map((f) => f.file).join(", "))
+          : t("sketch.migration.bak"),
+      dedupeKey: "sketch-migration",
+    });
+  });
+
+  const unlistenBus = await subscribeSyncBus((envelope: EventEnvelope) => {
     const p = envelope.payload as BusPayload | undefined;
     if (!p || !p.event) return;
     const { domain, event } = p;
@@ -80,4 +98,9 @@ export async function startNotificationBridge(): Promise<UnlistenFn> {
       return;
     }
   });
+
+  return () => {
+    unlistenMigration();
+    unlistenBus();
+  };
 }

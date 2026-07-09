@@ -394,10 +394,10 @@ mod tests {
     fn rebuild_binds_sketch_bound_criteria_to_sketch_files() {
         let tmp = TempDir::new().unwrap();
         init_blueprint_dirs(tmp.path()).unwrap();
-        std::fs::create_dir_all(tmp.path().join("sketches")).unwrap();
+        // Text-as-truth: resolution reads the sketch index cache, not files.
         std::fs::write(
-            tmp.path().join("sketches/login-screen.sketch.json"),
-            r#"{"id":"sk_login","name":"Login"}"#,
+            tmp.path().join(".sketch-index.json"),
+            r#"{"byFeature":{},"idToFile":{"sk_login":"sketches/login-screen.sketch"},"criteriaByNode":{},"dangling":[]}"#,
         )
         .unwrap();
 
@@ -414,7 +414,7 @@ mod tests {
         let bindings = load_bindings(tmp.path());
         let sketch_hits = crate::blueprint::bindings::criteria_for_file(
             &bindings,
-            "sketches/login-screen.sketch.json",
+            "sketches/login-screen.sketch",
         );
         assert_eq!(sketch_hits.len(), 1);
         assert_eq!(sketch_hits[0].criterion_id, crit_id);

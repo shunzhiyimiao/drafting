@@ -1,346 +1,55 @@
-//! Serde mirror of the Sketch Spec.
-//!
-//! `packages/sketch-core/src/spec.ts` is authoritative (docs/sketch-design.md
-//! §3); this mirror is isomorphic and — per the K3 corollary — Rust only
-//! stores and indexes Sketches. It never computes a className.
+//! Sketch types on the Rust side — deliberately THIN since text-as-truth
+//! (Rev 4, A4). The `.sketch` markup is the document and sketch-core owns
+//! its only parser/printer; the frontend parses text itself (it imports
+//! sketch-core directly), so full Spec trees no longer cross the Tauri
+//! boundary and the old serde mirror retired with its round-trip suite.
+//! What Rust still KNOWS about a sketch arrives as entity metadata from the
+//! codegen-server's `scanSketches` RPC.
 
 use serde::{Deserialize, Serialize};
 
+/// One sketch's entity metadata — everything the index, bindings and the
+/// list screen need; nothing the text doesn't already say.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Sketch {
+pub struct SketchMeta {
+    /// Project-relative file, e.g. `sketches/inbox.sketch`.
+    pub file: String,
     pub id: String,
     pub name: String,
+    #[serde(default)]
     pub blueprint_ref: Option<String>,
-    /// TS types this as `Container`; the serialized JSON carries
-    /// `kind:"stack"`, so the mirror holds a `Node` and storage validates
-    /// stack-ness on load.
-    pub root: Node,
-    pub schema_version: u32,
 }
 
+/// The `scanSketches` RPC's shape: parsed entities plus loudly-named
+/// failures (an unparsable file is surfaced, never silently dropped).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind")]
-pub enum Node {
-    #[serde(rename = "stack")]
-    Stack(Container),
-    #[serde(rename = "list")]
-    List(ListP),
-    #[serde(rename = "text")]
-    Text(TextP),
-    #[serde(rename = "button")]
-    Button(ButtonP),
-    #[serde(rename = "input")]
-    Input(InputP),
-    #[serde(rename = "image")]
-    Image(ImageP),
-}
-
-impl Node {
-    pub fn id(&self) -> &str {
-        match self {
-            Node::Stack(n) => &n.id,
-            Node::List(n) => &n.id,
-            Node::Text(n) => &n.id,
-            Node::Button(n) => &n.id,
-            Node::Input(n) => &n.id,
-            Node::Image(n) => &n.id,
-        }
-    }
-
-    pub fn id_mut(&mut self) -> &mut String {
-        match self {
-            Node::Stack(n) => &mut n.id,
-            Node::List(n) => &mut n.id,
-            Node::Text(n) => &mut n.id,
-            Node::Button(n) => &mut n.id,
-            Node::Input(n) => &mut n.id,
-            Node::Image(n) => &mut n.id,
-        }
-    }
-
-    pub fn children_mut(&mut self) -> Option<&mut Vec<Node>> {
-        match self {
-            Node::Stack(n) => Some(&mut n.children),
-            _ => None,
-        }
-    }
+#[serde(rename_all = "camelCase")]
+pub struct SketchScanReport {
+    pub entries: Vec<SketchMeta>,
+    #[serde(default)]
+    pub failed: Vec<SketchScanFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Container {
-    pub id: String,
-    pub layout: Layout,
-    pub sizing: Sizing,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<Style>,
-    pub children: Vec<Node>,
+pub struct SketchScanFailure {
+    pub file: String,
+    pub reason: String,
 }
 
-/// `string | { bind }` — a literal, or a binding to an itemShape field
-/// (legal only inside a list template; sketch-core's validate() decides
-/// that — this mirror stores either shape verbatim).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum BindableString {
-    Literal(String),
-    Bind { bind: String },
-}
-
-/// A repeated region (schema v2). The list only renders; data arrives via the
-/// generated component's `data.<dataKey>` prop, wired in the user's sibling.
+/// The `migrateSketches` RPC's report — shown to the user at project open.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ListP {
-    pub id: String,
-    pub item_shape: Vec<ItemField>,
-    pub data_key: String,
-    /// TS types this as `Container`; the serialized JSON carries
-    /// `kind:"stack"` (same as `Sketch.root`), so the mirror holds a `Node`
-    /// and storage validates stack-ness on load.
-    pub template: Box<Node>,
-    /// Canvas sample data — part of the Spec (reproducible rendering).
-    pub sample_rows: Vec<serde_json::Value>,
-    pub sizing: Sizing,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<Style>,
-    /// Unknown fields ride through byte-identically (round-trip safety —
-    /// the Blueprint constraint-23 discipline).
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
-}
-
-/// One itemShape field. A future spade may add a child-points-to-parent
-/// `blueprintRef` here (shape declared by Blueprint data) — reserved seam.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ItemField {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub field_type: ItemFieldType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub is_key: Option<bool>,
-    #[serde(flatten)]
-    pub extra: serde_json::Map<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ItemFieldType {
-    String,
-    Number,
-    Boolean,
-    Image,
+pub struct MigrationReport {
+    pub migrated: Vec<String>,
+    pub skipped: Vec<String>,
+    pub failed: Vec<MigrationFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TextP {
-    pub id: String,
-    pub role: TypeToken,
-    pub content: BindableString,
-    pub sizing: Sizing,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<Style>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantics: Option<SemanticDecl>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ButtonP {
-    pub id: String,
-    pub label: String,
-    pub variant: ButtonVariant,
-    pub sizing: Sizing,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<Style>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub intent: Option<Intent>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantics: Option<SemanticDecl>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InputP {
-    pub id: String,
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub placeholder: Option<String>,
-    #[serde(rename = "type")]
-    pub input_type: InputType,
-    pub sizing: Sizing,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<Style>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantics: Option<SemanticDecl>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImageP {
-    pub id: String,
-    pub src: BindableString,
-    pub alt: String,
-    pub sizing: Sizing,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub style: Option<Style>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub semantics: Option<SemanticDecl>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Layout {
-    pub direction: Direction,
-    pub gap: u8,
-    pub padding: Edges,
-    pub main_axis: MainAxis,
-    pub cross_axis: CrossAxis,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Edges {
-    pub top: u8,
-    pub right: u8,
-    pub bottom: u8,
-    pub left: u8,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "lowercase")]
-pub enum Size {
-    Hug,
-    Fill,
-    Fixed { px: u32 },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Sizing {
-    pub width: Size,
-    pub height: Size,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Style {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bg: Option<ColorToken>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fg: Option<ColorToken>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub border: Option<Border>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub radius: Option<RadiusToken>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Border {
-    pub width: BorderWidth,
-    pub color: ColorToken,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum BorderWidth {
-    None,
-    Thin,
-    Thick,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum Intent {
-    Navigate { to: Option<String> },
-    Submit,
-    None,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SemanticDecl {
-    pub declared: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proposed: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Direction {
-    Row,
-    Col,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MainAxis {
-    Start,
-    Center,
-    End,
-    Between,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CrossAxis {
-    Start,
-    Center,
-    End,
-    Stretch,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TypeToken {
-    Heading,
-    Subhead,
-    Body,
-    Caption,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ColorToken {
-    Surface,
-    Raised,
-    Text,
-    Muted,
-    Primary,
-    OnPrimary,
-    Border,
-    Danger,
-    OnDanger,
-    Transparent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum RadiusToken {
-    None,
-    Sm,
-    Md,
-    Lg,
-    Xl,
-    Full,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ButtonVariant {
-    Primary,
-    Secondary,
-    Ghost,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum InputType {
-    Text,
-    Email,
-    Password,
+pub struct MigrationFailure {
+    pub file: String,
+    pub reason: String,
 }

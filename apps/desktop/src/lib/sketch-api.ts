@@ -1,31 +1,49 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Sketch } from "@drafting/sketch-core";
 
-/** Tauri command wrappers for the Sketch backend. The Rust serde mirror is
- *  isomorphic to sketch-core's Spec types, so the shared package's types are
- *  used directly — no hand-written mirror to drift. */
+/** Tauri command wrappers for the Sketch backend (Rev 4, text-as-truth).
+ *  The `.sketch` TEXT is the document: Rust stores bytes and keeps the
+ *  derived index; the frontend parses/prints with sketch-core itself, so no
+ *  Spec tree crosses this boundary — only entity metadata and text. */
 
-export async function listSketches(projectRoot: string): Promise<Sketch[]> {
-  return invoke("sketch_list", { projectRoot });
+export interface SketchMeta {
+  /** Project-relative file, e.g. "sketches/inbox.sketch". */
+  file: string;
+  id: string;
+  name: string;
+  blueprintRef: string | null;
 }
 
-export async function getSketch(projectRoot: string, sketchId: string): Promise<Sketch> {
-  return invoke("sketch_get", { projectRoot, sketchId });
+export interface SketchMigrationReport {
+  migrated: string[];
+  skipped: string[];
+  failed: { file: string; reason: string }[];
+}
+
+export async function listSketches(projectRoot: string): Promise<SketchMeta[]> {
+  return invoke("sketch_list_meta", { projectRoot });
+}
+
+export async function readSketchText(projectRoot: string, file: string): Promise<string> {
+  return invoke("sketch_read", { projectRoot, file });
+}
+
+/** Persists the text, rebuilds the index and publishes FileSaved — which
+ *  drives both the debounced codegen pipeline (§8) and criterion
+ *  stale/drift for sketch-bound criteria. */
+export async function saveSketchText(
+  projectRoot: string,
+  file: string,
+  text: string,
+): Promise<void> {
+  return invoke("sketch_save_text", { projectRoot, file, text });
 }
 
 export async function createSketch(
   projectRoot: string,
   name: string,
   blueprintRef: string | null,
-): Promise<Sketch> {
+): Promise<SketchMeta> {
   return invoke("sketch_create", { projectRoot, name, blueprintRef });
-}
-
-/** Saves, rebuilds the index, and publishes FileSaved — which drives both
- *  the codegen pipeline (§8 debounced regeneration) and criterion
- *  stale/drift for sketch-bound criteria. */
-export async function saveSketch(projectRoot: string, sketch: Sketch): Promise<void> {
-  return invoke("sketch_save", { projectRoot, sketch });
 }
 
 /** Deletes the sketch and its tool-owned generated half; the user-owned

@@ -378,16 +378,56 @@ pub fn run() {
                         log::info!("startup: rebuilt blueprint + binding index");
                     }
                 }
-                // Same discipline for the sketch index (§6: rebuild on load,
-                // guarded so we never create sketch artifacts in an
-                // unrelated workspace).
-                if root_path.join("sketches").is_dir() {
-                    if let Err(e) = sketch::index::rebuild(root_path) {
-                        log::warn!("startup sketch index rebuild failed: {e}");
-                    } else {
-                        log::info!("startup: rebuilt sketch index");
+            }
+
+            // Sketch startup (Rev 4, A4): v2→v3 migration then index rebuild,
+            // both through the codegen-server (the dialect's single parser),
+            // so this runs ASYNC — a late index is legal for a cache, and a
+            // slow sidecar must not block the window. Guarded on sketches/
+            // so no artifacts appear in unrelated workspaces.
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let root = app_get_cwd();
+                    let root_path = std::path::Path::new(&root);
+                    if !root_path.join("sketches").is_dir() {
+                        return;
                     }
-                }
+                    let proxy = app_handle.state::<CodegenProxy>();
+
+                    if sketch::storage::has_legacy_json(root_path) {
+                        match proxy
+                            .call("migrateSketches", serde_json::json!({ "projectRoot": root }))
+                            .await
+                            .and_then(|v| {
+                                serde_json::from_value::<sketch::types::MigrationReport>(v)
+                                    .map_err(|e| format!("迁移报告解析失败: {e}"))
+                            }) {
+                            Ok(report) => {
+                                log::info!(
+                                    "sketch migration: {} migrated, {} skipped, {} failed",
+                                    report.migrated.len(),
+                                    report.skipped.len(),
+                                    report.failed.len()
+                                );
+                                for f in &report.failed {
+                                    log::warn!("sketch migration failed: {} — {}", f.file, f.reason);
+                                }
+                                // The user-visible report (A2 obligation).
+                                use tauri::Emitter;
+                                let _ = app_handle.emit("sketch:migration", &report);
+                            }
+                            Err(e) => log::warn!("sketch migration did not run: {e}"),
+                        }
+                    }
+
+                    match sketch::commands::refresh_index(&proxy, &root).await {
+                        Ok(_) => log::info!("startup: rebuilt sketch index"),
+                        Err(e) => log::warn!(
+                            "startup sketch index rebuild deferred (lazy rebuild on next use): {e}"
+                        ),
+                    }
+                });
             }
 
             // Sketch → codegen pipeline (docs/sketch-design.md §8): a saved
@@ -412,7 +452,7 @@ pub fn run() {
                                     continue;
                                 };
                                 if !(path.starts_with("sketches/")
-                                    && path.ends_with(".sketch.json"))
+                                    && path.ends_with(".sketch"))
                                 {
                                     continue;
                                 }
@@ -560,10 +600,10 @@ pub fn run() {
             blueprint::commands::blueprint_request_check,
             blueprint::commands::blueprint_get_check_results,
             blueprint::commands::blueprint_rebuild_index,
-            sketch::commands::sketch_list,
-            sketch::commands::sketch_get,
+            sketch::commands::sketch_list_meta,
+            sketch::commands::sketch_read,
             sketch::commands::sketch_create,
-            sketch::commands::sketch_save,
+            sketch::commands::sketch_save_text,
             sketch::commands::sketch_delete,
             sketch::commands::sketch_rebuild_index,
             blueprint_get_estimates,
