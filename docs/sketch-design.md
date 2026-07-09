@@ -1,6 +1,6 @@
 # Sketch — Design Spec (Drafting v2 subsystem)
 
-**Status:** Design locked across a six-spade pass (Spec → codegen → token → storage → editor → IR split). **Rev 2 (2026-07-02, review pass):** K3 hardened to single-codebase (no Rust port of the class core), `criterion.sketch_node` serialization pinned, generated-file landing + constitution deltas recorded, v1.5 loop seams made explicit (publisher + `artifacts_for`), canvas safelist note, literal-key handlers type, structure-assertion sensor parked, `schemaVersion`/`blueprintRef` edge policies. **Rev 3 (2026-07-03, two-spade build pass):** `list` + data binding un-parked and shipped (schema v2 — §3.1, §4 repeat rules, §7 validate surface); free-drag un-parked at a narrowed scope (drag expresses tree ops, never infers structure — §7.1). This is the authoritative spec for building Sketch; it supersedes chat discussion. Positioned as **layer 2** of the v2 four-layer model:
+**Status:** Design locked across a six-spade pass (Spec → codegen → token → storage → editor → IR split). **Rev 2 (2026-07-02, review pass):** K3 hardened to single-codebase (no Rust port of the class core), `criterion.sketch_node` serialization pinned, generated-file landing + constitution deltas recorded, v1.5 loop seams made explicit (publisher + `artifacts_for`), canvas safelist note, literal-key handlers type, structure-assertion sensor parked, `schemaVersion`/`blueprintRef` edge policies. **Rev 3 (2026-07-03, two-spade build pass):** `list` + data binding un-parked and shipped (schema v2 — §3.1, §4 repeat rules, §7 validate surface); free-drag un-parked at a narrowed scope (drag expresses tree ops, never infers structure — §7.1). **Rev 4 (2026-07-10, text-as-truth spade):** the truth serialization moves from `.sketch.json` to the `.sketch` **markup dialect** (schema v3 — §3.2); a fourth keystone lands (K4 — §2); the id policy revises to **persist-on-need** (§6); the editor inverts to a text-primary surface with ONE undo stack (§7.2); the Rust half narrows to text I/O + index (the K3 corollary extends: Rust never parses the dialect); the WPF reference ledger is recorded (§11). This is the authoritative spec for building Sketch; it supersedes chat discussion. Positioned as **layer 2** of the v2 four-layer model:
 
 ```
 想清楚      画出来      装起来       看明白
@@ -9,7 +9,7 @@ Blueprint → Sketch  →  Patchboard → Atlas
 (prescriptive ─────────────────►)   (descriptive return edge)
 ```
 
-Reference implementation (TypeScript — and per the K3 corollary, the implementation that *ships*; Rust mirrors only the Spec data model): `packages/sketch-core` (`spec.ts` / `theme.ts` / `emit.ts` / `to-element.ts` / `validate.ts`). Suite as of Rev 3: **34 green** (codegen + parity incl. repeat + validate), **145 enumerated finite-alphabet points**.
+Reference implementation (TypeScript — and per the K3 corollary, the implementation that *ships*; since Rev 4 Rust holds no mirror at all): `packages/sketch-core` (`spec.ts` / `theme.ts` / `emit.ts` / `to-element.ts` / `validate.ts` / `markup.ts` / `id-policy.ts`). Suite as of Rev 4: **66 green** (codegen + parity incl. repeat + validate + the dialect's law suite + id policy), **149 enumerated finite-alphabet points**.
 
 ---
 
@@ -21,33 +21,35 @@ Reference implementation (TypeScript — and per the K3 corollary, the implement
 
 ## 2. Three keystones (the load-bearing invariants)
 
-**K1 — The tree is truth.** Layout is an **auto-layout tree** (containers + `hug`/`fill`/`fixed` sizing), **never absolute coordinates**. Coordinates (`x=40,y=220`) don't encode intent; a good `<button>` from coordinates needs a heuristic/AI to *guess* the layout — reinjecting the very probabilistic step the design exists to remove. A tree → Tailwind flex is a pure, total, byte-stable map. The editor may let you drag freely, but the drag **snaps into the tree**; the stored `.sketch.json` is the tree, not coordinates.
+**K1 — The tree is truth.** Layout is an **auto-layout tree** (containers + `hug`/`fill`/`fixed` sizing), **never absolute coordinates**. Coordinates (`x=40,y=220`) don't encode intent; a good `<button>` from coordinates needs a heuristic/AI to *guess* the layout — reinjecting the very probabilistic step the design exists to remove. A tree → Tailwind flex is a pure, total, byte-stable map. The editor may let you drag freely, but the drag **snaps into the tree**; the stored `.sketch` document is the tree, not coordinates.
 
 **K2 — Codegen is a finite, pure fold.** tree → React/Tailwind is a structural recursion over **finitely many node kinds**; each kind's class emission is a pure function over a **finite attribute alphabet**. The only downward context is the parent's `{direction, crossAxis}` (a fixed 2-tuple). **AI appears nowhere on this path.** Because the alphabet is finite, the fold is **finite-state deterministic** → each mapping function's domain is *exhaustively* testable and codegen correctness is decidable. (The one open dimension — `fixed` px — is isolated in a single escape hatch and doesn't break this.)
 
 **K3 — One IR, two serializers.** `toIR` (the design's `describe`) is the **only** place that decides tag + className + nesting. `toJsxString` (→ file/codegen) and `toElement` (→ editor canvas) are **trivial projections** of that IR. So the canvas and the shipped code share every structural decision — **WYSIWYG is constructional, not a hope the tests protect.** Parity test = "both serializers yield identical `(tag, className, data-sk)` from one IR," which is near-tautological by design.
 
+**K4 — The text is the document (Rev 4).** The `.sketch` markup file IS the sketch; canvas, Inspector, outline, and drag are **views** over it. Every structured edit routes parse → mutate → canonical print → write-back into the text buffer, so there is exactly ONE undo stack — the buffer's — shared with typing. The dialect's laws make this safe rather than hopeful: parse is total on the finite alphabet with positioned errors for everything outside it, the canonical printer is a fixpoint, and `parse∘print ≡ id`. Constraint 23 translates to text as **loud refusal**: the dialect has no "unknown attribute rides along" — anything it can't represent is a positioned error at parse time and a named refusal at migration time, never a silent drop. (This replaces the JSON mirror's flatten-extras fidelity model.)
+
 **K3 corollary — one codebase, not just one function.** The IR decider ships as a single shared TS package consumed by **both** the editor canvas (frontend) and codegen (the existing Node codegen-server). There is deliberately **no Rust port** of `toIR`/emit: a second-language implementation would split "the only place that decides" across languages, explode the parity matrix (2 languages × 2 serializers), and reintroduce hand-sync drift at the *behavior* level — the exact bug class K3 exists to foreclose. Rust owns Spec serde + storage + index only; **it never computes a className.**
 
 ## 3. The Spec (data model)
 
-Stored as `sketches/*.sketch.json`. TS below is authoritative; the Rust `serde` mirror is isomorphic.
+Stored as `sketches/*.sketch` — the markup dialect (§3.2, schema v3). The TS types below remain authoritative for the tree's SHAPE; since Rev 4 the Rust serde mirror is retired (no Spec tree crosses the Tauri boundary — the frontend parses text itself, Rust exchanges entity metadata only).
 
 ```typescript
 // A Sketch = one screen, bound to a Blueprint feature (child-points-to-parent).
 interface Sketch { id: SketchId; name: string; blueprintRef: FeatureId | null; root: Container; schemaVersion: number; }
 
-type Node = Container | Primitive;   // the auto-layout tree
+type Node = Container | ListP | Primitive;   // the auto-layout tree (ListP: §3.1)
 
 interface Container {
   kind: "stack";                     // grid PARKED (needs its own track-sizing model)
   id: string;                        // stable ULID — see §6 addressing
   layout: Layout; sizing: Sizing; style?: Style; children: Node[];
 }
-interface TextP   { kind: "text";   id: string; role: TypeToken; content: string; sizing: Sizing; style?: Style; semantics?: SemanticDecl; }
+interface TextP   { kind: "text";   id: string; role: TypeToken; content: string | Bind; sizing: Sizing; style?: Style; semantics?: SemanticDecl; }
 interface ButtonP { kind: "button"; id: string; label: string; variant: ButtonVariant; sizing: Sizing; style?: Style; intent?: Intent; semantics?: SemanticDecl; }
 interface InputP  { kind: "input";  id: string; label: string; placeholder?: string; type: "text"|"email"|"password"; sizing: Sizing; style?: Style; semantics?: SemanticDecl; }
-interface ImageP  { kind: "image";  id: string; src: string; alt: string; sizing: Sizing; style?: Style; semantics?: SemanticDecl; }
+interface ImageP  { kind: "image";  id: string; src: string | Bind; alt: string; sizing: Sizing; style?: Style; semantics?: SemanticDecl; }
 type Primitive = TextP | ButtonP | InputP | ImageP;   // MVP primitive set: 4 atoms
 
 interface Layout { direction: "row"|"col"; gap: SpacingStep; padding: Edges;
@@ -108,6 +110,33 @@ Load-bearing decisions:
 
 **Edge policies.** `schemaVersion`: the loader migrates older versions forward on load and heal-writes the migrated form back (the same write-back channel as id healing); a version *newer* than the app understands opens read-only with a warning — never a rewrite. `blueprintRef` dangling mirrors the criterion rule (§6): a deleted feature leaves the sketch in a `dangling` state surfaced in the Inspector for a human to re-bind or null — signal, not error, never cascade.
 
+### 3.2 The markup dialect (schema v3, Rev 4)
+
+A restricted **XAML-shaped** text form — the shell is XAML's, the vocabulary is OURS (never WPF attribute names). Single implementation in `packages/sketch-core/src/markup.ts`; the reference implementation's law suite carried over.
+
+```
+<Sketch sk:id="…" name="…" blueprintRef="…"? schemaVersion={3}>   ← entity fields' home
+  <Stack dir="row"? gap={4}? pad={6}? main="…"? cross="…"? w h bg fg border radius>
+    <Text role="heading" …>content</Text>
+    <Button variant intent …>label</Button>          intent = none|submit|navigate|navigate:<sketchId>
+    <Input label type placeholder … />
+    <Image src alt … />
+    <List dataKey w h …>
+      <ItemShape><Field name type key? /></ItemShape>   ← inline shape; key = the React row key
+      <d:Sample field=value … />                        ← sample rows, typed by the shape
+      <Template>…one Stack…</Template>                  ← binds: {Bind field}, lookup-only
+    </List>
+  </Stack>
+</Sketch>
+```
+
+- **Laws:** parse total on the alphabet, positioned errors otherwise (unknown elements/attrs name the allowed set, enums name the alphabet, off-ramp spacing names the ramp, "the dialect has no expressions" is said in those words); canonical print = fixed attribute order, defaults omitted, 2-space indent, empty elements self-close; `parse∘print ≡ id`, print is a fixpoint.
+- **Values:** strings `"…"` (XML entities; `{` escapes as `&#123;`), numbers `{N}`, binds `{Bind field}` (template-only; undeclared fields are positioned errors). `w/h`: `"hug" | "fill" | {px}`. `pad`: `{N}` uniform (canonical) | `"v h"` | `"t r b l"` — the Spec's Edges are per-edge; a uniform-only pad would strand non-uniform v2 documents. `border="thin|thick <color>"`. `d:Sample` booleans are `"true"/"false"`, numbers `{N}`.
+- **Reserved prefixes** (parser-validated, not real namespaces): `sk:id` = persisted identity (§6); `d:` = design-time data.
+- **No comments in v3** — `<!--` is a positioned rejection; comments stay parked (a future rev needs a preservation story before admitting them: K4's round-trip law must hold).
+- **`semantics` has no spelling** — nothing writes it today; the migrator refuses such files loudly.
+- **Migration (v2→v3):** at project open, each `*.sketch.json` is parsed, canonically printed, REPARSED and verified tree-equivalent (key-order-independent, every ULID preserved, spelling variants canonicalized: absent intent ≡ none, none-border ≡ absent, empty placeholder/style ≡ absent) before the `.sketch` is written and the original renamed to `.sketch.json.bak` — kept, never deleted. Refusals (unparsable JSON, semantics, equivalence failure) leave originals untouched and reach the user in the migration report toast. Idempotent.
+
 ## 4. Codegen (the fold)
 
 Full map is in `emit.ts`; the load-bearing rules:
@@ -134,7 +163,7 @@ Full map is in `emit.ts`; the load-bearing rules:
 
 **Keystone: no separate binding file. All relationships live on entities; the index is a pure, rebuildable cache.** (Direct reuse of the Blueprint pattern shipped for criteria.)
 
-- **Files:** `sketches/*.sketch.json`, flat (no nested dirs — parallel to flat blueprint features), **in git**. Also in git: `.sketch.json` trees, `criterion.sketch_node` (inside `.blueprint.md`), generated React, `tokens.default.json`. Everything needed to use the project is versioned.
+- **Files:** `sketches/*.sketch` (markup, §3.2), flat (no nested dirs — parallel to flat blueprint features), **in git**. Also in git: `criterion.sketch_node` (inside `.blueprint.md`), generated React, `tokens.default.json`, and post-migration `.sketch.json.bak` originals until the user removes them. Everything needed to use the project is versioned.
 - **Generated-file landing & ownership (constitution delta):** one file per sketch at `packages/ui/src/generated/<sketch>.generated.tsx` (package name lean: `ui`) — **tool-owned, regenerated wholesale** (the sockets/wiring rule); a sibling `packages/ui/src/<sketch>.tsx` (imports the generated component, owns handler wiring) is **generated once, then user-owned** (the adapter-skeleton rule). **Off-monorepo self-heal (Rev 3, smoke-rehearsal decision A):** the landing convention is layout-independent; the *scaffold* adapts — a host without `tsconfig.base.json` gets a self-contained inline ui tsconfig (extending a missing file is an instant TS5083), and a host without `pnpm-workspace.yaml` gets the wiring instructions in the sibling's header comment. Note the landing path is currently derived in three places (codegen-server, `blueprint/bindings.rs` artifact resolution, `sketch/storage.rs` delete) — change all three together or hoist a shared constant first. Two v2 amendments to the v1 constitution follow and are recorded here so they're a decision, not an accident: Part 6 §2 ("only Patchboard writes `packages/`") gains Sketch's generated zone, and the package-ownership table gains `packages/ui` (`src/generated/` tool-owned, rest user-owned).
 - **Bindings — child-points-to-parent is the *only* authoritative edge:**
   - Sketch→feature: `Sketch.blueprintRef` authoritative. Feature does not back-point.
@@ -143,15 +172,16 @@ Full map is in `emit.ts`; the load-bearing rules:
   - All reverse lookups (a feature's sketches; a node's criteria) come **from the index only**, never stored as a second truth. This structurally forecloses "two places written, mismatched" — the same-family bug as the S5 placeholder.
 - **`.sketch-index.json` — pure cache, NOT in git.** It's 100% recomputable from the entities; `rebuild_index` is that function. Git should store the **non-recomputable** (truth); versioning a derived file duplicates information and produces (a) meaningless merge conflicts — the correct answer is "rescan the merged entities," not in either text side — and (b) **false consistency**: a text-merged index that's syntactically clean but semantically stale = silent drift. Rebuild on load, hooked to the existing startup-rebuild (with a `sketches/` guard, same as the blueprint `blueprints/` guard). *(Contrast: the Blueprint `index.json` IS in git — justified by offline-readability. `.sketch-index.json` is a reverse-lookup table, useless without tooling → cache, not document. Different treatment is deliberate, not an inconsistency.)*
 - **Git recovery uses zero AI.** `rebuild_index` is a deterministic file scan (ms, no network). Once a Spec is `.sketch.json`, everything downstream (`.sketch.json` → codegen → React) is the finite pure fold. Anyone, anytime, restoring from git gets the identical deterministic product. AI is *not* on the recovery path — that's the payoff of confining AI to one upstream cell.
-- **Node-id stability (criteria's anchor):**
-  1. **heal-on-load** — on loading `.sketch.json`, any id-less node mints a ULID and is **written back to disk** (copy of `load_blueprint_self_heals`); ids are stable from first load.
+- **Node-id stability (criteria's anchor) — Rev 4 revision: persist-on-need** (supersedes Rev 3's heal-on-load; the x:Name precedent):
+  1. A node's id reaches the file (`sk:id`) only when something EXTERNAL needs it stable: **(a)** a criterion binds to it — minted at the bind action, and the sketch file is **flushed before** the blueprint domain writes its marker (§6 write order); **(b)** `intent≠none` anywhere — the generated `SketchHandlers` literal key must survive reprints; **(c)** `{Bind}`/intent inside a template — plural data-sk addressing. The policy is ONE pure module (`id-policy.ts`), enforced at the save chokepoint for (b)/(c). Everything else carries a session-temp id (`~N`, doc order) that never reaches disk — unedited nodes never churn keys or diffs because the document reflowed. (Accepted noise: temp ids DO flow into generated `data-sk`, so inserting a node shifts later temp ids and the write-only generated file diffs on unreferenced nodes — nothing addresses them, documented not fixed.) Existing ULIDs are never touched; migration keeps every v2 id; "unreferenced-id cleanup" is a future EXPLICIT command, not behavior. The Sketch ENTITY id is always needed (index, criterion refs) — a hand-written file without one gets it healed on first open. `schemaVersion` forward migration within v3 rides the same editor open-heal-save path (the v2→v3 hop is the migrator's).
   2. **delete → dangling, not cascade** — a criterion pointing at a deleted node enters a `dangling` state; the Inspector surfaces "the node it verified is gone" for a human to re-bind/drop. Dangling is a signal, not an error.
-  3. ids are invariant across move/attribute-edit; only real delete invalidates.
+  3. persisted ids are invariant across move/attribute-edit; only real delete invalidates.
 - **Write invariant (satisfies the parked read/write review):** Sketch storage writes only `sketches/**` + the index; `criterion.sketch_node` is written by **blueprint** storage (it already owns `.blueprint.md` write-back). **No cross-writes.** A bind action (Inspector: bind criterion→node) writes the **criterion half** (blueprint domain); the Sketch domain only *reads* whether the node exists. The boundary is "who writes whose directory."
 
-**Index shape** (cache, rebuildable):
+**Index shape** (cache, rebuildable — since Rev 4 rebuilt from the codegen-server's `scanSketches` RPC, because the dialect's only parser is sketch-core; a late rebuild is legal for a cache):
 ```jsonc
 { "byFeature":      { "feat_login": ["sk_a1"] },              // feature -> sketches (reverse)
+  "idToFile":       { "sk_a1": "sketches/login.sketch" },     // Rev 4: bindings resolve through this cache
   "criteriaByNode": { "sk_a1:btn_8f3a": ["crit_x2"] },        // node -> criteria (reverse)
   "dangling":       ["crit_z9"] }                             // criteria pointing at a deleted node
 ```
@@ -167,6 +197,15 @@ Full map is in `emit.ts`; the load-bearing rules:
   3. **Inspector = the criterion attestation RightPanel** — same surface, content follows selection.
 - **Canvas Tailwind safelist (implementation note):** the canvas runs `toElement` inside Drafting's own webview, composing classes at *runtime* — invisible to Tailwind's static scan. K2 already contains the fix: the emitted class universe is finite, so Drafting's tailwind config **generates its safelist by enumerating the alphabet** (a build-time script over the same tables the exhaustive tests enumerate). User projects are unaffected — generated files carry literal class strings.
 - **Editor keystone = the IR split (K3):** canvas and ship can't drift.
+
+### 7.2 Text-primary editing (Rev 4 — K4's surface)
+
+The `.sketch` text pane is the PRIMARY editing surface; canvas, Inspector, outline and drag remain as co-pilot views. The mechanics:
+
+- **One write path.** Every structured edit routes parse → mutate → `ensurePersistentIds` → canonical print → `executeEdits` into the Monaco buffer. **One undo stack** — ⌘Z reverts an Inspector change, a drag drop, or typed characters interchangeably (verified end-to-end: tree and text revert in lockstep, canonical form restored).
+- **Dialect errors are inline.** `MarkupError` carries line/col → Monaco markers; the status bar states valid / canonical-form / error@line:col; **Format** = the canonical printer. While the document is outside the dialect the canvas keeps rendering the last good parse and structured edits DISABLE — editing a stale tree would clobber the user's text.
+- **Selection sync both ways.** Canvas/outline selection reveals and highlights the node's source range (the parse's ranges sidecar — ranges never enter the Spec); the text cursor selects the innermost containing node on the canvas. Selection survives reprints by tree-path remapping (session-temp ids reassign by document order).
+- **Saves are the text as typed** — canonical or not, parsable or not. An out-of-dialect save degrades loudly downstream (scan names the file, codegen logs the failure) and heals when the text does; refusing to save would be data loss.
 
 ### 7.1 Free-drag, narrowed (Rev 3)
 
@@ -190,11 +229,14 @@ Three seams make this real rather than aspirational (the first is S2's lesson �
 
 ## 9. Parked (explicit, ordered)
 
+0. **Dialect comments** — v3 rejects `<!--` precisely. Admitting comments requires a preservation story (where do they re-attach after a structured edit's reprint?) or K4's round-trip law breaks. Own design spade.
+0b. **Unreferenced-id cleanup** — an explicit command that strips `sk:id` from nodes nothing references. Deliberately NOT behavior (persist-on-need only constrains NEW ids; existing ULIDs are grandfathered).
+
 1. **Free-drag snap-into-tree** — ~~parked~~ **shipped in Rev 3 at a narrowed scope** (§7.1: drag expresses tree ops; no structure inference), then extended with the bounded side-drop wrap (§7.1 second pass). Still parked from the original ambition: merge-into-existing-wrapper heuristics, marquee selection, drag-drawn containers, auto-unwrap.
 2. **AI input chain** — hand-draw → geometry recognition → AI semantics → `proposed` + Inspector reconcile. The **only** probabilistic cell in Sketch; upstream and **optional** (preset primitives skip it, landing directly in the Spec).
 3. **typed-patch undo** — vs snapshot (see §10). Aligns with the Polaris typed-model motif.
 4. **sketch-embeds-sketch component reuse**; multi-feature dashboard pages (compose via sketch composition, since binding is sketch-level).
-5. **grid** container (own track-sizing model); breakpoints/responsive; multi-theme + per-project token override; `navigate` target payload; index incremental update.
+5. **grid** container — implementation parked, but the track-sizing model is now PINNED (Rev 4, from the WPF reference): each row/column track is `Auto | * | <px>` — exactly our `hug | fill | fixed` alphabet lifted from node sizing to track sizing, mapping to CSS grid `auto | 1fr | <N>px`. K2's finiteness and the exhaustive-test discipline extend unchanged; cell assignment is the child's `row/col` (+span) attributes. Un-parking is an implementation spade, not a design spade. Also parked: breakpoints/responsive; multi-theme + per-project token override; index incremental update. (`navigate` target payload shipped in Rev 3 as `intent="navigate:<sketchId>"`.)
 6. **Structure-assertion sensor** — a tiny decidable assertion language over the Spec tree (`node exists ∧ kind==button ∧ intent==submit`) as a Sketch-native deterministic leg for sketch-bound criteria, feeding the S4 fusion ahead of the LLM. MVP ships only the existence check (= dangling detection); the assertion language needs its own design spade.
 
 ## 10. Deferred micro-decisions (non-blocking; current leans)
@@ -203,6 +245,20 @@ Three seams make this real rather than aspirational (the first is S2's lesson �
 - **Dangling criterion presentation:** lean per-selection in Inspector (follows selection), not a top-of-load banner.
 - **Undo strategy:** lean snapshot first, typed-patch later.
 - **Canvas in-place edit** (double-click text): lean Inspector-only first (single write path), in-place later.
+
+## 11. The WPF reference ledger (Rev 4)
+
+Sketch and WPF/XAML converged on the same model independently (declarative element tree, Auto/\*/px ≈ hug/fill/fixed, design-time data). What we took, adapted, and refused — recorded so future "should we look at WPF again" questions start here:
+
+| 判定 | 项 | 落点 |
+|---|---|---|
+| **原样收** | 文档模型（XAML 文本 ⇄ 设计器双视图，文本为主） | K4 + §7.2 — the whole Rev 4 spade |
+| **原样收** | `x:Name`（命名是显式行为，不是自动分配） | persist-on-need `sk:id` (§6) |
+| **原样收** | `d:` 设计时数据岛（design-time DataContext） | `<d:Sample>` rows in the Spec (§3.2) |
+| **改造收** | 事件接线（WPF 的 `Click="Handler"` 字符串接线） | REFUSED as strings; the typed **sibling file** + `SketchHandlers` literal keys stay — tsc catches stale wiring, strings can't |
+| **拒收（带案底）** | 拖拽生成 `Margin`（设计器把布局意图翻译成魔法边距） | violates K1 — layout intent lives in the tree, drops express tree ops (§7.1) |
+| **拒收（带案底）** | `{Binding}` 表达式语言（converter/path/ElementName 的图灵泥潭） | the dialect has no expressions — `{Bind field}` is a LOOKUP against a declared shape; anything richer is the sibling's TypeScript |
+| **拒收（带案底）** | Styles/Triggers/Resources 资源系统 | the token system (§5) is the styling model: finite, enumerable, theme-swappable; a resource cascade would break K2's decidability |
 
 ## Appendix — reference implementation status
 
