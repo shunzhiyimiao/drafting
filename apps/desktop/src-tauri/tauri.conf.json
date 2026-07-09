@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.drafting.app",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm --filter @drafting/codegen-server build && pnpm dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm --filter @drafting/codegen-server build && pnpm --filter @drafting/desktop build",
     "frontendDist": "../dist"

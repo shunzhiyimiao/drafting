@@ -27,6 +27,7 @@
 6. **生成文件的 data-sk 临时 id 抖动**（已记 Rev 4 §6）：上游插节点使后续 `~N` 平移，write-only 生成文件在无引用节点上出 diff——可接受噪音，未修。
 7. **vite 长寿进程**：7/4 遗留 vite 占 1420 一周（tauri 二进制已死、vite 独活）——pkill "tauri dev" 不杀 vite 子进程，需单独清。
 8. **迁移报告的可见性通道**：sync-bus 桥只递 bus 事件，迁移报告走独立 Tauri emit——notification-bridge 现在组合两个 unlisten。
+9. **dist 陈旧的交接事故（用户现场撞上）**：A4 给 codegen-server 加了三个 RPC，但 app 跑的是打包产物 `dist/codegen-server.cjs`（tauri 资源 staged 拷贝）——本地 dist 停在 7/4，用户创建 sketch 报 `Method not found: printNewSketch`（启动迁移同样静默未跑，只有日志）。修复：重建 dist + 刷新 staged 拷贝 + 杀旧 sidecar（proxy 的 `ensure_running` 会自动重拉）；预防：`beforeDevCommand` 现在先构建 codegen-server（beforeBuildCommand 本就如此，dev 路径漏了）。教训：改 codegen-server 源码的提交要么带 dist 重建说明，要么让 dev 管线自动重建。
 
 ## 验收记录
 
