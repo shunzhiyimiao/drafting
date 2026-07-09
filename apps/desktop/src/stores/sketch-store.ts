@@ -3,15 +3,13 @@ import {
   ensurePersistentIds,
   parseSketchMarkup,
   printSketchMarkup,
-  type ButtonP,
+  MarkupError,
   type Container,
-  type ImageP,
-  type InputP,
   type ListP,
-  type Sizing,
+  type ParsedSketch,
+  type Range,
   type Sketch,
   type SketchNode,
-  type TextP,
 } from "@drafting/sketch-core";
 import * as api from "../lib/sketch-api";
 import { ulid } from "../lib/ulid";
@@ -23,20 +21,42 @@ const AUTOSAVE_MS = 800;
 
 export type NodeKind = SketchNode["kind"];
 
+/** The A5 write inversion (Rev 4 §7): the TEXT BUFFER is the document.
+ *  Typing edits it directly; every structured edit (Inspector, tree ops,
+ *  drag drops) routes parse → mutate → canonical print → write-back through
+ *  the registered buffer writer, which uses Monaco executeEdits — so ⌘Z is
+ *  ONE stack shared with typing. Without a registered buffer (harness,
+ *  canvas-only), edits fall back to plain state (still correct, no undo). */
+type BufferWriter = (text: string) => void;
+type BufferRevealer = (range: Range) => void;
+
+export interface ParseIssue {
+  message: string;
+  line: number;
+  col: number;
+}
+
 interface SketchState {
   projectRoot: string | null;
   sketches: api.SketchMeta[];
+  /** The open document's text — mirrored from the Monaco buffer. */
+  text: string;
+  /** Last GOOD parse of `text` (canvas renders this even mid-error). */
+  parsed: ParsedSketch | null;
+  /** Set while `text` is outside the dialect — structured edits disable. */
+  parseError: ParseIssue | null;
+  /** Is `text` exactly the canonical print of its own parse? */
+  canonical: boolean;
+  /** Convenience view of parsed.sketch — what canvas/outline/Inspector read. */
   active: Sketch | null;
-  /** The open sketch's project-relative `.sketch` file — the document the
-   *  tree edits print back into (text-as-truth). */
   activeFile: string | null;
   selectedNodeId: string | null;
+  /** Where the selection came from — guards the sync loop. */
+  selectionSource: "canvas" | "text" | null;
   dirty: boolean;
   saving: boolean;
   lastError: string | null;
-  /** Transient: a palette item being dragged toward the canvas (never
-   *  persisted). The palette arms it on pointerdown; the canvas's drag
-   *  controller consumes it. */
+  /** Transient: a palette item being dragged toward the canvas. */
   paletteDrag: NodeKind | null;
   setPaletteDrag: (kind: NodeKind | null) => void;
 
@@ -45,36 +65,41 @@ interface SketchState {
   createSketch: (name: string, blueprintRef: string | null) => Promise<void>;
   openSketch: (sketchId: string) => Promise<void>;
   deleteSketchById: (sketchId: string) => Promise<void>;
-  /** Back to the list/create screen. Flushes a pending autosave first so
-   *  closing never loses an edit. */
   closeSketch: () => Promise<void>;
-  selectNode: (nodeId: string | null) => void;
+  selectNode: (nodeId: string | null, source?: "canvas" | "text") => void;
+  /** Text panel wiring: Monaco registers its write/reveal surface. */
+  registerBuffer: (writer: BufferWriter, revealer: BufferRevealer) => () => void;
+  /** Monaco onChange → the document changed (typed or programmatic). */
+  setTextFromBuffer: (text: string) => void;
+  /** Format = canonical print (a no-op when already canonical). */
+  format: () => void;
 
-  /** Tree edits — all clone-mutate-set + schedule autosave. */
+  /** Structured edits — ALL route through the text buffer (single undo). */
+  applyTreeEdit: (mutate: (draft: Sketch) => void, keepSelection?: string | null) => void;
   addNode: (parentId: string, kind: NodeKind) => void;
   updateNode: (nodeId: string, mutate: (node: SketchNode) => void) => void;
   deleteNode: (nodeId: string) => void;
   moveNode: (nodeId: string, direction: "up" | "down") => void;
-  /** Drag ops (§7.1) — drags only EXPRESS these; nothing is inferred. */
   insertNodeAt: (containerId: string, index: number, kind: NodeKind) => void;
   moveNodeTo: (nodeId: string, containerId: string, index: number) => void;
-  /** Side-drop (§7.1 amendment): wrap a leaf and the dropped node in ONE
-   *  perpendicular stack — the bounded, pointer-decided structure creation. */
   insertNodeBeside: (targetId: string, side: "before" | "after", direction: "row" | "col", kind: NodeKind) => void;
   moveNodeBeside: (nodeId: string, targetId: string, side: "before" | "after", direction: "row" | "col") => void;
-  /** The explicit wrap command — the deliberate cousin of the side-drop. */
   wrapInStack: (nodeId: string) => void;
   updateSketchMeta: (patch: { name?: string; blueprintRef?: string | null }) => void;
+  /** persist-on-need case (a): give a node a durable sk:id and FLUSH the
+   *  save, so the criterion marker (blueprint domain) never references an
+   *  id the sketch file doesn't hold yet (§6 write order). */
+  persistNodeIdForBinding: (nodeId: string) => Promise<string | null>;
 
   saveNow: () => Promise<void>;
 }
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let bufferWriter: BufferWriter | null = null;
+let bufferRevealer: BufferRevealer | null = null;
 
 /** Find a node and its parent container in the tree. A list's template
- *  subtree is traversed too; the template itself reports a null parent —
- *  it is the list's required single root, so it can't be moved or deleted
- *  (its children behave like any container's). */
+ *  reports a null parent — it is the list's required single root. */
 export function findNode(
   root: SketchNode,
   nodeId: string,
@@ -102,8 +127,7 @@ export function allNodeIds(root: SketchNode, out: string[] = []): string[] {
   return out;
 }
 
-/** The list whose template subtree contains `nodeId` (the list node itself
- *  doesn't count) — the Inspector's "can this bind?" question. */
+/** The list whose template subtree contains `nodeId`. */
 export function findEnclosingList(root: SketchNode, nodeId: string): ListP | null {
   if (root.kind === "stack") {
     for (const child of root.children) {
@@ -113,8 +137,6 @@ export function findEnclosingList(root: SketchNode, nodeId: string): ListP | nul
     return null;
   }
   if (root.kind === "list") {
-    // Innermost list wins (nested lists are a validate() error, but the
-    // Inspector should still point at the nearest shape while it's red).
     const inner = findEnclosingList(root.template, nodeId);
     if (inner) return inner;
     return findNode(root.template, nodeId) ? root : null;
@@ -122,23 +144,46 @@ export function findEnclosingList(root: SketchNode, nodeId: string): ListP | nul
   return null;
 }
 
-/** A wrapper stack for wrap ops. It adopts the wrapped slot's sizing so the
- *  layout stays put; lean per-direction defaults: a row centers its unequal
- *  children, a col stretches them (matching every other col default). */
-function makeWrapper(direction: "row" | "col", sizing: Sizing): Container {
-  return {
-    kind: "stack",
-    id: ulid(),
-    layout: {
-      direction,
-      gap: 2,
-      padding: { top: 0, right: 0, bottom: 0, left: 0 },
-      mainAxis: "start",
-      crossAxis: direction === "row" ? "center" : "stretch",
-    },
-    sizing: structuredClone(sizing),
-    children: [],
-  };
+/** Tree path (child indices; -1 = descend into a list template) — node
+ *  identity across a reprint, where session-temp ids get reassigned. */
+function pathOfNode(root: SketchNode, nodeId: string, path: number[] = []): number[] | null {
+  if (root.id === nodeId) return path;
+  if (root.kind === "stack") {
+    for (let i = 0; i < root.children.length; i++) {
+      const hit = pathOfNode(root.children[i], nodeId, [...path, i]);
+      if (hit) return hit;
+    }
+  }
+  if (root.kind === "list") {
+    return pathOfNode(root.template, nodeId, [...path, -1]);
+  }
+  return null;
+}
+
+function nodeAtPath(root: SketchNode, path: number[]): SketchNode | null {
+  let cur: SketchNode = root;
+  for (const step of path) {
+    if (step === -1) {
+      if (cur.kind !== "list") return null;
+      cur = cur.template;
+    } else {
+      if (cur.kind !== "stack" || step >= cur.children.length) return null;
+      cur = cur.children[step];
+    }
+  }
+  return cur;
+}
+
+/** Innermost node whose source range contains `offset` — cursor→canvas sync. */
+export function nodeAtOffset(parsed: ParsedSketch, offset: number): string | null {
+  let best: { id: string; size: number } | null = null;
+  for (const [id, r] of Object.entries(parsed.ranges)) {
+    if (offset >= r.start && offset <= r.end) {
+      const size = r.end - r.start;
+      if (!best || size < best.size) best = { id, size };
+    }
+  }
+  return best?.id ?? null;
 }
 
 function defaultNode(kind: NodeKind): SketchNode {
@@ -159,15 +204,9 @@ function defaultNode(kind: NodeKind): SketchNode {
         },
         sizing: { width: fill, height: hug },
         children: [],
-      } satisfies Container;
+      };
     case "text":
-      return {
-        kind: "text",
-        id,
-        role: "body",
-        content: "Text",
-        sizing: { width: hug, height: hug },
-      } satisfies TextP;
+      return { kind: "text", id, role: "body", content: "Text", sizing: { width: hug, height: hug } };
     case "button":
       return {
         kind: "button",
@@ -176,15 +215,9 @@ function defaultNode(kind: NodeKind): SketchNode {
         variant: "primary",
         intent: { kind: "none" },
         sizing: { width: hug, height: hug },
-      } satisfies ButtonP;
+      };
     case "input":
-      return {
-        kind: "input",
-        id,
-        label: "Label",
-        type: "text",
-        sizing: { width: fill, height: hug },
-      } satisfies InputP;
+      return { kind: "input", id, label: "Label", type: "text", sizing: { width: fill, height: hug } };
     case "image":
       return {
         kind: "image",
@@ -192,10 +225,8 @@ function defaultNode(kind: NodeKind): SketchNode {
         src: "/image.png",
         alt: "image",
         sizing: { width: { mode: "fixed", px: 96 }, height: { mode: "fixed", px: 96 } },
-      } satisfies ImageP;
+      };
     case "list":
-      // A ready-to-run list: keyed shape, one bound text in the template,
-      // sample rows so the canvas shows something immediately.
       return {
         kind: "list",
         id,
@@ -221,18 +252,34 @@ function defaultNode(kind: NodeKind): SketchNode {
           },
           sizing: { width: fill, height: hug },
           children: [
-            {
-              kind: "text",
-              id: ulid(),
-              role: "body",
-              content: { bind: "title" },
-              sizing: { width: fill, height: hug },
-            },
+            { kind: "text", id: ulid(), role: "body", content: { bind: "title" }, sizing: { width: fill, height: hug } },
           ],
         },
         sizing: { width: fill, height: hug },
-      } satisfies ListP;
+      };
   }
+}
+
+/** A wrapper stack for wrap ops (side-drop + explicit Wrap in Stack). */
+function makeWrapper(direction: "row" | "col", sizing: SketchNode["sizing"]): Container {
+  return {
+    kind: "stack",
+    id: ulid(),
+    layout: {
+      direction,
+      gap: 2,
+      padding: { top: 0, right: 0, bottom: 0, left: 0 },
+      mainAxis: "start",
+      crossAxis: direction === "row" ? "center" : "stretch",
+    },
+    sizing: structuredClone(sizing),
+    children: [],
+  };
+}
+
+function issueOf(e: unknown): ParseIssue {
+  if (e instanceof MarkupError) return { message: e.message, line: e.line, col: e.col };
+  return { message: String(e), line: 1, col: 1 };
 }
 
 export const useSketchStore = create<SketchState>((set, get) => {
@@ -243,22 +290,46 @@ export const useSketchStore = create<SketchState>((set, get) => {
     }, AUTOSAVE_MS);
   };
 
-  /** Clone the active sketch, apply `edit`, mark dirty, schedule autosave. */
-  const editActive = (edit: (draft: Sketch) => void) => {
-    const { active } = get();
-    if (!active) return;
-    const draft = structuredClone(active) as Sketch;
-    edit(draft);
-    set({ active: draft, dirty: true });
-    scheduleAutosave();
+  /** Ingest new document text: reparse, derive views, schedule autosave. */
+  const ingestText = (text: string, markDirty: boolean) => {
+    try {
+      const parsed = parseSketchMarkup(text);
+      set({
+        text,
+        parsed,
+        active: parsed.sketch,
+        parseError: null,
+        canonical: printSketchMarkup(parsed.sketch) === text,
+        ...(markDirty ? { dirty: true } : {}),
+      });
+    } catch (e) {
+      // Keep the last good tree on screen; name the error precisely.
+      set({ text, parseError: issueOf(e), canonical: false, ...(markDirty ? { dirty: true } : {}) });
+    }
+    if (markDirty) scheduleAutosave();
+  };
+
+  /** Write new text into the document through the Monaco buffer when wired
+   *  (single undo stack); fall back to plain state otherwise. */
+  const writeText = (text: string) => {
+    if (bufferWriter) {
+      bufferWriter(text); // Monaco onChange → setTextFromBuffer → ingest
+    } else {
+      ingestText(text, true);
+    }
   };
 
   return {
     projectRoot: null,
     sketches: [],
+    text: "",
+    parsed: null,
+    parseError: null,
+    canonical: false,
     active: null,
     activeFile: null,
     selectedNodeId: null,
+    selectionSource: null,
     dirty: false,
     saving: false,
     lastError: null,
@@ -303,31 +374,23 @@ export const useSketchStore = create<SketchState>((set, get) => {
         return;
       }
       try {
-        // Text-as-truth: read the document, parse locally (sketch-core is
-        // the frontend's own dependency — no Spec tree crosses Tauri).
-        const text = await api.readSketchText(projectRoot, meta.file);
-        const { sketch } = parseSketchMarkup(text);
-        // Entity heal moved editor-side: a hand-written file without sk:id
-        // gets one on open and the autosave writes it back.
-        if (sketch.id === "") {
-          sketch.id = ulid();
-          set({
-            active: sketch,
-            activeFile: meta.file,
-            selectedNodeId: sketch.root.id,
-            dirty: true,
-            lastError: null,
-          });
-          scheduleAutosave();
-          return;
+        let text = await api.readSketchText(projectRoot, meta.file);
+        let dirty = false;
+        // Entity heal on open: a hand-written document without sk:id gets
+        // its durable id here and the autosave writes it back.
+        try {
+          const probe = parseSketchMarkup(text);
+          if (probe.sketch.id === "") {
+            text = printSketchMarkup({ ...probe.sketch, id: ulid() });
+            dirty = true;
+          }
+        } catch {
+          // Unparsable on open: show the text, let the markers speak.
         }
-        set({
-          active: sketch,
-          activeFile: meta.file,
-          selectedNodeId: sketch.root.id,
-          dirty: false,
-          lastError: null,
-        });
+        set({ activeFile: meta.file, selectedNodeId: null, selectionSource: null });
+        ingestText(text, dirty);
+        const root = get().parsed?.sketch.root;
+        if (root) set({ selectedNodeId: root.id });
       } catch (e) {
         set({ lastError: String(e) });
       }
@@ -343,7 +406,15 @@ export const useSketchStore = create<SketchState>((set, get) => {
             clearTimeout(autosaveTimer);
             autosaveTimer = null;
           }
-          set({ active: null, activeFile: null, selectedNodeId: null, dirty: false });
+          set({
+            active: null,
+            activeFile: null,
+            parsed: null,
+            text: "",
+            parseError: null,
+            selectedNodeId: null,
+            dirty: false,
+          });
         }
         set({ lastError: null });
         await get().refresh();
@@ -360,45 +431,101 @@ export const useSketchStore = create<SketchState>((set, get) => {
       if (get().dirty) {
         await get().saveNow();
       }
-      set({ active: null, activeFile: null, selectedNodeId: null });
+      set({
+        active: null,
+        activeFile: null,
+        parsed: null,
+        text: "",
+        parseError: null,
+        selectedNodeId: null,
+        selectionSource: null,
+      });
     },
 
-    selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
+    selectNode: (nodeId, source = "canvas") => {
+      set({ selectedNodeId: nodeId, selectionSource: source });
+      // Canvas/outline selections reveal the node's text — the other half
+      // (text cursor → canvas) lives in the text panel. Source guards loops.
+      if (source === "canvas" && nodeId) {
+        const range = get().parsed?.ranges[nodeId];
+        if (range && bufferRevealer) bufferRevealer(range);
+      }
+    },
+
+    registerBuffer: (writer, revealer) => {
+      bufferWriter = writer;
+      bufferRevealer = revealer;
+      return () => {
+        if (bufferWriter === writer) bufferWriter = null;
+        if (bufferRevealer === revealer) bufferRevealer = null;
+      };
+    },
+
+    setTextFromBuffer: (text) => {
+      if (text === get().text) return;
+      ingestText(text, true);
+    },
+
+    format: () => {
+      const { parsed, parseError } = get();
+      if (!parsed || parseError) return;
+      const canon = printSketchMarkup(parsed.sketch);
+      if (canon !== get().text) writeText(canon);
+    },
+
+    applyTreeEdit: (mutate, keepSelection) => {
+      const { parsed, parseError, selectedNodeId } = get();
+      // Never edit a stale tree over live text: while the document is
+      // outside the dialect, structured editing is disabled.
+      if (!parsed || parseError) return;
+      const draft = structuredClone(parsed.sketch);
+      mutate(draft);
+      const ensured = ensurePersistentIds(draft, ulid).sketch;
+
+      // Selection identity across the reprint (temp ids reassign by doc
+      // order): resolve the kept node's PATH in the mutated tree, then look
+      // it up again after reparse.
+      const keepId = keepSelection !== undefined ? keepSelection : selectedNodeId;
+      const keepPath = keepId ? pathOfNode(ensured.root, keepId) : null;
+
+      writeText(printSketchMarkup(ensured));
+
+      const after = get().parsed;
+      if (after && keepPath) {
+        const node = nodeAtPath(after.sketch.root, keepPath);
+        set({ selectedNodeId: node?.id ?? after.sketch.root.id, selectionSource: null });
+      }
+    },
 
     addNode: (parentId, kind) => {
       const child = defaultNode(kind);
-      editActive((draft) => {
+      get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, parentId);
-        // Adding lands in the selected container, or its parent when a
-        // primitive is selected (structured add — the tree stays the truth).
-        const target =
-          hit?.node.kind === "stack" ? hit.node : hit?.parent ?? null;
+        const target = hit?.node.kind === "stack" ? hit.node : (hit?.parent ?? null);
         if (target) target.children.push(child);
-      });
-      set({ selectedNodeId: child.id });
+      }, child.id);
     },
 
     updateNode: (nodeId, mutate) => {
-      editActive((draft) => {
+      get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, nodeId);
         if (hit) mutate(hit.node);
       });
     },
 
     deleteNode: (nodeId) => {
-      const { active, selectedNodeId } = get();
+      const { active } = get();
       if (!active || active.root.id === nodeId) return; // never delete the root
-      editActive((draft) => {
+      get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, nodeId);
         if (hit?.parent) {
           hit.parent.children = hit.parent.children.filter((c) => c.id !== nodeId);
         }
-      });
-      if (selectedNodeId === nodeId) set({ selectedNodeId: get().active?.root.id ?? null });
+      }, null);
     },
 
     moveNode: (nodeId, direction) => {
-      editActive((draft) => {
+      get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, nodeId);
         if (!hit?.parent) return;
         const siblings = hit.parent.children;
@@ -411,67 +538,60 @@ export const useSketchStore = create<SketchState>((set, get) => {
 
     insertNodeAt: (containerId, index, kind) => {
       const child = defaultNode(kind);
-      let inserted = false;
-      editActive((draft) => {
+      get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, containerId);
         if (hit?.node.kind !== "stack") return;
         const at = Math.max(0, Math.min(index, hit.node.children.length));
         hit.node.children.splice(at, 0, child);
-        inserted = true;
-      });
-      if (inserted) set({ selectedNodeId: child.id });
+      }, child.id);
     },
 
     moveNodeTo: (nodeId, containerId, index) => {
       const { active } = get();
       if (!active) return;
-      // Pre-checks on current state so a same-place drop never dirties.
-      const hit = findNode(active.root, nodeId);
-      if (!hit?.parent) return; // root and template roots are locked
-      if (allNodeIds(hit.node).includes(containerId)) return; // no self-nesting
+      const dragged = findNode(active.root, nodeId);
+      if (!dragged?.parent) return; // root and template roots are locked
+      if (allNodeIds(dragged.node).includes(containerId)) return; // no self-nesting
       const target = findNode(active.root, containerId);
       if (target?.node.kind !== "stack") return;
-      const from = hit.parent.children.findIndex((c) => c.id === nodeId);
-      const sameParent = hit.parent.id === containerId;
+      const from = dragged.parent.children.findIndex((c) => c.id === nodeId);
+      const sameParent = dragged.parent.id === containerId;
       const clamped = Math.max(0, Math.min(index, target.node.children.length));
       const adjusted = sameParent && from < clamped ? clamped - 1 : clamped;
-      if (sameParent && adjusted === from) return;
+      if (sameParent && adjusted === from) return; // same-place drop: no churn
 
-      editActive((draft) => {
-        const dHit = findNode(draft.root, nodeId);
-        const dTarget = findNode(draft.root, containerId);
-        if (!dHit?.parent || dTarget?.node.kind !== "stack") return;
-        const i = dHit.parent.children.findIndex((c) => c.id === nodeId);
-        dHit.parent.children.splice(i, 1);
-        dTarget.node.children.splice(adjusted, 0, dHit.node);
-      });
+      get().applyTreeEdit((draft) => {
+        const d = findNode(draft.root, nodeId);
+        const t = findNode(draft.root, containerId);
+        if (!d?.parent || t?.node.kind !== "stack") return;
+        const i = d.parent.children.findIndex((c) => c.id === nodeId);
+        d.parent.children.splice(i, 1);
+        t.node.children.splice(adjusted, 0, d.node);
+      }, nodeId);
     },
 
     insertNodeBeside: (targetId, side, direction, kind) => {
       const child = defaultNode(kind);
-      let wrapped = false;
-      editActive((draft) => {
+      get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, targetId);
-        if (!hit?.parent) return; // roots and template roots don't wrap
+        if (!hit?.parent) return;
         const i = hit.parent.children.findIndex((c) => c.id === targetId);
         const wrapper = makeWrapper(direction, hit.node.sizing);
         wrapper.children = side === "before" ? [child, hit.node] : [hit.node, child];
         hit.parent.children[i] = wrapper;
-        wrapped = true;
-      });
-      if (wrapped) set({ selectedNodeId: child.id });
+      }, child.id);
     },
 
     moveNodeBeside: (nodeId, targetId, side, direction) => {
       const { active } = get();
       if (!active || nodeId === targetId) return;
       const dragged = findNode(active.root, nodeId);
-      if (!dragged?.parent) return; // root and template roots don't drag
-      if (allNodeIds(dragged.node).includes(targetId)) return; // no self-wrap
+      if (!dragged?.parent) return;
+      if (allNodeIds(dragged.node).includes(targetId)) return;
       const target = findNode(active.root, targetId);
       if (!target?.parent) return;
 
-      editActive((draft) => {
+      get().applyTreeEdit((draft) => {
         const d = findNode(draft.root, nodeId);
         if (!d?.parent) return;
         d.parent.children = d.parent.children.filter((c) => c.id !== nodeId);
@@ -481,53 +601,65 @@ export const useSketchStore = create<SketchState>((set, get) => {
         const wrapper = makeWrapper(direction, t.node.sizing);
         wrapper.children = side === "before" ? [d.node, t.node] : [t.node, d.node];
         t.parent.children[i] = wrapper;
-      });
+      }, nodeId);
     },
 
     wrapInStack: (nodeId) => {
       const { active } = get();
       if (!active) return;
       const check = findNode(active.root, nodeId);
-      if (!check?.parent) return; // can't wrap the root or a template root
-      let wrapperId: string | null = null;
-      editActive((draft) => {
+      if (!check?.parent) return;
+      const wrapper = makeWrapper("col", check.node.sizing);
+      get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, nodeId);
         if (!hit?.parent) return;
         const i = hit.parent.children.findIndex((c) => c.id === nodeId);
-        // The wrapper adopts the child's sizing so the layout stays put; the
-        // child keeps its own (a fill child fills the wrapper).
-        const wrapper = makeWrapper("col", hit.node.sizing);
         wrapper.children = [hit.node];
         hit.parent.children[i] = wrapper;
-        wrapperId = wrapper.id;
-      });
-      if (wrapperId) set({ selectedNodeId: wrapperId });
+      }, wrapper.id);
     },
 
     updateSketchMeta: (patch) => {
-      editActive((draft) => {
+      get().applyTreeEdit((draft) => {
         if (patch.name !== undefined) draft.name = patch.name;
         if (patch.blueprintRef !== undefined) draft.blueprintRef = patch.blueprintRef;
       });
     },
 
+    persistNodeIdForBinding: async (nodeId) => {
+      const { parsed, parseError } = get();
+      if (!parsed || parseError) return null;
+      const hit = findNode(parsed.sketch.root, nodeId);
+      if (!hit) return null;
+      let id = hit.node.id;
+      if (id.startsWith("~") || id === "") {
+        id = ulid();
+        get().applyTreeEdit((draft) => {
+          const d = findNode(draft.root, nodeId);
+          if (d) d.node.id = id;
+        }, null);
+        set({ selectedNodeId: id, selectionSource: null });
+      }
+      // Flush: the criterion marker must never point at an id the sketch
+      // file doesn't hold yet (§6 — sketch domain persists first).
+      if (autosaveTimer) {
+        clearTimeout(autosaveTimer);
+        autosaveTimer = null;
+      }
+      await get().saveNow();
+      return id;
+    },
+
     saveNow: async () => {
-      const { projectRoot, active, activeFile, saving } = get();
-      if (!projectRoot || !active || !activeFile || saving) return;
+      const { projectRoot, activeFile, text, saving } = get();
+      if (!projectRoot || !activeFile || saving) return;
       set({ saving: true });
       try {
-        // persist-on-need (Rev 4 §6): the save chokepoint mints sk:id for
-        // every node the tree says needs one (intent≠none, template binds).
-        // Case (a) — criterion binding — mints at the bind action instead.
-        const ensured = ensurePersistentIds(active, ulid);
-        if (ensured.minted.length > 0) {
-          set({ active: ensured.sketch });
-        }
-        // Text-as-truth: the document IS the canonical print of the tree.
-        const text = printSketchMarkup(ensured.sketch);
+        // The text IS the document — saved as typed, canonical or not.
+        // (An out-of-dialect save degrades loudly downstream: scan names
+        // the file, codegen logs it; nothing silently drops.)
         await api.saveSketchText(projectRoot, activeFile, text);
         set({ dirty: false, lastError: null });
-        // Keep the list's names/refs in sync (cheap; list is small).
         await get().refresh();
       } catch (e) {
         set({ lastError: String(e) });

@@ -19,6 +19,7 @@ import { Dropdown } from "../../components/Dropdown";
 import { SketchOutline } from "./Outline";
 import { SketchCanvas } from "./Canvas";
 import { SketchInspector } from "./Inspector";
+import { SketchTextPanel } from "./SketchTextPanel";
 
 /** The §7 toolbox: exactly the finite primitive set. Clicking adds into the
  *  selected container (structured add — no free coordinates, K1). */
@@ -46,6 +47,9 @@ export function SketchView() {
   const addNode = useSketchStore((s) => s.addNode);
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
   const wrapInStack = useSketchStore((s) => s.wrapInStack);
+  // Structured edits disable while the document is outside the dialect —
+  // editing a stale tree would clobber the user's text.
+  const parseError = useSketchStore((s) => s.parseError);
 
   useEffect(() => {
     void getProjectRoot().then(async (root) => {
@@ -174,7 +178,7 @@ export function SketchView() {
                 // controller measures/points/inserts. A plain click (pointer
                 // released on the button) still adds into the selection.
                 onPointerDown={() => setPaletteDrag(kind)}
-                disabled={!selectedNodeId}
+                disabled={!selectedNodeId || !!parseError}
                 title={`Add ${label} into the selected container — or drag it onto the canvas`}
                 className="flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-40"
               >
@@ -190,6 +194,7 @@ export function SketchView() {
             disabled={
               !selectedNodeId ||
               !active ||
+              !!parseError ||
               !findNode(active.root, selectedNodeId)?.parent
             }
             title="Wrap the selected node in a new Stack"
@@ -238,7 +243,14 @@ export function SketchView() {
             {saving ? "saving…" : dirty ? "unsaved" : "saved · codegen follows in ~1s"}
           </span>
         </div>
-        <SketchCanvas />
+        {/* Text-as-truth (Rev 4 §7): the text pane is the PRIMARY editing
+            surface; the canvas above it is the live projection. */}
+        <div className="flex-[4] min-h-0 flex flex-col">
+          <SketchCanvas />
+        </div>
+        <div className="flex-[5] min-h-0">
+          <SketchTextPanel />
+        </div>
         {lastError && (
           <p className="text-[10px] text-error px-1 shrink-0">{lastError}</p>
         )}

@@ -767,6 +767,7 @@ async function setCriterionBinding(
 function BindingSection({ nodeId }: { nodeId: string }) {
   const active = useSketchStore((s) => s.active)!;
   const projectRoot = useSketchStore((s) => s.projectRoot);
+  const persistNodeIdForBinding = useSketchStore((s) => s.persistNodeIdForBinding);
   const [feature, reload] = useBoundFeature();
 
   if (!active.blueprintRef) {
@@ -798,12 +799,19 @@ function BindingSection({ nodeId }: { nodeId: string }) {
               title={boundHere ? "Unbind from this node" : "Bind to the selected node"}
               onClick={async () => {
                 if (!projectRoot || !c.id) return;
-                await setCriterionBinding(
-                  projectRoot,
-                  feature,
-                  c.id,
-                  boundHere ? undefined : { sketchId: active.id, nodeId },
-                );
+                if (boundHere) {
+                  await setCriterionBinding(projectRoot, feature, c.id, undefined);
+                } else {
+                  // persist-on-need case (a), §6 write order: the sketch
+                  // domain persists sk:id (and flushes the file) BEFORE the
+                  // blueprint domain writes the criterion marker.
+                  const persisted = await persistNodeIdForBinding(nodeId);
+                  if (!persisted) return;
+                  await setCriterionBinding(projectRoot, feature, c.id, {
+                    sketchId: active.id,
+                    nodeId: persisted,
+                  });
+                }
                 await reload();
               }}
               className={`mt-0.5 shrink-0 ${

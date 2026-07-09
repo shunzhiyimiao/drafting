@@ -6,10 +6,15 @@
  * loudly into lastError, which is fine here.
  */
 import ReactDOM from "react-dom/client";
-import type { Sketch } from "@drafting/sketch-core";
+import { parseSketchMarkup, printSketchMarkup, type Sketch } from "@drafting/sketch-core";
 import { SketchCanvas } from "../views/sketch/Canvas";
+import { SketchTextPanel } from "../views/sketch/SketchTextPanel";
 import { useSketchStore, type NodeKind } from "../stores/sketch-store";
 import "../index.css";
+
+// Puppeteer's window into the store — assertion access for the e2e checks
+// (drag → text, ⌘Z → both revert). Dev-only page, never bundled.
+(window as unknown as { __sketchStore: typeof useSketchStore }).__sketchStore = useSketchStore;
 
 const FIXTURE: Sketch = {
   id: "sk_harness",
@@ -59,12 +64,20 @@ const FIXTURE: Sketch = {
   },
 };
 
+// Text-as-truth: seed the store the way openSketch would — text first,
+// parsed views derived (FIXTURE's literal ids are non-temp, so they print
+// as sk:id and survive the round-trip).
+const HARNESS_TEXT = printSketchMarkup(FIXTURE);
+const HARNESS_PARSED = parseSketchMarkup(HARNESS_TEXT);
 useSketchStore.setState({
   projectRoot: "/dev/null",
   sketches: [
     { file: "sketches/harness.sketch", id: FIXTURE.id, name: FIXTURE.name, blueprintRef: null },
   ],
-  active: FIXTURE,
+  text: HARNESS_TEXT,
+  parsed: HARNESS_PARSED,
+  active: HARNESS_PARSED.sketch,
+  canonical: true,
   activeFile: "sketches/harness.sketch",
   selectedNodeId: "root",
 });
@@ -105,7 +118,10 @@ function Harness() {
       <div className="flex-1 flex min-h-0">
         <SketchCanvas />
       </div>
-      <pre data-harness-outline className="text-[10px] text-lime-300 bg-black/40 p-2 rounded max-h-40 overflow-auto">
+      <div className="h-56 min-h-0">
+        <SketchTextPanel />
+      </div>
+      <pre data-harness-outline className="text-[10px] text-lime-300 bg-black/40 p-2 rounded max-h-32 overflow-auto">
         {active ? outlineOf(active) : "no active"}
       </pre>
     </div>
