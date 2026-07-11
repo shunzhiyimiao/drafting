@@ -797,6 +797,31 @@ body::before {
   border: 2px solid transparent;
 }
 
+/* The design surface's scroll pane: the sheet is bright and the pane is
+   glass — the global 8% thumb disappears there. Readable track + thumb,
+   accent on hover, like a proper design tool. */
+.canvas-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.canvas-scroll::-webkit-scrollbar-track {
+  background: var(--surface-1);
+  border-radius: 10px;
+}
+
+.canvas-scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-hover);
+}
+
+.canvas-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--color-accent-rgb), 0.45);
+}
+
+.canvas-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* ---------- Form elements ---------- */
 
 input,

@@ -38,6 +38,20 @@ export function SketchCanvas() {
   const [session, setSessionState] = useState<DragSession | null>(null);
   /** One-click "spread apart" affordance after a snuggle wrap (§7.1 B). */
   const [wrapHint, setWrapHint] = useState<{ wrapperId: string } | null>(null);
+  /** The surface's LAYOUT height (transform-independent). The zoom frame
+   *  multiplies it by zoom so the scroll pane sees the sheet's true visual
+   *  footprint — without it, zoom > 1 leaves the sheet's bottom beyond the
+   *  scroll range and zoom < 1 leaves dead scroll space. */
+  const [surfaceH, setSurfaceH] = useState(0);
+
+  useEffect(() => {
+    const el = surfaceRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setSurfaceH(el.offsetHeight));
+    ro.observe(el);
+    setSurfaceH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, [active !== null]);
   /** Synchronous mirror of the session — pointer events can arrive faster
    *  than React commits, and the exactly-once guarantee must not depend on
    *  render timing (the old dragRef-goes-stale duplicate-commit bug). */
@@ -209,7 +223,7 @@ export function SketchCanvas() {
     dragging?.source.type === "existing-node" ? dragging.source.nodeId : null;
 
   return (
-    <div className="flex-1 glass-panel overflow-auto p-6 min-h-0">
+    <div className="flex-1 glass-panel overflow-auto p-6 min-h-0 canvas-scroll">
       {/* Selection chrome moved to SelectionOverlay (S3); this style block
           keeps only cursor rules and the drag source's dimming. */}
       <style>
@@ -220,11 +234,17 @@ export function SketchCanvas() {
           : ""}
       </style>
       {/* Zoom frame (S2a): reserves the VISUAL footprint of the scaled
-          sheet so scrollbars stay honest; the surface itself keeps logical
-          width and scales via transform — geometry divides by zoom. */}
+          sheet so scrollbars stay honest — width statically, height from
+          the measured layout height (transforms don't affect layout, so
+          without this the scroll range would be the UNSCALED height). The
+          surface itself keeps logical width and scales via transform —
+          geometry divides by zoom. */}
       <div
         className="mx-auto"
-        style={{ width: canvasWidth * zoom, height: undefined }}
+        style={{
+          width: canvasWidth * zoom,
+          height: surfaceH ? surfaceH * zoom : undefined,
+        }}
       >
       {/* The surface is a flex column so the root's ROOT_CTX premise holds
           on the canvas: its fill sizing (flex-1/self-stretch) actually
