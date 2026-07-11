@@ -46,6 +46,22 @@ export interface ParseIssue {
   col: number;
 }
 
+/** One open document's stashed state (S2b multi-tab). The store's top-level
+ *  fields always mirror the ACTIVE document — every consumer keeps reading
+ *  them unchanged; switching tabs = flush → stash → restore. Monaco keeps a
+ *  model (and its own undo stack) per file via the `path` prop. */
+export interface OpenDoc {
+  file: string;
+  sketchId: string;
+  name: string;
+  text: string;
+  parsed: ParsedSketch | null;
+  parseError: ParseIssue | null;
+  canonical: boolean;
+  dirty: boolean;
+  selectedNodeId: string | null;
+}
+
 interface SketchState {
   projectRoot: string | null;
   sketches: api.SketchMeta[];
@@ -60,6 +76,8 @@ interface SketchState {
   /** Convenience view of parsed.sketch — what canvas/outline/Inspector read. */
   active: Sketch | null;
   activeFile: string | null;
+  /** All open documents (the active one's entry is refreshed on stash). */
+  openDocs: OpenDoc[];
   selectedNodeId: string | null;
   /** Where the selection came from — guards the sync loop. */
   selectionSource: "canvas" | "text" | null;
@@ -79,7 +97,12 @@ interface SketchState {
   createSketch: (name: string, blueprintRef: string | null) => Promise<void>;
   openSketch: (sketchId: string) => Promise<void>;
   deleteSketchById: (sketchId: string) => Promise<void>;
+  /** Back to the list screen — open tabs stay alive (S2b). */
   closeSketch: () => Promise<void>;
+  /** Close one tab (flushes if dirty); active falls to a neighbor. */
+  closeDoc: (file: string) => Promise<void>;
+  /** Switch to an already-open tab (flush → stash → restore). */
+  switchDoc: (file: string) => Promise<void>;
   selectNode: (nodeId: string | null, source?: "canvas" | "text") => void;
   /** Text panel wiring: Monaco registers its buffer surface. */
   registerBuffer: (handle: BufferHandle) => () => void;
@@ -341,6 +364,55 @@ export const useSketchStore = create<SketchState>((set, get) => {
     }
   };
 
+  /** Upsert the active document's snapshot into openDocs (tab order kept). */
+  const stashActive = () => {
+    const s = get();
+    if (!s.activeFile) return;
+    const doc: OpenDoc = {
+      file: s.activeFile,
+      sketchId: s.active?.id ?? "",
+      name: s.active?.name ?? s.activeFile,
+      text: s.text,
+      parsed: s.parsed,
+      parseError: s.parseError,
+      canonical: s.canonical,
+      dirty: s.dirty,
+      selectedNodeId: s.selectedNodeId,
+    };
+    const exists = s.openDocs.some((d) => d.file === doc.file);
+    set({
+      openDocs: exists
+        ? s.openDocs.map((d) => (d.file === doc.file ? doc : d))
+        : [...s.openDocs, doc],
+    });
+  };
+
+  const restoreDoc = (doc: OpenDoc) => {
+    set({
+      activeFile: doc.file,
+      text: doc.text,
+      parsed: doc.parsed,
+      parseError: doc.parseError,
+      canonical: doc.canonical,
+      dirty: doc.dirty,
+      active: doc.parsed?.sketch ?? null,
+      selectedNodeId: doc.selectedNodeId,
+      selectionSource: null,
+    });
+  };
+
+  /** Flush the active document (pending autosave included) before any tab
+   *  transition — stashed documents are therefore never dirty. */
+  const flushActive = async () => {
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+    }
+    if (get().dirty) {
+      await get().saveNow();
+    }
+  };
+
   return {
     projectRoot: null,
     sketches: [],
@@ -350,6 +422,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
     canonical: false,
     active: null,
     activeFile: null,
+    openDocs: [],
     selectedNodeId: null,
     selectionSource: null,
     dirty: false,
@@ -388,14 +461,23 @@ export const useSketchStore = create<SketchState>((set, get) => {
     },
 
     openSketch: async (sketchId) => {
-      const { projectRoot, sketches } = get();
+      const { projectRoot, sketches, openDocs, activeFile } = get();
       if (!projectRoot) return;
       const meta = sketches.find((m) => m.id === sketchId);
       if (!meta) {
         set({ lastError: `sketch ${sketchId} not in the list — refresh?` });
         return;
       }
+      if (meta.file === activeFile) return;
+      // Already open in a background tab → just switch.
+      if (openDocs.some((d) => d.file === meta.file)) {
+        await get().switchDoc(meta.file);
+        return;
+      }
       try {
+        // The current tab survives: flush + stash before loading the new one.
+        await flushActive();
+        stashActive();
         let text = await api.readSketchText(projectRoot, meta.file);
         let dirty = false;
         // Entity heal on open: a hand-written document without sk:id gets
@@ -413,8 +495,48 @@ export const useSketchStore = create<SketchState>((set, get) => {
         ingestText(text, dirty);
         const root = get().parsed?.sketch.root;
         if (root) set({ selectedNodeId: root.id });
+        stashActive(); // register the new tab
       } catch (e) {
         set({ lastError: String(e) });
+      }
+    },
+
+    switchDoc: async (file) => {
+      const s = get();
+      if (file === s.activeFile) return;
+      const target = s.openDocs.find((d) => d.file === file);
+      if (!target) return;
+      await flushActive();
+      stashActive();
+      // Re-read the target from openDocs (stashActive may have rewritten it).
+      const doc = get().openDocs.find((d) => d.file === file);
+      if (doc) restoreDoc(doc);
+    },
+
+    closeDoc: async (file) => {
+      const s = get();
+      const isActive = s.activeFile === file;
+      if (isActive) {
+        await flushActive();
+      }
+      const remaining = get().openDocs.filter((d) => d.file !== file);
+      set({ openDocs: remaining });
+      if (!isActive) return;
+      const neighbor = remaining[remaining.length - 1] ?? null;
+      if (neighbor) {
+        restoreDoc(neighbor);
+      } else {
+        set({
+          active: null,
+          activeFile: null,
+          parsed: null,
+          text: "",
+          parseError: null,
+          canonical: false,
+          selectedNodeId: null,
+          selectionSource: null,
+          dirty: false,
+        });
       }
     },
 
@@ -423,6 +545,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
       if (!projectRoot) return;
       try {
         await api.deleteSketch(projectRoot, sketchId);
+        // Drop any tab holding it (active or background).
+        const doomed = get().openDocs.find((d) => d.sketchId === sketchId);
         if (active?.id === sketchId) {
           if (autosaveTimer) {
             clearTimeout(autosaveTimer);
@@ -434,9 +558,13 @@ export const useSketchStore = create<SketchState>((set, get) => {
             parsed: null,
             text: "",
             parseError: null,
+            canonical: false,
             selectedNodeId: null,
             dirty: false,
           });
+        }
+        if (doomed) {
+          set({ openDocs: get().openDocs.filter((d) => d.file !== doomed.file) });
         }
         set({ lastError: null });
         await get().refresh();
@@ -446,19 +574,16 @@ export const useSketchStore = create<SketchState>((set, get) => {
     },
 
     closeSketch: async () => {
-      if (autosaveTimer) {
-        clearTimeout(autosaveTimer);
-        autosaveTimer = null;
-      }
-      if (get().dirty) {
-        await get().saveNow();
-      }
+      // Back to the list screen; open tabs stay alive (S2b).
+      await flushActive();
+      stashActive();
       set({
         active: null,
         activeFile: null,
         parsed: null,
         text: "",
         parseError: null,
+        canonical: false,
         selectedNodeId: null,
         selectionSource: null,
       });

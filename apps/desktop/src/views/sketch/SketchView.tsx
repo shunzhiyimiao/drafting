@@ -6,6 +6,7 @@ import {
   Redo2,
   Trash2,
   Undo2,
+  X,
 } from "lucide-react";
 import { useSketchStore } from "../../stores/sketch-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
@@ -32,6 +33,10 @@ export function SketchView() {
   const openSketch = useSketchStore((s) => s.openSketch);
   const closeSketch = useSketchStore((s) => s.closeSketch);
   const deleteSketchById = useSketchStore((s) => s.deleteSketchById);
+  const openDocs = useSketchStore((s) => s.openDocs);
+  const activeFile = useSketchStore((s) => s.activeFile);
+  const switchDoc = useSketchStore((s) => s.switchDoc);
+  const closeDoc = useSketchStore((s) => s.closeDoc);
   const undoBuffer = useSketchStore((s) => s.undoBuffer);
   const redoBuffer = useSketchStore((s) => s.redoBuffer);
   const canvasWidth = useSketchStore((s) => s.canvasWidth);
@@ -160,9 +165,37 @@ export function SketchView() {
           <ArrowLeft size={13} />
         </button>
         <PenTool size={12} className="text-accent" />
-        <span className="text-xs text-text-primary font-medium">{active.name}</span>
+        {/* Document tabs (S2b): every open doc, dirty dot, close, add. */}
+        <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto">
+          {openDocs.map((d) => (
+            <span
+              key={d.file}
+              className={`group flex items-center gap-1 pl-2 pr-1 py-1 rounded-md text-[11px] cursor-pointer shrink-0 ${
+                d.file === activeFile
+                  ? "bg-bg-hover text-text-primary"
+                  : "text-text-muted hover:text-text-secondary hover:bg-bg-hover/50"
+              }`}
+              onClick={() => d.file !== activeFile && void switchDoc(d.file)}
+            >
+              {d.name}
+              {(d.file === activeFile ? dirty : d.dirty) && (
+                <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void closeDoc(d.file);
+                }}
+                title="关闭（先保存）"
+                className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-error transition-opacity"
+              >
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
         <Dropdown
-          className="min-w-32"
+          className="min-w-28"
           value={active.id}
           options={sketches.map((s) => ({ value: s.id, label: s.name }))}
           onChange={(v) => void openSketch(v)}
@@ -170,7 +203,7 @@ export function SketchView() {
         <button
           onClick={() => void closeSketch()}
           title="回列表新建"
-          className="text-[10px] text-accent hover:text-accent-hover"
+          className="text-[10px] text-accent hover:text-accent-hover shrink-0"
         >
           + new
         </button>

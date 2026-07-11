@@ -15,6 +15,11 @@ import "../index.css";
 // Puppeteer's window into the store — assertion access for the e2e checks
 // (drag → text, ⌘Z → both revert). Dev-only page, never bundled.
 (window as unknown as { __sketchStore: typeof useSketchStore }).__sketchStore = useSketchStore;
+// And the dialect halves, so e2e can construct extra documents (S2b).
+(window as unknown as { __sketchCore: object }).__sketchCore = {
+  parseSketchMarkup,
+  printSketchMarkup,
+};
 
 const FIXTURE: Sketch = {
   id: "sk_harness",

@@ -88,33 +88,27 @@ export function SketchTextPanel() {
   }, [parseError, text]);
 
   // Canvas/outline selection → highlight the node's source (decoration).
-  const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+  // The collection is created per effect run and cleared on cleanup —
+  // decorations are model-bound, and tab switches (S2b) swap models.
   useEffect(() => {
     const editor = editorRef.current;
     const model = editor?.getModel();
     if (!editor || !model) return;
-    if (!decorationsRef.current) decorationsRef.current = editor.createDecorationsCollection();
     const range = selectedNodeId ? parsed?.ranges[selectedNodeId] : undefined;
-    if (!range) {
-      decorationsRef.current.clear();
-      return;
-    }
+    if (!range) return;
     const start = model.getPositionAt(range.start);
     const end = model.getPositionAt(range.end);
-    decorationsRef.current.set([
-      {
-        range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
-        options: { className: "sketch-node-highlight", isWholeLine: false },
-      },
+    const mRange = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+    const collection = editor.createDecorationsCollection([
+      { range: mRange, options: { className: "sketch-node-highlight", isWholeLine: false } },
     ]);
     if (selectionSource === "canvas") {
       revealingRef.current = true;
-      editor.revealRangeInCenterIfOutsideViewport(
-        new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
-      );
+      editor.revealRangeInCenterIfOutsideViewport(mRange);
       revealingRef.current = false;
     }
-  }, [selectedNodeId, selectionSource, parsed]);
+    return () => collection.clear();
+  }, [selectedNodeId, selectionSource, parsed, activeFile]);
 
   const fileName = activeFile?.split("/").pop() ?? "";
 
@@ -123,6 +117,9 @@ export function SketchTextPanel() {
       <style>{`.sketch-node-highlight { background: rgba(91, 124, 255, 0.14); border-radius: 2px; }`}</style>
       <div className="flex-1 min-h-0 overflow-hidden">
         <Editor
+          // Per-file Monaco model (S2b): tab switches swap models, so each
+          // document keeps its OWN undo stack and view state natively.
+          path={activeFile ?? "untitled.sketch"}
           value={text}
           language="xml"
           theme={`drafting-${themeVariant}`}
