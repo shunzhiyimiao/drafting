@@ -223,6 +223,8 @@ export function SketchCanvas() {
         className="relative flex flex-col bg-white text-slate-900 rounded-lg shadow-lg min-h-[420px] overflow-hidden"
         style={{ width: canvasWidth, transform: `scale(${zoom})`, transformOrigin: "top left" }}
         onMouseDownCapture={(e) => {
+          // Overlay chrome (selection handles — S4) owns its own gestures.
+          if ((e.target as HTMLElement).closest("[data-designer-overlay]")) return;
           // Canvas interactions select, never activate (inputs don't focus,
           // buttons don't fire — the sketch is a drawing, not a form).
           e.preventDefault();
@@ -230,6 +232,7 @@ export function SketchCanvas() {
           selectNode(hit ? hit.getAttribute("data-sk") : active.root.id);
         }}
         onPointerDownCapture={(e) => {
+          if ((e.target as HTMLElement).closest("[data-designer-overlay]")) return;
           if (sessionRef.current) return; // one gesture at a time
           const hit = (e.target as HTMLElement).closest("[data-sk]");
           const nodeId = hit?.getAttribute("data-sk");
