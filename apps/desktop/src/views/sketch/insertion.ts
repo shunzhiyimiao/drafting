@@ -31,8 +31,9 @@ export interface LayoutBox {
   boxId: string;
   nodeId: string;
   rect: Rect;
-  /** Present iff this element is a stack container (a valid drop target). */
-  container?: { direction: "row" | "col" };
+  /** Present iff this element is a container (a valid drop target): a
+   *  stack with flow axes, or a positioned frame (Rev 5). */
+  container?: { direction: "row" | "col" } | { frame: true };
   parentBoxId: string | null;
   /** Direct child boxes in document order (containers only). */
   childBoxIds: string[];
@@ -124,8 +125,10 @@ function deepestContainer(
   return target;
 }
 
-/** Nearest gap: count children whose main-axis midpoint precedes the point. */
+/** Nearest gap: count children whose main-axis midpoint precedes the point.
+ *  A frame has no gaps — new children append (z-top). */
 function gapIndex(point: Point, target: LayoutBox, byId: Map<string, LayoutBox>): number {
+  if ("frame" in target.container!) return target.childBoxIds.length;
   const axis = target.container!.direction === "row" ? point.x : point.y;
   let index = 0;
   for (const childId of target.childBoxIds) {
@@ -180,6 +183,18 @@ export function computeDrop(
   const byId = new Map(boxes.map((b) => [b.boxId, b]));
   const target = deepestContainer(point, boxes, byId, excludeNodeIds);
   if (!target) return null;
+
+  if ("frame" in target.container!) {
+    // Positioned region (Rev 5): the pointer IS the placement — no gaps,
+    // no side zones, no flank pairing. The caller turns the point into the
+    // new child's pos.
+    return {
+      kind: "insert",
+      containerId: target.nodeId,
+      index: target.childBoxIds.length,
+      targetBoxId: target.boxId,
+    };
+  }
 
   const sidesAreHorizontal = target.container!.direction === "col"; // cross axis
   const direction = sidesAreHorizontal ? "row" : "col";
@@ -281,7 +296,7 @@ export function indicatorFor(
 export function indicatorRect(insertion: Insertion, boxes: LayoutBox[]): Rect | null {
   const byId = new Map(boxes.map((b) => [b.boxId, b]));
   const target = byId.get(insertion.targetBoxId);
-  if (!target?.container) return null;
+  if (!target?.container || "frame" in target.container) return null;
   const children = target.childBoxIds
     .map((id) => byId.get(id))
     .filter((b): b is LayoutBox => b !== undefined);

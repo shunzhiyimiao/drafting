@@ -102,7 +102,7 @@ function Harness() {
   const active = useSketchStore((s) => s.active);
   const paletteDrag = useSketchStore((s) => s.paletteDrag);
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
-  const kinds: NodeKind[] = ["stack", "text", "button", "input", "image", "list"];
+  const kinds: NodeKind[] = ["stack", "frame", "text", "button", "input", "image", "list"];
   return (
     <div className="h-screen flex flex-col gap-2 p-3 bg-slate-800">
       <div className="flex items-center gap-2">

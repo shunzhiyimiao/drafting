@@ -25,7 +25,7 @@ function ancestryOf(root: SketchNode, nodeId: string): SketchNode[] {
       path.push(...next);
       return true;
     }
-    if (n.kind === "stack") return n.children.some((c) => walk(c, next));
+    if (n.kind === "stack" || n.kind === "frame") return n.children.some((c) => walk(c, next));
     if (n.kind === "list") return walk(n.template, next);
     return false;
   };
@@ -59,6 +59,7 @@ export function BottomDock() {
 
   const crumbLabel = (n: SketchNode) => {
     if (n.kind === "stack") return `Stack·${n.layout.direction}`;
+    if (n.kind === "frame") return "Frame";
     if (n.kind === "list") return `List·${n.dataKey}`;
     return n.kind.charAt(0).toUpperCase() + n.kind.slice(1);
   };

@@ -18,9 +18,14 @@ import { computeResize, type Handle, type Rect, type ResizeResult } from "./resi
  *  handlers ignore it (a handle press must not arm a node drag or reset
  *  the selection). */
 function labelOf(node: SketchNode): string {
-  if (node.kind === "stack") return `Stack · ${node.layout.direction}`;
-  if (node.kind === "list") return `List · ${node.dataKey}`;
-  return node.kind.charAt(0).toUpperCase() + node.kind.slice(1);
+  const base =
+    node.kind === "stack"
+      ? `Stack · ${node.layout.direction}`
+      : node.kind === "list"
+        ? `List · ${node.dataKey}`
+        : node.kind.charAt(0).toUpperCase() + node.kind.slice(1);
+  // A frame child wears its coordinates (Rev 5) — the position IS the fact.
+  return node.pos ? `${base} · ${node.pos.x}, ${node.pos.y}` : base;
 }
 
 const HANDLES: Handle[] = [

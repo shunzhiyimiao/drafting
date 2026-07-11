@@ -404,3 +404,45 @@ test("indicator geometry: vertical line in a row gap, horizontal in a col gap", 
   const append = indicatorRect({ containerId: "root", index: 3, targetBoxId: "root" }, boxes);
   assert.deepEqual(append, { x: 139, y: 0, width: 2, height: 50 });
 });
+
+// ---------------------------------------------------------- Frame (Rev 5) --
+
+test("frame targets: pointer = placement — append insert, no side zones, no flanks, no gap line", () => {
+  const boxes: LayoutBox[] = [
+    {
+      boxId: "root",
+      nodeId: "root",
+      rect: { x: 0, y: 0, width: 200, height: 300 },
+      container: { direction: "col" },
+      parentBoxId: null,
+      childBoxIds: ["fr"],
+    },
+    {
+      boxId: "fr",
+      nodeId: "fr",
+      rect: { x: 0, y: 10, width: 200, height: 200 },
+      container: { frame: true },
+      parentBoxId: "root",
+      childBoxIds: ["chip"],
+    },
+    { boxId: "chip", nodeId: "chip", rect: { x: 20, y: 40, width: 60, height: 30 }, parentBoxId: "fr", childBoxIds: [] },
+  ];
+
+  // Anywhere inside the frame — even a child's edge zone or its flank
+  // strip — is a plain insert into the frame (append: index = child count).
+  for (const p of [{ x: 25, y: 55 }, { x: 78, y: 55 }, { x: 150, y: 55 }, { x: 100, y: 180 }]) {
+    const plan = computeDrop(p, boxes);
+    assert.deepEqual(plan, { kind: "insert", containerId: "fr", index: 1, targetBoxId: "fr" });
+  }
+  // No gap line for frame inserts — the caller rings the frame instead.
+  const plan = computeDrop({ x: 100, y: 180 }, boxes)!;
+  assert.equal(indicatorFor(plan, boxes), null);
+
+  // Below the frame (inside root) the ordinary col insertion resumes.
+  const below = computeDrop({ x: 100, y: 260 }, boxes)!;
+  assert.equal(below.kind === "insert" && below.containerId, "root");
+
+  // The dragged subtree's own frame never receives itself.
+  const excluded = computeDrop({ x: 100, y: 180 }, boxes, new Set(["fr"]));
+  assert.equal(excluded?.kind === "insert" && excluded.containerId, "root");
+});

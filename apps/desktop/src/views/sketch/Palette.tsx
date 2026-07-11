@@ -8,6 +8,7 @@ import {
   Search,
   TextCursorInput,
   Type,
+  Frame as FrameIcon,
 } from "lucide-react";
 import { findNode, useSketchStore, type NodeKind } from "../../stores/sketch-store";
 
@@ -20,6 +21,7 @@ const CATEGORIES: { title: string; items: { kind: NodeKind; label: string; icon:
     title: "布局",
     items: [
       { kind: "stack", label: "Stack", icon: BoxSelect },
+      { kind: "frame", label: "Frame", icon: FrameIcon },
       { kind: "list", label: "List", icon: ListIcon },
     ],
   },

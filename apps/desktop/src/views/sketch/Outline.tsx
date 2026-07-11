@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUp,
   BoxSelect,
+  Frame as FrameIcon,
   Image as ImageIcon,
   List as ListIcon,
   MousePointerClick,
@@ -14,6 +15,7 @@ import { useSketchStore } from "../../stores/sketch-store";
 
 const KIND_ICON = {
   stack: BoxSelect,
+  frame: FrameIcon,
   list: ListIcon,
   text: Type,
   button: MousePointerClick,
@@ -25,6 +27,8 @@ function nodeLabel(node: SketchNode): string {
   switch (node.kind) {
     case "stack":
       return `stack · ${node.layout.direction}`;
+    case "frame":
+      return "frame";
     case "list":
       return `list · ${node.dataKey}`;
     case "text":
@@ -108,7 +112,7 @@ function OutlineNode({
       </div>
       {/* Indent guide (S2a): children render inside a guided rail so depth
           reads at a glance — LAYERS-panel style. */}
-      {node.kind === "stack" && node.children.length > 0 && (
+      {(node.kind === "stack" || node.kind === "frame") && node.children.length > 0 && (
         <div className="ml-3 border-l border-border/40">
           {node.children.map((child) => (
             <OutlineNode key={child.id} node={child} />

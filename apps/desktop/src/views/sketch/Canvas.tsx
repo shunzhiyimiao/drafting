@@ -1,8 +1,9 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { defaultTheme, sketchToIR, toElement, type CreateElement } from "@drafting/sketch-core";
+import { defaultTheme, sketchToIR, toElement, type CreateElement, type Pos } from "@drafting/sketch-core";
 import { allNodeIds, findNode, useSketchStore } from "../../stores/sketch-store";
-import { computeDrop, indicatorFor, type LayoutBox } from "./insertion";
+import { computeDrop, indicatorFor, type LayoutBox, type Rect } from "./insertion";
 import { measureLayoutBoxes } from "./designer/geometry";
+import { computeFrameMove } from "./designer/frame-move";
 import { SelectionOverlay } from "./designer/SelectionOverlay";
 import { DragPreview } from "./designer/DragPreview";
 import { beginSession, cancel, commit, move, setPlan } from "./interaction/drag-session";
@@ -26,6 +27,7 @@ export function SketchCanvas() {
   const moveNodeTo = useSketchStore((s) => s.moveNodeTo);
   const insertNodeBeside = useSketchStore((s) => s.insertNodeBeside);
   const moveNodeBeside = useSketchStore((s) => s.moveNodeBeside);
+  const updateNode = useSketchStore((s) => s.updateNode);
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
   const canvasWidth = useSketchStore((s) => s.canvasWidth);
   const zoom = useSketchStore((s) => s.zoom);
@@ -43,6 +45,28 @@ export function SketchCanvas() {
    *  footprint — without it, zoom > 1 leaves the sheet's bottom beyond the
    *  scroll range and zoom < 1 leaves dead scroll space. */
   const [surfaceH, setSurfaceH] = useState(0);
+  /** Frame-move gesture (Rev 5): dragging a Frame child writes its pos —
+   *  an attribute gesture in the S4 resize mold (pointerId-guarded, live
+   *  dashed preview, exactly-once commit as ONE updateNode = one undo
+   *  unit). Leaving the frame's box converts it into an ordinary tree-drag
+   *  session (one-way), so pulling a child OUT of a frame still works. */
+  interface FrameMoveGesture {
+    pointerId: number;
+    nodeId: string;
+    frameId: string;
+    startPos: Pos;
+    /** Logical surface points (client ÷ zoom) at the press. */
+    startPoint: { x: number; y: number };
+    startClient: { x: number; y: number };
+    /** The node's rendered rect at press (logical, surface-relative). */
+    nodeRect: Rect;
+    /** The frame's rendered rect at press (logical, surface-relative). */
+    frameRect: Rect;
+    label: string;
+    moved: boolean;
+  }
+  const frameMoveRef = useRef<FrameMoveGesture | null>(null);
+  const [frameLive, setFrameLive] = useState<Pos | null>(null);
 
   useEffect(() => {
     const el = surfaceRef.current;
@@ -99,6 +123,10 @@ export function SketchCanvas() {
     const cancelActive = () => {
       setPaletteDrag(null); // an unconsumed arm is stale the moment we cancel
       setWrapHint(null); // Escape/blur are universal dismissals
+      if (frameMoveRef.current) {
+        frameMoveRef.current = null; // cancel never mutates the document
+        setFrameLive(null);
+      }
       const s = sessionRef.current;
       if (!s) return;
       cancel(s); // (law 9 — result is always cancelled; nothing to apply)
@@ -108,6 +136,49 @@ export function SketchCanvas() {
     const onMove = (e: PointerEvent) => {
       const surface = surfaceRef.current;
       if (!surface) return;
+
+      // Frame-move gesture (Rev 5) — serviced before the session machinery.
+      const fm = frameMoveRef.current;
+      if (fm) {
+        if (e.pointerId !== fm.pointerId) return;
+        if (!fm.moved) {
+          const dist = Math.hypot(e.clientX - fm.startClient.x, e.clientY - fm.startClient.y);
+          if (dist < 4) return; // below threshold: still a click
+          fm.moved = true;
+        }
+        const point = surfacePoint(e.clientX, e.clientY);
+        const insideFrame =
+          point.x >= fm.frameRect.x &&
+          point.x <= fm.frameRect.x + fm.frameRect.width &&
+          point.y >= fm.frameRect.y &&
+          point.y <= fm.frameRect.y + fm.frameRect.height;
+        if (insideFrame) {
+          setFrameLive(computeFrameMove(fm.startPos, fm.startPoint, point));
+          return;
+        }
+        // Leaving the frame converts the gesture into an ordinary tree drag
+        // (one-way): the child can be pulled out to any flow target — or
+        // into another frame — through the exact same computeDrop path.
+        frameMoveRef.current = null;
+        setFrameLive(null);
+        const node = findNode(active.root, fm.nodeId);
+        if (node?.parent) {
+          updateSession(
+            beginSession(
+              e.pointerId,
+              {
+                type: "existing-node",
+                nodeId: fm.nodeId,
+                label: fm.label,
+                excludeNodeIds: new Set(allNodeIds(node.node)),
+              },
+              e.clientX,
+              e.clientY,
+            ),
+          );
+        }
+        return;
+      }
 
       let s = sessionRef.current;
       if (!s) {
@@ -147,19 +218,46 @@ export function SketchCanvas() {
       // (fresh read — same race note as onMove).
       if (useSketchStore.getState().paletteDrag) setPaletteDrag(null);
 
+      // Frame-move release: exactly-once commit (ref nulled first), ONE
+      // updateNode = one undo unit. A sub-threshold release is the click
+      // the mousedown handler already turned into a selection.
+      const fm = frameMoveRef.current;
+      if (fm) {
+        if (e.pointerId !== fm.pointerId) return;
+        frameMoveRef.current = null;
+        setFrameLive(null);
+        if (!fm.moved) return;
+        const pos = computeFrameMove(fm.startPos, fm.startPoint, surfacePoint(e.clientX, e.clientY));
+        updateNode(fm.nodeId, (n) => {
+          n.pos = pos;
+        });
+        return;
+      }
+
       const s = sessionRef.current;
       if (!s) return;
       const { session: ended, plan } = commit(s, e.pointerId);
       if (ended === s) return; // foreign pointer's release — session untouched
+      const gestureBoxes = boxesRef.current; // endGesture clears the ref
       endGesture();
       if (!plan) return; // click, or off-sheet drop: zero mutations
 
       // ONE mutation per gesture, through the existing four ops only.
       if (plan.kind === "insert") {
+        // A frame target consumes the pointer as the new child's position
+        // (frame-local, logical units — the store rounds).
+        const targetBox = gestureBoxes?.find((b) => b.boxId === plan.targetBoxId);
+        const framePos =
+          targetBox?.container && "frame" in targetBox.container
+            ? (() => {
+                const pt = surfacePoint(e.clientX, e.clientY);
+                return { x: pt.x - targetBox.rect.x, y: pt.y - targetBox.rect.y };
+              })()
+            : undefined;
         if (s.source.type === "palette") {
-          insertNodeAt(plan.containerId, plan.index, s.source.kind);
+          insertNodeAt(plan.containerId, plan.index, s.source.kind, framePos);
         } else {
-          moveNodeTo(s.source.nodeId, plan.containerId, plan.index);
+          moveNodeTo(s.source.nodeId, plan.containerId, plan.index, framePos);
         }
         setWrapHint(null); // a new edit outdates any lingering hint
       } else {
@@ -204,7 +302,7 @@ export function SketchCanvas() {
       // session state lives in refs. (The arm is deliberately NOT a dep:
       // handlers read it fresh, so arming never re-registers listeners.)
     };
-  }, [active, insertNodeAt, moveNodeTo, insertNodeBeside, moveNodeBeside, setPaletteDrag]);
+  }, [active, insertNodeAt, moveNodeTo, insertNodeBeside, moveNodeBeside, setPaletteDrag, updateNode]);
 
   if (!active) return null;
 
@@ -267,12 +365,52 @@ export function SketchCanvas() {
         onPointerDownCapture={(e) => {
           if ((e.target as HTMLElement).closest("[data-designer-overlay]")) return;
           setWrapHint(null); // any fresh press dismisses the hint
-          if (sessionRef.current) return; // one gesture at a time
+          if (sessionRef.current || frameMoveRef.current) return; // one gesture at a time
           const hit = (e.target as HTMLElement).closest("[data-sk]");
           const nodeId = hit?.getAttribute("data-sk");
           if (!nodeId || nodeId === active.root.id) return;
           const found = findNode(active.root, nodeId);
           if (!found?.parent) return; // root and template roots don't drag
+
+          // A Frame child starts a POSITION gesture, not a tree drag —
+          // the pointer writes x/y (Rev 5). Leaving the frame's box later
+          // converts it into a tree drag (see onMove).
+          if (found.parent.kind === "frame" && surfaceRef.current) {
+            const surface = surfaceRef.current;
+            const origin = surface.getBoundingClientRect();
+            const z = zoomRef.current;
+            const nodeEl = hit as HTMLElement;
+            const frameEl = surface.querySelector<HTMLElement>(
+              `[data-sk="${CSS.escape(found.parent.id)}"]`,
+            );
+            if (!frameEl) return;
+            const nr = nodeEl.getBoundingClientRect();
+            const fr = frameEl.getBoundingClientRect();
+            frameMoveRef.current = {
+              pointerId: e.pointerId,
+              nodeId,
+              frameId: found.parent.id,
+              startPos: found.node.pos ?? { x: 0, y: 0 },
+              startPoint: surfacePoint(e.clientX, e.clientY),
+              startClient: { x: e.clientX, y: e.clientY },
+              nodeRect: {
+                x: (nr.x - origin.x) / z,
+                y: (nr.y - origin.y) / z,
+                width: nr.width / z,
+                height: nr.height / z,
+              },
+              frameRect: {
+                x: (fr.x - origin.x) / z,
+                y: (fr.y - origin.y) / z,
+                width: fr.width / z,
+                height: fr.height / z,
+              },
+              label: found.node.kind,
+              moved: false,
+            };
+            return;
+          }
+
           updateSession(
             beginSession(
               e.pointerId,
@@ -315,9 +453,27 @@ export function SketchCanvas() {
             }}
           />
         )}
+        {/* Frame-move live preview (Rev 5): dashed rect at the pending
+            position + x,y badge. The document mutates only on release. */}
+        {frameLive && frameMoveRef.current && (
+          <div
+            data-designer-overlay
+            className="absolute pointer-events-none z-20 border-2 border-dashed border-blue-400 rounded-[2px]"
+            style={{
+              left: frameMoveRef.current.frameRect.x + frameLive.x,
+              top: frameMoveRef.current.frameRect.y + frameLive.y,
+              width: frameMoveRef.current.nodeRect.width,
+              height: frameMoveRef.current.nodeRect.height,
+            }}
+          >
+            <div className="absolute -bottom-5 left-0 px-1.5 py-0.5 rounded bg-slate-900/85 text-white text-[9px] whitespace-nowrap">
+              {frameLive.x}, {frameLive.y}
+            </div>
+          </div>
+        )}
         {/* Selection frame + handles + kind chip (S3). Hidden mid-drag so
             the preview and indicator own the stage. */}
-        {!dragging && <SelectionOverlay surface={surfaceRef.current} />}
+        {!dragging && !frameLive && <SelectionOverlay surface={surfaceRef.current} />}
         {!dragging && wrapHint && (
           <WrapSpreadHint
             surface={surfaceRef.current}
@@ -399,9 +555,10 @@ function WrapSpreadHint({
 }
 
 /** React createElement with one canvas-only shim: fixed-px classes
- *  (`w-[240px]`) are arbitrary values Tailwind can't see at runtime, so they
- *  are mirrored to inline style. The className itself stays untouched —
- *  parity with the generated code is byte-level. */
+ *  (`w-[240px]`) and frame positions (`left-[x] top-[y]`, Rev 5) are
+ *  arbitrary values Tailwind can't see at runtime, so they are mirrored to
+ *  inline style. The className itself stays untouched — parity with the
+ *  generated code is byte-level. */
 const canvasCreateElement: CreateElement<React.ReactElement> = (tag, props, ...children) => {
   const p: Record<string, unknown> = { ...(props ?? {}) };
   const className = typeof p.className === "string" ? p.className : "";
@@ -411,6 +568,11 @@ const canvasCreateElement: CreateElement<React.ReactElement> = (tag, props, ...c
     if (m) {
       if (m[1] === "w") style.width = Number(m[2]);
       else style.height = Number(m[2]);
+    }
+    const pos = /^(left|top)-\[(-?\d+)px\]$/.exec(cls);
+    if (pos) {
+      if (pos[1] === "left") style.left = Number(pos[2]);
+      else style.top = Number(pos[2]);
     }
   }
   if (Object.keys(style).length > 0) {

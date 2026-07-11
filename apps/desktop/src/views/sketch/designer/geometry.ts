@@ -15,13 +15,20 @@
 import type { SketchNode } from "@drafting/sketch-core";
 import type { LayoutBox } from "../insertion";
 
-/** The stack containers of the Spec tree (drop targets), incl. templates. */
+/** Container facts per node id: a stack's direction, or the frame marker
+ *  (Rev 5 — a positioned drop target with no flow axes). */
+export type ContainerInfo = NonNullable<LayoutBox["container"]>;
+
+/** The containers of the Spec tree (drop targets), incl. templates. */
 export function collectContainers(
   root: SketchNode,
-  map = new Map<string, "row" | "col">(),
-): Map<string, "row" | "col"> {
+  map = new Map<string, ContainerInfo>(),
+): Map<string, ContainerInfo> {
   if (root.kind === "stack") {
-    map.set(root.id, root.layout.direction);
+    map.set(root.id, { direction: root.layout.direction });
+    for (const child of root.children) collectContainers(child, map);
+  } else if (root.kind === "frame") {
+    map.set(root.id, { frame: true });
     for (const child of root.children) collectContainers(child, map);
   } else if (root.kind === "list") {
     collectContainers(root.template, map);
@@ -50,7 +57,7 @@ export function measureLayoutBoxes(
   const boxes: LayoutBox[] = els.map((el, i) => {
     const r = el.getBoundingClientRect();
     const nodeId = el.getAttribute("data-sk") ?? "";
-    const direction = containers.get(nodeId);
+    const info = containers.get(nodeId);
     const parentEl = el.parentElement?.closest<HTMLElement>("[data-sk]") ?? null;
     return {
       boxId: `b${i}`,
@@ -61,7 +68,7 @@ export function measureLayoutBoxes(
         width: r.width / scale,
         height: r.height / scale,
       },
-      container: direction ? { direction } : undefined,
+      container: info,
       parentBoxId: parentEl && surface.contains(parentEl) ? (idOf.get(parentEl) ?? null) : null,
       childBoxIds: [],
     };

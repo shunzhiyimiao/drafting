@@ -5,8 +5,10 @@ import {
   printSketchMarkup,
   MarkupError,
   type Container,
+  type FrameP,
   type ListP,
   type ParsedSketch,
+  type Pos,
   type Range,
   type Sketch,
   type SketchNode,
@@ -126,8 +128,10 @@ interface SketchState {
   updateNode: (nodeId: string, mutate: (node: SketchNode) => void) => void;
   deleteNode: (nodeId: string) => void;
   moveNode: (nodeId: string, direction: "up" | "down") => void;
-  insertNodeAt: (containerId: string, index: number, kind: NodeKind) => void;
-  moveNodeTo: (nodeId: string, containerId: string, index: number) => void;
+  /** `pos` (Rev 5): the drop point in the target FRAME's local coords —
+   *  ignored for stack targets. Frame inserts append (z-top). */
+  insertNodeAt: (containerId: string, index: number, kind: NodeKind, pos?: Pos) => void;
+  moveNodeTo: (nodeId: string, containerId: string, index: number, pos?: Pos) => void;
   /** Wrap ops return the new wrapper's id (the post-wrap hint anchors to
    *  it), or null when the op was refused. `spread` = §7.1 amendment:
    *  wrapper gets main="between" + main-axis fill instead of hugging. */
@@ -163,10 +167,10 @@ let buffer: BufferHandle | null = null;
 export function findNode(
   root: SketchNode,
   nodeId: string,
-  parent: Container | null = null,
-): { node: SketchNode; parent: Container | null } | null {
+  parent: Container | FrameP | null = null,
+): { node: SketchNode; parent: Container | FrameP | null } | null {
   if (root.id === nodeId) return { node: root, parent };
-  if (root.kind === "stack") {
+  if (root.kind === "stack" || root.kind === "frame") {
     for (const child of root.children) {
       const hit = findNode(child, nodeId, root);
       if (hit) return hit;
@@ -180,7 +184,7 @@ export function findNode(
 
 export function allNodeIds(root: SketchNode, out: string[] = []): string[] {
   out.push(root.id);
-  if (root.kind === "stack") {
+  if (root.kind === "stack" || root.kind === "frame") {
     for (const child of root.children) allNodeIds(child, out);
   }
   if (root.kind === "list") allNodeIds(root.template, out);
@@ -189,7 +193,7 @@ export function allNodeIds(root: SketchNode, out: string[] = []): string[] {
 
 /** The list whose template subtree contains `nodeId`. */
 export function findEnclosingList(root: SketchNode, nodeId: string): ListP | null {
-  if (root.kind === "stack") {
+  if (root.kind === "stack" || root.kind === "frame") {
     for (const child of root.children) {
       const hit = findEnclosingList(child, nodeId);
       if (hit) return hit;
@@ -208,7 +212,7 @@ export function findEnclosingList(root: SketchNode, nodeId: string): ListP | nul
  *  identity across a reprint, where session-temp ids get reassigned. */
 function pathOfNode(root: SketchNode, nodeId: string, path: number[] = []): number[] | null {
   if (root.id === nodeId) return path;
-  if (root.kind === "stack") {
+  if (root.kind === "stack" || root.kind === "frame") {
     for (let i = 0; i < root.children.length; i++) {
       const hit = pathOfNode(root.children[i], nodeId, [...path, i]);
       if (hit) return hit;
@@ -227,7 +231,7 @@ function nodeAtPath(root: SketchNode, path: number[]): SketchNode | null {
       if (cur.kind !== "list") return null;
       cur = cur.template;
     } else {
-      if (cur.kind !== "stack" || step >= cur.children.length) return null;
+      if ((cur.kind !== "stack" && cur.kind !== "frame") || step >= cur.children.length) return null;
       cur = cur.children[step];
     }
   }
@@ -266,6 +270,16 @@ export function defaultNode(kind: NodeKind): SketchNode {
         },
         sizing: { width: fill, height: hug },
         children: [],
+      };
+    case "frame":
+      // The positioned region (Rev 5): fill × fixed-200 — hug is illegal
+      // (absolute children give a frame no intrinsic size).
+      return {
+        kind: "frame",
+        id,
+        sizing: { width: fill, height: { mode: "fixed", px: 200 } },
+        children: [],
+        style: { bg: "raised", radius: "md" },
       };
     case "text":
       return { kind: "text", id, role: "body", content: "Text", sizing: { width: hug, height: hug } };
@@ -320,6 +334,15 @@ export function defaultNode(kind: NodeKind): SketchNode {
         sizing: { width: fill, height: hug },
       };
   }
+}
+
+/** Entering a frame: a node takes a position (rounded) and sheds fill
+ *  sizing (fill has no meaning at a point — validate would reject it).
+ *  Leaving a frame is the mirror: the position is deleted. */
+function placeInFrame(node: SketchNode, pos: Pos | undefined) {
+  node.pos = pos ? { x: Math.round(pos.x), y: Math.round(pos.y) } : { x: 8, y: 8 };
+  if (node.sizing.width.mode === "fill") node.sizing.width = { mode: "hug" };
+  if (node.sizing.height.mode === "fill") node.sizing.height = { mode: "hug" };
 }
 
 /** A wrapper stack for wrap ops (side-drop + explicit Wrap in Stack).
@@ -685,8 +708,13 @@ export const useSketchStore = create<SketchState>((set, get) => {
       const child = defaultNode(kind);
       get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, parentId);
-        const target = hit?.node.kind === "stack" ? hit.node : (hit?.parent ?? null);
-        if (target) target.children.push(child);
+        const target =
+          hit?.node.kind === "stack" || hit?.node.kind === "frame"
+            ? hit.node
+            : (hit?.parent ?? null);
+        if (!target) return;
+        if (target.kind === "frame") placeInFrame(child, undefined);
+        target.children.push(child);
       }, child.id);
     },
 
@@ -720,23 +748,40 @@ export const useSketchStore = create<SketchState>((set, get) => {
       });
     },
 
-    insertNodeAt: (containerId, index, kind) => {
+    insertNodeAt: (containerId, index, kind, pos) => {
       const child = defaultNode(kind);
       get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, containerId);
+        if (hit?.node.kind === "frame") {
+          // Positioned insert: order is z-order — new arrivals paint on top.
+          placeInFrame(child, pos);
+          hit.node.children.push(child);
+          return;
+        }
         if (hit?.node.kind !== "stack") return;
         const at = Math.max(0, Math.min(index, hit.node.children.length));
         hit.node.children.splice(at, 0, child);
       }, child.id);
     },
 
-    moveNodeTo: (nodeId, containerId, index) => {
+    moveNodeTo: (nodeId, containerId, index, pos) => {
       const { active } = get();
       if (!active) return;
       const dragged = findNode(active.root, nodeId);
       if (!dragged?.parent) return; // root and template roots are locked
       if (allNodeIds(dragged.node).includes(containerId)) return; // no self-nesting
       const target = findNode(active.root, containerId);
+      if (target?.node.kind === "frame") {
+        get().applyTreeEdit((draft) => {
+          const d = findNode(draft.root, nodeId);
+          const t = findNode(draft.root, containerId);
+          if (!d?.parent || t?.node.kind !== "frame") return;
+          d.parent.children = d.parent.children.filter((c) => c.id !== nodeId);
+          placeInFrame(d.node, pos);
+          t.node.children.push(d.node); // append = paint on top
+        }, nodeId);
+        return;
+      }
       if (target?.node.kind !== "stack") return;
       const from = dragged.parent.children.findIndex((c) => c.id === nodeId);
       const sameParent = dragged.parent.id === containerId;
@@ -750,6 +795,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
         if (!d?.parent || t?.node.kind !== "stack") return;
         const i = d.parent.children.findIndex((c) => c.id === nodeId);
         d.parent.children.splice(i, 1);
+        delete d.node.pos; // leaving a frame: flow children carry no position
         t.node.children.splice(adjusted, 0, d.node);
       }, nodeId);
     },
@@ -802,6 +848,11 @@ export const useSketchStore = create<SketchState>((set, get) => {
         if (!hit?.parent) return;
         const i = hit.parent.children.findIndex((c) => c.id === nodeId);
         wrapper.children = [hit.node];
+        if (hit.node.pos) {
+          // A frame child hands its position to the wrapper it enters.
+          wrapper.pos = hit.node.pos;
+          delete hit.node.pos;
+        }
         hit.parent.children[i] = wrapper;
       }, wrapper.id);
     },

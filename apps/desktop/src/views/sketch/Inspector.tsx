@@ -145,9 +145,13 @@ function TokenSelect<T extends string>({
 function SizeControl({
   value,
   onChange,
+  exclude = [],
 }: {
   value: Size;
   onChange: (s: Size) => void;
+  /** Modes the Spec forbids in this position (Rev 5: frames can't hug,
+   *  frame children can't fill) — hidden rather than error-surfaced. */
+  exclude?: Size["mode"][];
 }) {
   return (
     <div className="flex gap-1">
@@ -158,7 +162,7 @@ function SizeControl({
           { value: "hug", label: "hug" },
           { value: "fill", label: "fill" },
           { value: "fixed", label: "fixed" },
-        ]}
+        ].filter((o) => !exclude.includes(o.value as Size["mode"]))}
         onChange={(v) => {
           const mode = v as Size["mode"];
           onChange(mode === "fixed" ? { mode, px: 100 } : { mode });
@@ -274,22 +278,58 @@ function NodeSection({ node }: { node: SketchNode }) {
   // Binds only resolve inside a list template — the control follows.
   const enclosingList = findEnclosingList(active.root, node.id);
 
+  const sizeExclude: Size["mode"][] =
+    node.kind === "frame" ? ["hug"] : node.pos ? ["fill"] : [];
+
   return (
     <>
       <Section title={`${node.kind} · sizing`}>
         <Row label="width">
           <SizeControl
             value={node.sizing.width}
+            exclude={sizeExclude}
             onChange={(size) => up((n) => (n.sizing.width = size))}
           />
         </Row>
         <Row label="height">
           <SizeControl
             value={node.sizing.height}
+            exclude={sizeExclude}
             onChange={(size) => up((n) => (n.sizing.height = size))}
           />
         </Row>
       </Section>
+
+      {/* Position (Rev 5): a frame child's coordinates — document
+          attributes, same undo stack as everything else. */}
+      {node.pos && (
+        <Section title="position">
+          <Row label="x">
+            <input
+              type="number"
+              className={inputCls}
+              value={node.pos.x}
+              onChange={(e) =>
+                up((n) => {
+                  if (n.pos) n.pos.x = Math.round(Number(e.target.value) || 0);
+                })
+              }
+            />
+          </Row>
+          <Row label="y">
+            <input
+              type="number"
+              className={inputCls}
+              value={node.pos.y}
+              onChange={(e) =>
+                up((n) => {
+                  if (n.pos) n.pos.y = Math.round(Number(e.target.value) || 0);
+                })
+              }
+            />
+          </Row>
+        </Section>
+      )}
 
       {node.kind === "stack" && (
         <Section title="layout">
