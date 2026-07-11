@@ -30,6 +30,16 @@ export type NodeKind = SketchNode["kind"];
 type BufferWriter = (text: string) => void;
 type BufferRevealer = (range: Range) => void;
 
+/** The Monaco surface the text panel registers (S2a widens the old
+ *  writer/revealer pair): undo/redo let the designer toolbar drive the ONE
+ *  shared stack without owning the editor. */
+export interface BufferHandle {
+  write: BufferWriter;
+  reveal: BufferRevealer;
+  undo: () => void;
+  redo: () => void;
+}
+
 export interface ParseIssue {
   message: string;
   line: number;
@@ -71,8 +81,17 @@ interface SketchState {
   deleteSketchById: (sketchId: string) => Promise<void>;
   closeSketch: () => Promise<void>;
   selectNode: (nodeId: string | null, source?: "canvas" | "text") => void;
-  /** Text panel wiring: Monaco registers its write/reveal surface. */
-  registerBuffer: (writer: BufferWriter, revealer: BufferRevealer) => () => void;
+  /** Text panel wiring: Monaco registers its buffer surface. */
+  registerBuffer: (handle: BufferHandle) => () => void;
+  /** Designer toolbar → the shared Monaco undo stack. */
+  undoBuffer: () => void;
+  redoBuffer: () => void;
+  /** Designer viewport (visual only — K1 untouched): sheet width preset and
+   *  canvas zoom. Geometry divides by zoom, so drop math is zoom-proof. */
+  canvasWidth: number;
+  zoom: number;
+  setCanvasWidth: (px: number) => void;
+  setZoom: (z: number) => void;
   /** Monaco onChange → the document changed (typed or programmatic). */
   setTextFromBuffer: (text: string) => void;
   /** Format = canonical print (a no-op when already canonical). */
@@ -99,8 +118,7 @@ interface SketchState {
 }
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
-let bufferWriter: BufferWriter | null = null;
-let bufferRevealer: BufferRevealer | null = null;
+let buffer: BufferHandle | null = null;
 
 /** Find a node and its parent container in the tree. A list's template
  *  reports a null parent — it is the list's required single root. */
@@ -316,8 +334,8 @@ export const useSketchStore = create<SketchState>((set, get) => {
   /** Write new text into the document through the Monaco buffer when wired
    *  (single undo stack); fall back to plain state otherwise. */
   const writeText = (text: string) => {
-    if (bufferWriter) {
-      bufferWriter(text); // Monaco onChange → setTextFromBuffer → ingest
+    if (buffer) {
+      buffer.write(text); // Monaco onChange → setTextFromBuffer → ingest
     } else {
       ingestText(text, true);
     }
@@ -452,18 +470,24 @@ export const useSketchStore = create<SketchState>((set, get) => {
       // (text cursor → canvas) lives in the text panel. Source guards loops.
       if (source === "canvas" && nodeId) {
         const range = get().parsed?.ranges[nodeId];
-        if (range && bufferRevealer) bufferRevealer(range);
+        if (range && buffer) buffer.reveal(range);
       }
     },
 
-    registerBuffer: (writer, revealer) => {
-      bufferWriter = writer;
-      bufferRevealer = revealer;
+    registerBuffer: (handle) => {
+      buffer = handle;
       return () => {
-        if (bufferWriter === writer) bufferWriter = null;
-        if (bufferRevealer === revealer) bufferRevealer = null;
+        if (buffer === handle) buffer = null;
       };
     },
+
+    undoBuffer: () => buffer?.undo(),
+    redoBuffer: () => buffer?.redo(),
+
+    canvasWidth: 768,
+    zoom: 1,
+    setCanvasWidth: (px) => set({ canvasWidth: px }),
+    setZoom: (z) => set({ zoom: Math.min(2, Math.max(0.25, z)) }),
 
     setTextFromBuffer: (text) => {
       if (text === get().text) return;

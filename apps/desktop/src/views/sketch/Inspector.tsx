@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Link2, Link2Off, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, Link2, Link2Off, Plus, Trash2 } from "lucide-react";
 import {
   BUTTON_VARIANTS,
   COLOR_TOKENS,
@@ -79,11 +79,23 @@ function ProblemsSection() {
 
 // ---------------------------------------------------------- grid helpers --
 
+/** Inspector section (S2a): collapsible, designer-panel style. Open by
+ *  default; state is per-mount (deliberately not persisted). */
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
   return (
-    <div>
-      <h3 className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">{title}</h3>
-      <div className="flex flex-col gap-1.5">{children}</div>
+    <div className="border-b border-border/30 pb-2 last:border-b-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between text-[10px] uppercase tracking-widest text-text-muted mb-1.5 hover:text-text-secondary"
+      >
+        {title}
+        <ChevronDown
+          size={11}
+          className={`transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {open && <div className="flex flex-col gap-1.5">{children}</div>}
     </div>
   );
 }

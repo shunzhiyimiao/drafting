@@ -1,41 +1,29 @@
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
-  BoxSelect,
-  Group,
-  Image as ImageIcon,
-  List as ListIcon,
-  MousePointerClick,
   PenTool,
   Plus,
-  TextCursorInput,
+  Redo2,
   Trash2,
-  Type,
+  Undo2,
 } from "lucide-react";
-import { findNode, useSketchStore, type NodeKind } from "../../stores/sketch-store";
+import { useSketchStore } from "../../stores/sketch-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { getProjectRoot } from "../../lib/app-bootstrap";
 import { Dropdown } from "../../components/Dropdown";
 import { SketchOutline } from "./Outline";
 import { SketchCanvas } from "./Canvas";
 import { SketchInspector } from "./Inspector";
-import { SketchTextPanel } from "./SketchTextPanel";
+import { SketchPalette } from "./Palette";
+import { BottomDock } from "./BottomDock";
 
-/** The §7 toolbox: exactly the finite primitive set. Clicking adds into the
- *  selected container (structured add — no free coordinates, K1). */
-const TOOLBOX: { kind: NodeKind; label: string; icon: typeof Type }[] = [
-  { kind: "stack", label: "Stack", icon: BoxSelect },
-  { kind: "text", label: "Text", icon: Type },
-  { kind: "button", label: "Button", icon: MousePointerClick },
-  { kind: "input", label: "Input", icon: TextCursorInput },
-  { kind: "image", label: "Image", icon: ImageIcon },
-  { kind: "list", label: "List", icon: ListIcon },
-];
+/** Sheet width presets (visual viewport only — K1 untouched). */
+const WIDTHS = [375, 768, 1024, 1280];
+const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5];
 
 export function SketchView() {
   const sketches = useSketchStore((s) => s.sketches);
   const active = useSketchStore((s) => s.active);
-  const selectedNodeId = useSketchStore((s) => s.selectedNodeId);
   const dirty = useSketchStore((s) => s.dirty);
   const saving = useSketchStore((s) => s.saving);
   const lastError = useSketchStore((s) => s.lastError);
@@ -44,12 +32,12 @@ export function SketchView() {
   const openSketch = useSketchStore((s) => s.openSketch);
   const closeSketch = useSketchStore((s) => s.closeSketch);
   const deleteSketchById = useSketchStore((s) => s.deleteSketchById);
-  const addNode = useSketchStore((s) => s.addNode);
-  const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
-  const wrapInStack = useSketchStore((s) => s.wrapInStack);
-  // Structured edits disable while the document is outside the dialect —
-  // editing a stale tree would clobber the user's text.
-  const parseError = useSketchStore((s) => s.parseError);
+  const undoBuffer = useSketchStore((s) => s.undoBuffer);
+  const redoBuffer = useSketchStore((s) => s.redoBuffer);
+  const canvasWidth = useSketchStore((s) => s.canvasWidth);
+  const zoom = useSketchStore((s) => s.zoom);
+  const setCanvasWidth = useSketchStore((s) => s.setCanvasWidth);
+  const setZoom = useSketchStore((s) => s.setZoom);
 
   useEffect(() => {
     void getProjectRoot().then(async (root) => {
@@ -127,9 +115,7 @@ export function SketchView() {
             </div>
           )}
           <div className="flex items-center gap-2">
-            {/* min-w-0 lets the input shrink below its placeholder width —
-                without it the row overflows the panel padding and the button
-                lands flush against the border. */}
+            {/* min-w-0 lets the input shrink below its placeholder width. */}
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -162,105 +148,89 @@ export function SketchView() {
   }
 
   return (
-    <div className="h-full flex gap-3 p-3">
-      {/* Left — toolbox + outline (the VS designer's left rail) */}
-      <div className="w-56 flex flex-col gap-3 shrink-0">
-        <div className="glass-panel p-2">
-          <h3 className="text-[10px] uppercase tracking-wider text-text-muted px-1 mb-1.5">
-            Toolbox
-          </h3>
-          <div className="grid grid-cols-2 gap-1">
-            {TOOLBOX.map(({ kind, label, icon: Icon }) => (
-              <button
-                key={kind}
-                onClick={() => selectedNodeId && addNode(selectedNodeId, kind)}
-                // Drag-to-canvas (§7.1): arm the palette drag; the canvas's
-                // session controller consumes the arm on this pointer's
-                // first move (S1 — one-shot, pointerId-bound). A plain click
-                // (pointer released on the button) still adds into the
-                // selection.
-                onPointerDown={(e) => setPaletteDrag({ kind, pointerId: e.pointerId })}
-                disabled={!selectedNodeId || !!parseError}
-                title={`Add ${label} into the selected container — or drag it onto the canvas`}
-                className="flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-40"
-              >
-                <Icon size={12} />
-                {label}
-              </button>
-            ))}
-          </div>
-          {/* The explicit structure command (§7.1): wrapping is never
-              inferred from a drop — it is asked for, on the selection. */}
-          <button
-            onClick={() => selectedNodeId && wrapInStack(selectedNodeId)}
-            disabled={
-              !selectedNodeId ||
-              !active ||
-              !!parseError ||
-              !findNode(active.root, selectedNodeId)?.parent
-            }
-            title="Wrap the selected node in a new Stack"
-            className="mt-1 w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-40"
-          >
-            <Group size={12} />
-            Wrap in Stack
-          </button>
-        </div>
-        <div className="glass-panel flex-1 overflow-auto p-2">
-          <h3 className="text-[10px] uppercase tracking-wider text-text-muted px-1 mb-1.5">
-            Outline
-          </h3>
-          <SketchOutline />
-        </div>
+    <div className="h-full flex flex-col gap-2 p-2">
+      {/* Designer toolbar (S2a): document identity · undo/redo (the ONE
+          Monaco stack) · viewport width/zoom · save state. */}
+      <div className="glass-panel px-3 py-1.5 flex items-center gap-2 shrink-0">
+        <button
+          onClick={() => void closeSketch()}
+          title="返回列表（先保存）"
+          className="text-text-muted hover:text-accent"
+        >
+          <ArrowLeft size={13} />
+        </button>
+        <PenTool size={12} className="text-accent" />
+        <span className="text-xs text-text-primary font-medium">{active.name}</span>
+        <Dropdown
+          className="min-w-32"
+          value={active.id}
+          options={sketches.map((s) => ({ value: s.id, label: s.name }))}
+          onChange={(v) => void openSketch(v)}
+        />
+        <button
+          onClick={() => void closeSketch()}
+          title="回列表新建"
+          className="text-[10px] text-accent hover:text-accent-hover"
+        >
+          + new
+        </button>
+
+        <span className="mx-1 h-4 w-px bg-border/60" />
+        <button onClick={undoBuffer} title="撤销 (⌘Z)" className="text-text-muted hover:text-text-primary">
+          <Undo2 size={13} />
+        </button>
+        <button onClick={redoBuffer} title="重做 (⇧⌘Z)" className="text-text-muted hover:text-text-primary">
+          <Redo2 size={13} />
+        </button>
+
+        <span className="flex-1" />
+
+        <Dropdown
+          className="w-24"
+          value={String(canvasWidth)}
+          options={WIDTHS.map((w) => ({ value: String(w), label: `${w} px` }))}
+          onChange={(v) => setCanvasWidth(Number(v))}
+        />
+        <Dropdown
+          className="w-20"
+          value={String(zoom)}
+          options={ZOOMS.map((z) => ({ value: String(z), label: `${Math.round(z * 100)}%` }))}
+          onChange={(v) => setZoom(Number(v))}
+        />
+        <span className="text-[10px] text-text-muted w-40 text-right">
+          {saving ? "saving…" : dirty ? "unsaved" : "saved · codegen follows in ~1s"}
+        </span>
       </div>
 
-      {/* Center — the design surface */}
-      <div className="flex-1 flex flex-col gap-2 min-w-0">
-        <div className="glass-panel px-3 py-1.5 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs">
-            <button
-              onClick={() => void closeSketch()}
-              title="Back to sketches (saves first)"
-              className="text-text-muted hover:text-accent"
-            >
-              <ArrowLeft size={13} />
-            </button>
-            <PenTool size={12} className="text-accent" />
-            <span className="text-text-primary font-medium">{active.name}</span>
-            <Dropdown
-              className="min-w-32"
-              value={active.id}
-              options={sketches.map((s) => ({ value: s.id, label: s.name }))}
-              onChange={(v) => void openSketch(v)}
-            />
-            <button
-              onClick={() => void closeSketch()}
-              title="Back to the list to create a new sketch"
-              className="text-[10px] text-accent hover:text-accent-hover"
-            >
-              + new
-            </button>
+      <div className="flex-1 min-h-0 flex gap-2">
+        {/* Left — palette + layers */}
+        <div className="w-52 flex flex-col gap-2 shrink-0 min-h-0">
+          <SketchPalette />
+          <div className="glass-panel flex-1 overflow-auto p-2 min-h-0">
+            <h3 className="text-[9px] uppercase tracking-widest text-text-muted px-1 mb-1.5">
+              Layers
+            </h3>
+            <SketchOutline />
           </div>
-          <span className="text-[10px] text-text-muted">
-            {saving ? "saving…" : dirty ? "unsaved" : "saved · codegen follows in ~1s"}
-          </span>
         </div>
-        {/* Text-as-truth (Rev 4 §7): the text pane is the PRIMARY editing
-            surface; the canvas above it is the live projection. */}
-        <div className="flex-[4] min-h-0 flex flex-col">
-          <SketchCanvas />
-        </div>
-        <div className="flex-[5] min-h-0">
-          <SketchTextPanel />
-        </div>
-        {lastError && (
-          <p className="text-[10px] text-error px-1 shrink-0">{lastError}</p>
-        )}
-      </div>
 
-      {/* Right — the property grid */}
-      <div className="w-80 shrink-0 glass-panel overflow-auto">
-        <SketchInspector />
+        {/* Center — canvas over the bottom dock (markup/code) */}
+        <div className="flex-1 flex flex-col gap-2 min-w-0 min-h-0">
+          <div className="flex-[5] min-h-0 flex flex-col">
+            <SketchCanvas />
+          </div>
+          <div className="flex-[4] min-h-0">
+            <BottomDock />
+          </div>
+          {lastError && (
+            <p className="text-[10px] text-error px-1 shrink-0">{lastError}</p>
+          )}
+        </div>
+
+        {/* Right — inspector */}
+        <div className="w-80 shrink-0 glass-panel overflow-auto min-h-0">
+          <SketchInspector />
+        </div>
       </div>
     </div>
   );

@@ -29,8 +29,18 @@ export function collectContainers(
   return map;
 }
 
-/** Snapshot every rendered [data-sk] element as a LayoutBox. */
-export function measureLayoutBoxes(surface: HTMLElement, root: SketchNode): LayoutBox[] {
+/** Snapshot every rendered [data-sk] element as a LayoutBox.
+ *
+ *  `scale` (S2a): when the surface renders under a CSS transform zoom,
+ *  getBoundingClientRect returns VISUAL coordinates. Dividing both the
+ *  rects here and the pointer (caller-side) by the same scale keeps all
+ *  drop math in logical surface units — overlays drawn inside the scaled
+ *  surface then line up by construction. Default 1 = exact old behavior. */
+export function measureLayoutBoxes(
+  surface: HTMLElement,
+  root: SketchNode,
+  scale = 1,
+): LayoutBox[] {
   const containers = collectContainers(root);
   const origin = surface.getBoundingClientRect();
   const els = Array.from(surface.querySelectorAll<HTMLElement>("[data-sk]"));
@@ -45,7 +55,12 @@ export function measureLayoutBoxes(surface: HTMLElement, root: SketchNode): Layo
     return {
       boxId: `b${i}`,
       nodeId,
-      rect: { x: r.x - origin.x, y: r.y - origin.y, width: r.width, height: r.height },
+      rect: {
+        x: (r.x - origin.x) / scale,
+        y: (r.y - origin.y) / scale,
+        width: r.width / scale,
+        height: r.height / scale,
+      },
       container: direction ? { direction } : undefined,
       parentBoxId: parentEl && surface.contains(parentEl) ? (idOf.get(parentEl) ?? null) : null,
       childBoxIds: [],

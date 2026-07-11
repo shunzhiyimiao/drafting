@@ -37,28 +37,32 @@ export function SketchTextPanel() {
 
   // Wire the store's buffer surface to THIS Monaco instance.
   useEffect(() => {
-    const writer = (newText: string) => {
-      const editor = editorRef.current;
-      const model = editor?.getModel();
-      if (!editor || !model) return;
-      // One undo unit per structured edit, on the same stack as typing.
-      editor.pushUndoStop();
-      editor.executeEdits("sketch-structured-edit", [
-        { range: model.getFullModelRange(), text: newText },
-      ]);
-      editor.pushUndoStop();
-    };
-    const revealer = (range: { start: number; end: number }) => {
-      const editor = editorRef.current;
-      const model = editor?.getModel();
-      if (!editor || !model) return;
-      const pos = model.getPositionAt(range.start);
-      revealingRef.current = true;
-      editor.setPosition(pos);
-      editor.revealPositionInCenterIfOutsideViewport(pos);
-      revealingRef.current = false;
-    };
-    return registerBuffer(writer, revealer);
+    return registerBuffer({
+      write: (newText: string) => {
+        const editor = editorRef.current;
+        const model = editor?.getModel();
+        if (!editor || !model) return;
+        // One undo unit per structured edit, on the same stack as typing.
+        editor.pushUndoStop();
+        editor.executeEdits("sketch-structured-edit", [
+          { range: model.getFullModelRange(), text: newText },
+        ]);
+        editor.pushUndoStop();
+      },
+      reveal: (range: { start: number; end: number }) => {
+        const editor = editorRef.current;
+        const model = editor?.getModel();
+        if (!editor || !model) return;
+        const pos = model.getPositionAt(range.start);
+        revealingRef.current = true;
+        editor.setPosition(pos);
+        editor.revealPositionInCenterIfOutsideViewport(pos);
+        revealingRef.current = false;
+      },
+      // The designer toolbar drives the SAME stack (S2a).
+      undo: () => editorRef.current?.trigger("designer", "undo", null),
+      redo: () => editorRef.current?.trigger("designer", "redo", null),
+    });
   }, [registerBuffer]);
 
   // Dialect errors → inline markers.
@@ -117,7 +121,7 @@ export function SketchTextPanel() {
   return (
     <div className="flex flex-col min-h-0 h-full">
       <style>{`.sketch-node-highlight { background: rgba(91, 124, 255, 0.14); border-radius: 2px; }`}</style>
-      <div className="flex-1 min-h-0 glass-panel overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <Editor
           value={text}
           language="xml"

@@ -26,6 +26,11 @@ export function SketchCanvas() {
   const insertNodeBeside = useSketchStore((s) => s.insertNodeBeside);
   const moveNodeBeside = useSketchStore((s) => s.moveNodeBeside);
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
+  const canvasWidth = useSketchStore((s) => s.canvasWidth);
+  const zoom = useSketchStore((s) => s.zoom);
+  /** Fresh zoom for event handlers (they outlive render closures). */
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [session, setSessionState] = useState<DragSession | null>(null);
@@ -52,10 +57,13 @@ export function SketchCanvas() {
     }
   }, [active]);
 
-  /** Client → surface-relative coordinates (scroll-consistent). */
+  /** Client → LOGICAL surface coordinates (scroll- and zoom-consistent:
+   *  rect and pointer are both visual, dividing by zoom restores the
+   *  surface-local units the overlays render in). */
   const surfacePoint = (clientX: number, clientY: number) => {
     const rect = surfaceRef.current!.getBoundingClientRect();
-    return { x: clientX - rect.x, y: clientY - rect.y };
+    const z = zoomRef.current;
+    return { x: (clientX - rect.x) / z, y: (clientY - rect.y) / z };
   };
 
   useEffect(() => {
@@ -101,7 +109,7 @@ export function SketchCanvas() {
       if (next === s) return; // foreign pointer or ended session (laws 5, 8)
 
       if (s.phase === "pending" && next.phase === "dragging") {
-        boxesRef.current = measureLayoutBoxes(surface, active.root);
+        boxesRef.current = measureLayoutBoxes(surface, active.root, zoomRef.current);
       }
       if (next.phase === "dragging" && boxesRef.current) {
         const point = surfacePoint(e.clientX, e.clientY);
@@ -198,6 +206,13 @@ export function SketchCanvas() {
         {`[data-sk] { cursor: default; }`}
         {dragging ? `* { cursor: grabbing !important; }` : ""}
       </style>
+      {/* Zoom frame (S2a): reserves the VISUAL footprint of the scaled
+          sheet so scrollbars stay honest; the surface itself keeps logical
+          width and scales via transform — geometry divides by zoom. */}
+      <div
+        className="mx-auto"
+        style={{ width: canvasWidth * zoom, height: undefined }}
+      >
       {/* The surface is a flex column so the root's ROOT_CTX premise holds
           on the canvas: its fill sizing (flex-1/self-stretch) actually
           stretches, the root's box covers the whole sheet, and dropping on
@@ -205,7 +220,8 @@ export function SketchCanvas() {
           tree's own insertion rule, not a special case. */}
       <div
         ref={surfaceRef}
-        className="relative mx-auto flex flex-col bg-white text-slate-900 rounded-lg shadow-lg min-h-[420px] max-w-3xl overflow-hidden"
+        className="relative flex flex-col bg-white text-slate-900 rounded-lg shadow-lg min-h-[420px] overflow-hidden"
+        style={{ width: canvasWidth, transform: `scale(${zoom})`, transformOrigin: "top left" }}
         onMouseDownCapture={(e) => {
           // Canvas interactions select, never activate (inputs don't focus,
           // buttons don't fire — the sketch is a drawing, not a form).
@@ -272,6 +288,7 @@ export function SketchCanvas() {
             {ghost.label}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

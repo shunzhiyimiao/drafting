@@ -41,16 +41,14 @@ function nodeLabel(node: SketchNode): string {
 export function SketchOutline() {
   const active = useSketchStore((s) => s.active);
   if (!active) return null;
-  return <OutlineNode node={active.root} depth={0} isRoot />;
+  return <OutlineNode node={active.root} isRoot />;
 }
 
 function OutlineNode({
   node,
-  depth,
   isRoot = false,
 }: {
   node: SketchNode;
-  depth: number;
   isRoot?: boolean;
 }) {
   const selectedNodeId = useSketchStore((s) => s.selectedNodeId);
@@ -70,7 +68,6 @@ function OutlineNode({
             ? "bg-accent/15 text-text-primary"
             : "text-text-secondary hover:bg-bg-hover"
         }`}
-        style={{ paddingLeft: 6 + depth * 12 }}
       >
         <Icon size={11} className="shrink-0 text-text-muted" />
         <span className="truncate flex-1">{nodeLabel(node)}</span>
@@ -109,16 +106,23 @@ function OutlineNode({
           </span>
         )}
       </div>
-      {node.kind === "stack" &&
-        node.children.map((child) => (
-          <OutlineNode key={child.id} node={child} depth={depth + 1} />
-        ))}
+      {/* Indent guide (S2a): children render inside a guided rail so depth
+          reads at a glance — LAYERS-panel style. */}
+      {node.kind === "stack" && node.children.length > 0 && (
+        <div className="ml-3 border-l border-border/40">
+          {node.children.map((child) => (
+            <OutlineNode key={child.id} node={child} />
+          ))}
+        </div>
+      )}
       {/* The template is the list's required single root: it renders as a
           normal subtree but — like the sketch root — can't be moved or
           deleted (isRoot hides those controls; findNode gives it a null
           parent so the ops are no-ops anyway). Its children edit normally. */}
       {node.kind === "list" && (
-        <OutlineNode key={node.template.id} node={node.template} depth={depth + 1} isRoot />
+        <div className="ml-3 border-l border-border/40">
+          <OutlineNode key={node.template.id} node={node.template} isRoot />
+        </div>
       )}
     </div>
   );
