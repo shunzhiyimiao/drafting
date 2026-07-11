@@ -194,13 +194,14 @@ function colWithLeaf(): LayoutBox[] {
 
 test("side-drop: outer quarters of a leaf in a col parent wrap into a row", () => {
   const boxes = colWithLeaf();
-  // Left 25% (x < 50) → wrap, dragged goes before.
+  // Left 25% (x < 50) → wrap, dragged goes before. In-box = snuggle.
   assert.deepEqual(computeDrop({ x: 30, y: 30 }, boxes), {
     kind: "wrap",
     targetNodeId: "leaf",
     targetBoxId: "leaf",
     side: "before",
     direction: "row",
+    spread: false,
   });
   // Right 25% (x > 150) → wrap, dragged goes after.
   assert.deepEqual(computeDrop({ x: 170, y: 30 }, boxes), {
@@ -209,6 +210,7 @@ test("side-drop: outer quarters of a leaf in a col parent wrap into a row", () =
     targetBoxId: "leaf",
     side: "after",
     direction: "row",
+    spread: false,
   });
   // Middle band keeps the ordinary gap semantics (midpoint rule).
   assert.deepEqual(computeDrop({ x: 100, y: 20 }, boxes), {
@@ -240,6 +242,7 @@ test("side-drop: in a row parent the wrap sides are top/bottom and the wrapper i
     targetBoxId: "leaf",
     side: "before",
     direction: "col",
+    spread: false,
   });
   const bottom = computeDrop({ x: 50, y: 90 }, boxes);
   assert.ok(bottom?.kind === "wrap" && bottom.side === "after", "bottom zone wraps after");
@@ -288,13 +291,15 @@ test("side-drop: the flank strip beside a narrow leaf pairs with it", () => {
     },
     { boxId: "img", nodeId: "img", rect: { x: 52, y: 10, width: 96, height: 40 }, parentBoxId: "root", childBoxIds: [] },
   ];
-  // Right flank (outside the box, same y band) → pair after.
+  // Right flank (outside the box, same y band) → pair after, APART:
+  // pointing at empty space means "over there", so the plan spreads.
   assert.deepEqual(computeDrop({ x: 180, y: 30 }, boxes), {
     kind: "wrap",
     targetNodeId: "img",
     targetBoxId: "img",
     side: "after",
     direction: "row",
+    spread: true,
   });
   // Left flank → pair before.
   const left = computeDrop({ x: 20, y: 30 }, boxes);
@@ -317,16 +322,61 @@ test("side-drop: flank strips work symmetrically in a row parent", () => {
     },
     { boxId: "chip", nodeId: "chip", rect: { x: 20, y: 40, width: 60, height: 30 }, parentBoxId: "row", childBoxIds: [] },
   ];
-  // Below the short chip, inside its x band → pair after in a col wrapper.
+  // Below the short chip, inside its x band → pair after in a col wrapper,
+  // apart (flank strip = spread).
   assert.deepEqual(computeDrop({ x: 50, y: 100 }, boxes), {
     kind: "wrap",
     targetNodeId: "chip",
     targetBoxId: "chip",
     side: "after",
     direction: "col",
+    spread: true,
   });
   // Beside it on the row's main axis (outside the x band) → gap insert.
   assert.equal(computeDrop({ x: 150, y: 100 }, boxes)?.kind, "insert");
+});
+
+test("spread indicator: the PARENT's far half at the target's band — the zone is where the node will land", () => {
+  const boxes: LayoutBox[] = [
+    {
+      boxId: "root",
+      nodeId: "root",
+      rect: { x: 0, y: 0, width: 200, height: 120 },
+      container: { direction: "col" },
+      parentBoxId: null,
+      childBoxIds: ["img"],
+    },
+    { boxId: "img", nodeId: "img", rect: { x: 52, y: 10, width: 96, height: 40 }, parentBoxId: "root", childBoxIds: [] },
+  ];
+  // Right flank at x=180 → zone covers the parent's right half (100..200),
+  // NOT the narrow target's own half — the highlight sits under the pointer.
+  const after = computeDrop({ x: 180, y: 30 }, boxes)!;
+  assert.equal(after.kind === "wrap" && after.spread, true);
+  assert.deepEqual(indicatorFor(after, boxes), {
+    rect: { x: 100, y: 10, width: 100, height: 40 },
+    kind: "zone",
+  });
+  const before = computeDrop({ x: 20, y: 30 }, boxes)!;
+  assert.deepEqual(indicatorFor(before, boxes)?.rect, { x: 0, y: 10, width: 100, height: 40 });
+
+  // Vertical analog: below a short chip in a row parent, zone = parent's
+  // bottom half at the chip's x band.
+  const rowParent: LayoutBox[] = [
+    {
+      boxId: "row",
+      nodeId: "row",
+      rect: { x: 0, y: 0, width: 200, height: 120 },
+      container: { direction: "row" },
+      parentBoxId: null,
+      childBoxIds: ["chip"],
+    },
+    { boxId: "chip", nodeId: "chip", rect: { x: 20, y: 40, width: 60, height: 30 }, parentBoxId: "row", childBoxIds: [] },
+  ];
+  const below = computeDrop({ x: 50, y: 100 }, rowParent)!;
+  assert.deepEqual(indicatorFor(below, rowParent), {
+    rect: { x: 20, y: 60, width: 60, height: 60 },
+    kind: "zone",
+  });
 });
 
 test("side-drop indicator: the joined half as a zone; insert plans stay lines", () => {

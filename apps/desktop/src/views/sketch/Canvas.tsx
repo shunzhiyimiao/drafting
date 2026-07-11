@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { defaultTheme, sketchToIR, toElement, type CreateElement } from "@drafting/sketch-core";
 import { allNodeIds, findNode, useSketchStore } from "../../stores/sketch-store";
 import { computeDrop, indicatorFor, type LayoutBox } from "./insertion";
@@ -29,12 +29,15 @@ export function SketchCanvas() {
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
   const canvasWidth = useSketchStore((s) => s.canvasWidth);
   const zoom = useSketchStore((s) => s.zoom);
+  const activeFile = useSketchStore((s) => s.activeFile);
   /** Fresh zoom for event handlers (they outlive render closures). */
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const [session, setSessionState] = useState<DragSession | null>(null);
+  /** One-click "spread apart" affordance after a snuggle wrap (§7.1 B). */
+  const [wrapHint, setWrapHint] = useState<{ wrapperId: string } | null>(null);
   /** Synchronous mirror of the session — pointer events can arrive faster
    *  than React commits, and the exactly-once guarantee must not depend on
    *  render timing (the old dragRef-goes-stale duplicate-commit bug). */
@@ -46,6 +49,9 @@ export function SketchCanvas() {
     sessionRef.current = next;
     setSessionState(next);
   };
+
+  // The hint is a moment, not a mode — it doesn't survive leaving the doc.
+  useEffect(() => setWrapHint(null), [activeFile]);
 
   const element = useMemo(() => {
     if (!active) return null;
@@ -78,6 +84,7 @@ export function SketchCanvas() {
 
     const cancelActive = () => {
       setPaletteDrag(null); // an unconsumed arm is stale the moment we cancel
+      setWrapHint(null); // Escape/blur are universal dismissals
       const s = sessionRef.current;
       if (!s) return;
       cancel(s); // (law 9 — result is always cancelled; nothing to apply)
@@ -140,10 +147,16 @@ export function SketchCanvas() {
         } else {
           moveNodeTo(s.source.nodeId, plan.containerId, plan.index);
         }
-      } else if (s.source.type === "palette") {
-        insertNodeBeside(plan.targetNodeId, plan.side, plan.direction, s.source.kind);
+        setWrapHint(null); // a new edit outdates any lingering hint
       } else {
-        moveNodeBeside(s.source.nodeId, plan.targetNodeId, plan.side, plan.direction);
+        const wrapperId =
+          s.source.type === "palette"
+            ? insertNodeBeside(plan.targetNodeId, plan.side, plan.direction, s.source.kind, plan.spread)
+            : moveNodeBeside(s.source.nodeId, plan.targetNodeId, plan.side, plan.direction, plan.spread);
+        // Snuggle wraps get the one-click "spread apart" affordance (§7.1
+        // amendment, option B): the alignment vocabulary is already in the
+        // alphabet — this makes it discoverable at the moment it applies.
+        setWrapHint(!plan.spread && wrapperId ? { wrapperId } : null);
       }
     };
 
@@ -233,6 +246,7 @@ export function SketchCanvas() {
         }}
         onPointerDownCapture={(e) => {
           if ((e.target as HTMLElement).closest("[data-designer-overlay]")) return;
+          setWrapHint(null); // any fresh press dismisses the hint
           if (sessionRef.current) return; // one gesture at a time
           const hit = (e.target as HTMLElement).closest("[data-sk]");
           const nodeId = hit?.getAttribute("data-sk");
@@ -284,6 +298,13 @@ export function SketchCanvas() {
         {/* Selection frame + handles + kind chip (S3). Hidden mid-drag so
             the preview and indicator own the stage. */}
         {!dragging && <SelectionOverlay surface={surfaceRef.current} />}
+        {!dragging && wrapHint && (
+          <WrapSpreadHint
+            surface={surfaceRef.current}
+            wrapperId={wrapHint.wrapperId}
+            onDone={() => setWrapHint(null)}
+          />
+        )}
         {/* Real-rendered drag preview (S3) — the dragged node itself (or
             the exact default node a palette drop inserts) follows the
             cursor; the source dims via the style block above. */}
@@ -293,6 +314,67 @@ export function SketchCanvas() {
       </div>
       </div>
     </div>
+  );
+}
+
+/** Post-snuggle-wrap affordance (§7.1 amendment, option B): a one-click
+ *  chip on the fresh wrapper offering "spread apart" — main="between" plus
+ *  main-axis fill, the exact attributes a flank drop would have written.
+ *  The vocabulary already exists in the Spec and the Inspector; this makes
+ *  it discoverable at the moment it's most likely wanted. Dismissed by any
+ *  fresh press on the surface, Escape, or applying it. */
+function WrapSpreadHint({
+  surface,
+  wrapperId,
+  onDone,
+}: {
+  surface: HTMLElement | null;
+  wrapperId: string;
+  onDone: () => void;
+}) {
+  const active = useSketchStore((s) => s.active);
+  const zoom = useSketchStore((s) => s.zoom);
+  const updateNode = useSketchStore((s) => s.updateNode);
+  const [rect, setRect] = useState<{ x: number; y: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!surface) {
+      setRect(null);
+      return;
+    }
+    const el = surface.querySelector<HTMLElement>(`[data-sk="${CSS.escape(wrapperId)}"]`);
+    if (!el) {
+      setRect(null); // wrapper gone (undo, doc switch) → hint hides itself
+      return;
+    }
+    const origin = surface.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    setRect({ x: (r.x - origin.x) / zoom, y: (r.y - origin.y) / zoom, width: r.width / zoom });
+  }, [surface, wrapperId, active, zoom]);
+
+  if (!rect) return null;
+  return (
+    <button
+      data-designer-overlay
+      className="absolute z-20 px-2 py-0.5 rounded-full bg-slate-900/85 text-white text-[10px] leading-tight whitespace-nowrap shadow-md hover:bg-slate-900 cursor-pointer"
+      style={{
+        left: rect.x + rect.width,
+        // Clamp inside the sheet — the surface clips overflow.
+        top: Math.max(2, rect.y - 22),
+        transform: "translateX(-100%)",
+      }}
+      onClick={() => {
+        updateNode(wrapperId, (n) => {
+          if (n.kind !== "stack") return;
+          n.layout.mainAxis = "between";
+          if (n.layout.direction === "row") n.sizing.width = { mode: "fill" };
+          else n.sizing.height = { mode: "fill" };
+        });
+        onDone();
+      }}
+    >
+      ⇄ 两端分开
+    </button>
   );
 }
 

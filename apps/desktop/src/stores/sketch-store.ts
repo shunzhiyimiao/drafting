@@ -128,8 +128,23 @@ interface SketchState {
   moveNode: (nodeId: string, direction: "up" | "down") => void;
   insertNodeAt: (containerId: string, index: number, kind: NodeKind) => void;
   moveNodeTo: (nodeId: string, containerId: string, index: number) => void;
-  insertNodeBeside: (targetId: string, side: "before" | "after", direction: "row" | "col", kind: NodeKind) => void;
-  moveNodeBeside: (nodeId: string, targetId: string, side: "before" | "after", direction: "row" | "col") => void;
+  /** Wrap ops return the new wrapper's id (the post-wrap hint anchors to
+   *  it), or null when the op was refused. `spread` = §7.1 amendment:
+   *  wrapper gets main="between" + main-axis fill instead of hugging. */
+  insertNodeBeside: (
+    targetId: string,
+    side: "before" | "after",
+    direction: "row" | "col",
+    kind: NodeKind,
+    spread?: boolean,
+  ) => string | null;
+  moveNodeBeside: (
+    nodeId: string,
+    targetId: string,
+    side: "before" | "after",
+    direction: "row" | "col",
+    spread?: boolean,
+  ) => string | null;
   wrapInStack: (nodeId: string) => void;
   updateSketchMeta: (patch: { name?: string; blueprintRef?: string | null }) => void;
   /** persist-on-need case (a): give a node a durable sk:id and FLUSH the
@@ -307,8 +322,18 @@ export function defaultNode(kind: NodeKind): SketchNode {
   }
 }
 
-/** A wrapper stack for wrap ops (side-drop + explicit Wrap in Stack). */
-function makeWrapper(direction: "row" | "col", sizing: SketchNode["sizing"]): Container {
+/** A wrapper stack for wrap ops (side-drop + explicit Wrap in Stack).
+ *
+ *  `spread` (§7.1 amendment): a flank-strip drop means "apart, over there" —
+ *  the wrapper fills its main axis and distributes `between`, so the dragged
+ *  node lands at the far side the pointer named. Snuggle wraps (pointing at
+ *  the leaf itself) keep the target's own sizing and hug together. */
+function makeWrapper(
+  direction: "row" | "col",
+  sizing: SketchNode["sizing"],
+  spread = false,
+): Container {
+  const inherited = structuredClone(sizing);
   return {
     kind: "stack",
     id: ulid(),
@@ -316,10 +341,14 @@ function makeWrapper(direction: "row" | "col", sizing: SketchNode["sizing"]): Co
       direction,
       gap: 2,
       padding: { top: 0, right: 0, bottom: 0, left: 0 },
-      mainAxis: "start",
+      mainAxis: spread ? "between" : "start",
       crossAxis: direction === "row" ? "center" : "stretch",
     },
-    sizing: structuredClone(sizing),
+    sizing: spread
+      ? direction === "row"
+        ? { width: { mode: "fill" }, height: inherited.height }
+        : { width: inherited.width, height: { mode: "fill" } }
+      : inherited,
     children: [],
   };
 }
@@ -725,27 +754,30 @@ export const useSketchStore = create<SketchState>((set, get) => {
       }, nodeId);
     },
 
-    insertNodeBeside: (targetId, side, direction, kind) => {
+    insertNodeBeside: (targetId, side, direction, kind, spread = false) => {
       const child = defaultNode(kind);
+      const wrapper = makeWrapper(direction, { width: { mode: "hug" }, height: { mode: "hug" } }, spread);
       get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, targetId);
         if (!hit?.parent) return;
         const i = hit.parent.children.findIndex((c) => c.id === targetId);
-        const wrapper = makeWrapper(direction, hit.node.sizing);
+        if (!spread) wrapper.sizing = structuredClone(hit.node.sizing);
         wrapper.children = side === "before" ? [child, hit.node] : [hit.node, child];
         hit.parent.children[i] = wrapper;
       }, child.id);
+      return wrapper.id;
     },
 
-    moveNodeBeside: (nodeId, targetId, side, direction) => {
+    moveNodeBeside: (nodeId, targetId, side, direction, spread = false) => {
       const { active } = get();
-      if (!active || nodeId === targetId) return;
+      if (!active || nodeId === targetId) return null;
       const dragged = findNode(active.root, nodeId);
-      if (!dragged?.parent) return;
-      if (allNodeIds(dragged.node).includes(targetId)) return;
+      if (!dragged?.parent) return null;
+      if (allNodeIds(dragged.node).includes(targetId)) return null;
       const target = findNode(active.root, targetId);
-      if (!target?.parent) return;
+      if (!target?.parent) return null;
 
+      const wrapper = makeWrapper(direction, structuredClone(target.node.sizing), spread);
       get().applyTreeEdit((draft) => {
         const d = findNode(draft.root, nodeId);
         if (!d?.parent) return;
@@ -753,10 +785,10 @@ export const useSketchStore = create<SketchState>((set, get) => {
         const t = findNode(draft.root, targetId);
         if (!t?.parent) return;
         const i = t.parent.children.findIndex((c) => c.id === targetId);
-        const wrapper = makeWrapper(direction, t.node.sizing);
         wrapper.children = side === "before" ? [d.node, t.node] : [t.node, d.node];
         t.parent.children[i] = wrapper;
       }, nodeId);
+      return wrapper.id;
     },
 
     wrapInStack: (nodeId) => {

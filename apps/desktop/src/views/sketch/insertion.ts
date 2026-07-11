@@ -64,6 +64,13 @@ export type DropPlan =
       side: "before" | "after";
       /** Wrapper direction — perpendicular to the parent container's. */
       direction: "row" | "col";
+      /** §7.1 spread amendment: pointing AT the leaf (its outer SIDE_ZONE)
+       *  means "snuggle beside it" — the wrapper hugs, pair sits together.
+       *  Pointing at the EMPTY flank strip means "over there, apart" — the
+       *  wrapper fills the main axis with `between`, so the dragged node
+       *  actually lands where the pointer is. Both are pointer geometry;
+       *  neither infers structure. */
+      spread: boolean;
     };
 
 /** Outer fraction of a leaf's cross-axis extent that triggers a wrap. */
@@ -176,12 +183,13 @@ export function computeDrop(
 
   const sidesAreHorizontal = target.container!.direction === "col"; // cross axis
   const direction = sidesAreHorizontal ? "row" : "col";
-  const wrap = (child: LayoutBox, side: "before" | "after"): DropPlan => ({
+  const wrap = (child: LayoutBox, side: "before" | "after", spread: boolean): DropPlan => ({
     kind: "wrap",
     targetNodeId: child.nodeId,
     targetBoxId: child.boxId,
     side,
     direction,
+    spread,
   });
 
   let beside: DropPlan | null = null;
@@ -200,21 +208,21 @@ export function computeDrop(
       const [lo, size, p] = sidesAreHorizontal
         ? [child.rect.x, child.rect.width, point.x]
         : [child.rect.y, child.rect.height, point.y];
-      if (p < lo + size * SIDE_ZONE) return wrap(child, "before");
-      if (p > lo + size * (1 - SIDE_ZONE)) return wrap(child, "after");
+      if (p < lo + size * SIDE_ZONE) return wrap(child, "before", false);
+      if (p > lo + size * (1 - SIDE_ZONE)) return wrap(child, "after", false);
       beside = null;
       break; // middle band → ordinary gap semantics
     }
 
     if (!beside && !excluded) {
       // The flank strip: inside the child's main-axis extent, outside its
-      // box on the cross axis.
+      // box on the cross axis. Pointing at empty flank space = "apart".
       const inBand = sidesAreHorizontal
         ? point.y >= child.rect.y && point.y <= child.rect.y + child.rect.height
         : point.x >= child.rect.x && point.x <= child.rect.x + child.rect.width;
       if (inBand) {
         const before = sidesAreHorizontal ? point.x < child.rect.x : point.y < child.rect.y;
-        beside = wrap(child, before ? "before" : "after");
+        beside = wrap(child, before ? "before" : "after", true);
       }
     }
   }
@@ -229,8 +237,10 @@ export function computeDrop(
 }
 
 /** Indicator for a full DropPlan: the gap line for insertions (null → the
- *  caller rings the empty container), or the target's joined half for a
- *  side-drop wrap — rendered as a translucent zone, not a line. */
+ *  caller rings the empty container), or a translucent zone for a wrap.
+ *  Snuggle wraps highlight the target's joined half; spread wraps highlight
+ *  the PARENT's far half at the target's band — the zone sits where the
+ *  dragged node will actually land, so the preview tells the truth. */
 export function indicatorFor(
   plan: DropPlan,
   boxes: LayoutBox[],
@@ -242,16 +252,22 @@ export function indicatorFor(
   const target = boxes.find((b) => b.boxId === plan.targetBoxId);
   if (!target) return null;
   const r = target.rect;
+  const parent = plan.spread
+    ? (boxes.find((b) => b.boxId === target.parentBoxId) ?? null)
+    : null;
   if (plan.direction === "row") {
-    const w = r.width / 2;
+    // Spread: halves of the parent's width, at the target's vertical band.
+    const lo = parent ? parent.rect.x : r.x;
+    const w = (parent ? parent.rect.width : r.width) / 2;
     return {
-      rect: { x: plan.side === "before" ? r.x : r.x + w, y: r.y, width: w, height: r.height },
+      rect: { x: plan.side === "before" ? lo : lo + w, y: r.y, width: w, height: r.height },
       kind: "zone",
     };
   }
-  const h = r.height / 2;
+  const lo = parent ? parent.rect.y : r.y;
+  const h = (parent ? parent.rect.height : r.height) / 2;
   return {
-    rect: { x: r.x, y: plan.side === "before" ? r.y : r.y + h, width: r.width, height: h },
+    rect: { x: r.x, y: plan.side === "before" ? lo : lo + h, width: r.width, height: h },
     kind: "zone",
   };
 }
