@@ -175,9 +175,11 @@ export function SketchView() {
                 key={kind}
                 onClick={() => selectedNodeId && addNode(selectedNodeId, kind)}
                 // Drag-to-canvas (§7.1): arm the palette drag; the canvas's
-                // controller measures/points/inserts. A plain click (pointer
-                // released on the button) still adds into the selection.
-                onPointerDown={() => setPaletteDrag(kind)}
+                // session controller consumes the arm on this pointer's
+                // first move (S1 — one-shot, pointerId-bound). A plain click
+                // (pointer released on the button) still adds into the
+                // selection.
+                onPointerDown={(e) => setPaletteDrag({ kind, pointerId: e.pointerId })}
                 disabled={!selectedNodeId || !!parseError}
                 title={`Add ${label} into the selected container — or drag it onto the canvas`}
                 className="flex items-center gap-1.5 px-2 py-1.5 rounded text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary disabled:opacity-40"

@@ -56,9 +56,13 @@ interface SketchState {
   dirty: boolean;
   saving: boolean;
   lastError: string | null;
-  /** Transient: a palette item being dragged toward the canvas. */
-  paletteDrag: NodeKind | null;
-  setPaletteDrag: (kind: NodeKind | null) => void;
+  /** Transient one-shot ARM: a palette press that may become a drag. The
+   *  canvas's session controller consumes it on that pointer's first move
+   *  (S1) — carrying the pointerId is what makes stale arms impossible to
+   *  misattribute to a later gesture. Interaction state proper (the drag
+   *  session) lives in the interaction controller, not here. */
+  paletteDrag: { kind: NodeKind; pointerId: number } | null;
+  setPaletteDrag: (arm: { kind: NodeKind; pointerId: number } | null) => void;
 
   initialize: (projectRoot: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -334,7 +338,7 @@ export const useSketchStore = create<SketchState>((set, get) => {
     saving: false,
     lastError: null,
     paletteDrag: null,
-    setPaletteDrag: (kind) => set({ paletteDrag: kind }),
+    setPaletteDrag: (arm) => set({ paletteDrag: arm }),
 
     initialize: async (projectRoot) => {
       set({ projectRoot });

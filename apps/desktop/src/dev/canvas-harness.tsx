@@ -105,7 +105,7 @@ function Harness() {
           <button
             key={k}
             data-harness-palette={k}
-            onPointerDown={() => setPaletteDrag(k)}
+            onPointerDown={(e) => setPaletteDrag({ kind: k, pointerId: e.pointerId })}
             className="px-2 py-1 text-xs rounded bg-slate-600 text-white"
           >
             {k}

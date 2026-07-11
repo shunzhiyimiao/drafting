@@ -1,88 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  defaultTheme,
-  sketchToIR,
-  toElement,
-  type CreateElement,
-  type SketchNode,
-} from "@drafting/sketch-core";
-import { allNodeIds, findNode, useSketchStore, type NodeKind } from "../../stores/sketch-store";
-import {
-  computeDrop,
-  indicatorFor,
-  type DropPlan,
-  type LayoutBox,
-} from "./insertion";
+import { defaultTheme, sketchToIR, toElement, type CreateElement } from "@drafting/sketch-core";
+import { allNodeIds, findNode, useSketchStore } from "../../stores/sketch-store";
+import { computeDrop, indicatorFor, type LayoutBox } from "./insertion";
+import { measureLayoutBoxes } from "./designer/geometry";
+import { beginSession, cancel, commit, move, setPlan } from "./interaction/drag-session";
+import type { DragSession } from "./interaction/types";
 
 /** The design surface. Rendered via toElement — the SAME IR the generated
  *  code serializes from (K3: WYSIWYG is constructional). Selection reads
  *  data-sk, the addressing criteria and Atlas share (§7).
  *
- *  Drag (§7.1, narrowed): drags only EXPRESS tree ops. The event layer here
- *  collects the pointer, measures boxes once per drag, and calls
- *  computeInsertion (pure, tested) + the store's insert/move ops. Pointer
- *  events, not HTML5 DnD — the Tauri webview intercepts native drag/drop. */
-
-/** Pixels of movement before a press becomes a drag (below = click/select). */
-const DRAG_THRESHOLD = 4;
-
-interface ActiveDrag {
-  /** Moving an existing node, or dropping a new palette kind. */
-  source: { nodeId: string; exclude: Set<string> } | { paletteKind: NodeKind };
-  /** What the ghost chip says while following the cursor. */
-  label: string;
-  boxes: LayoutBox[];
-  plan: DropPlan | null;
-  /** Cursor position relative to the surface — drives the ghost chip. */
-  pointer: { x: number; y: number };
-}
-
-/** The stack containers of the Spec tree (drop targets), incl. templates. */
-function collectContainers(
-  root: SketchNode,
-  map = new Map<string, "row" | "col">(),
-): Map<string, "row" | "col"> {
-  if (root.kind === "stack") {
-    map.set(root.id, root.layout.direction);
-    for (const child of root.children) collectContainers(child, map);
-  } else if (root.kind === "list") {
-    collectContainers(root.template, map);
-  }
-  return map;
-}
-
-/** Snapshot every rendered [data-sk] element as a LayoutBox, rects relative
- *  to the surface origin. boxId is per ELEMENT: template instances yield
- *  several boxes for one nodeId (plural data-sk), so dropping into any
- *  instance edits the template. */
-function measureBoxes(surface: HTMLElement, root: SketchNode): LayoutBox[] {
-  const containers = collectContainers(root);
-  const origin = surface.getBoundingClientRect();
-  const els = Array.from(surface.querySelectorAll<HTMLElement>("[data-sk]"));
-  const idOf = new Map<HTMLElement, string>();
-  els.forEach((el, i) => idOf.set(el, `b${i}`));
-
-  const boxes: LayoutBox[] = els.map((el, i) => {
-    const r = el.getBoundingClientRect();
-    const nodeId = el.getAttribute("data-sk") ?? "";
-    const direction = containers.get(nodeId);
-    const parentEl = el.parentElement?.closest<HTMLElement>("[data-sk]") ?? null;
-    return {
-      boxId: `b${i}`,
-      nodeId,
-      rect: { x: r.x - origin.x, y: r.y - origin.y, width: r.width, height: r.height },
-      container: direction ? { direction } : undefined,
-      parentBoxId: parentEl && surface.contains(parentEl) ? (idOf.get(parentEl) ?? null) : null,
-      childBoxIds: [],
-    };
-  });
-  const byId = new Map(boxes.map((b) => [b.boxId, b]));
-  for (const b of boxes) {
-    if (b.parentBoxId) byId.get(b.parentBoxId)?.childBoxIds.push(b.boxId);
-  }
-  return boxes;
-}
-
+ *  Drag (§7.1, narrowed): drags only EXPRESS tree ops. Since S1 the event
+ *  layer is thin plumbing around the drag-session state machine
+ *  (interaction/drag-session.ts, ten laws, unit-tested): it feeds pointer
+ *  facts in, renders the session out, and applies a commit's plan through
+ *  the four existing tree ops EXACTLY once. Geometry lives in
+ *  designer/geometry.ts. Pointer events, not HTML5 DnD — the Tauri webview
+ *  intercepts native drag/drop. */
 export function SketchCanvas() {
   const active = useSketchStore((s) => s.active);
   const selectedNodeId = useSketchStore((s) => s.selectedNodeId);
@@ -91,15 +25,21 @@ export function SketchCanvas() {
   const moveNodeTo = useSketchStore((s) => s.moveNodeTo);
   const insertNodeBeside = useSketchStore((s) => s.insertNodeBeside);
   const moveNodeBeside = useSketchStore((s) => s.moveNodeBeside);
-  const paletteDrag = useSketchStore((s) => s.paletteDrag);
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
-  const [drag, setDrag] = useState<ActiveDrag | null>(null);
-  /** A press that hasn't crossed the threshold yet (node drags only). */
-  const pendingRef = useRef<{ nodeId: string; x: number; y: number } | null>(null);
-  const dragRef = useRef<ActiveDrag | null>(null);
-  dragRef.current = drag;
+  const [session, setSessionState] = useState<DragSession | null>(null);
+  /** Synchronous mirror of the session — pointer events can arrive faster
+   *  than React commits, and the exactly-once guarantee must not depend on
+   *  render timing (the old dragRef-goes-stale duplicate-commit bug). */
+  const sessionRef = useRef<DragSession | null>(null);
+  /** Boxes measured once per gesture, at activation. */
+  const boxesRef = useRef<LayoutBox[] | null>(null);
+
+  const updateSession = (next: DragSession | null) => {
+    sessionRef.current = next;
+    setSessionState(next);
+  };
 
   const element = useMemo(() => {
     if (!active) return null;
@@ -112,100 +52,139 @@ export function SketchCanvas() {
     }
   }, [active]);
 
-  /** Pointer position relative to the surface origin, scroll-consistent. */
-  const surfacePoint = (e: PointerEvent | React.PointerEvent) => {
+  /** Client → surface-relative coordinates (scroll-consistent). */
+  const surfacePoint = (clientX: number, clientY: number) => {
     const rect = surfaceRef.current!.getBoundingClientRect();
-    return { x: e.clientX - rect.x, y: e.clientY - rect.y };
+    return { x: clientX - rect.x, y: clientY - rect.y };
   };
 
-  // One window-level move/up pair serves both drag sources: node drags arm
-  // pendingRef on the surface; palette drags arm via the store.
   useEffect(() => {
     if (!active) return;
+
+    /** Tear down the gesture's transient state. Never touches the document. */
+    const endGesture = () => {
+      boxesRef.current = null;
+      updateSession(null);
+    };
+
+    const cancelActive = () => {
+      setPaletteDrag(null); // an unconsumed arm is stale the moment we cancel
+      const s = sessionRef.current;
+      if (!s) return;
+      cancel(s); // (law 9 — result is always cancelled; nothing to apply)
+      endGesture();
+    };
 
     const onMove = (e: PointerEvent) => {
       const surface = surfaceRef.current;
       if (!surface) return;
 
-      let current = dragRef.current;
-      if (!current) {
-        const pending = pendingRef.current;
-        if (pending) {
-          const dx = e.clientX - pending.x;
-          const dy = e.clientY - pending.y;
-          if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-          const hit = findNode(active.root, pending.nodeId);
-          if (!hit?.parent) {
-            // Root and template roots don't drag.
-            pendingRef.current = null;
-            return;
-          }
-          current = {
-            source: { nodeId: pending.nodeId, exclude: new Set(allNodeIds(hit.node)) },
-            label: hit.node.kind,
-            boxes: measureBoxes(surface, active.root),
-            plan: null,
-            pointer: surfacePoint(e),
-          };
-          pendingRef.current = null;
-        } else if (paletteDrag) {
-          current = {
-            source: { paletteKind: paletteDrag },
-            label: paletteDrag,
-            boxes: measureBoxes(surface, active.root),
-            plan: null,
-            pointer: surfacePoint(e),
-          };
-        } else {
+      let s = sessionRef.current;
+      if (!s) {
+        // A palette arm converts to a session on its OWN pointer's first
+        // move — consumed one-shot, so it can never go stale into a later
+        // gesture. Read the arm FRESH from the store: pointer events race
+        // React's effect re-registration, so a closure value here can lag
+        // reality by a frame. A move without buttons means the press ended
+        // somewhere we couldn't see (released off-window): discard the arm.
+        const arm = useSketchStore.getState().paletteDrag;
+        if (!arm || e.pointerId !== arm.pointerId) return;
+        if (e.buttons === 0) {
+          setPaletteDrag(null);
           return;
         }
+        s = beginSession(e.pointerId, { type: "palette", kind: arm.kind }, e.clientX, e.clientY);
+        setPaletteDrag(null);
       }
 
-      const point = surfacePoint(e);
-      const exclude = "exclude" in current.source ? current.source.exclude : undefined;
-      const plan = computeDrop(point, current.boxes, exclude);
-      const next = { ...current, plan, pointer: point };
-      // Keep the ref current synchronously — move events can arrive before
-      // React commits, and re-measuring boxes per event would be wasteful.
-      dragRef.current = next;
-      setDrag(next);
+      let next = move(s, e.pointerId, e.clientX, e.clientY);
+      if (next === s) return; // foreign pointer or ended session (laws 5, 8)
+
+      if (s.phase === "pending" && next.phase === "dragging") {
+        boxesRef.current = measureLayoutBoxes(surface, active.root);
+      }
+      if (next.phase === "dragging" && boxesRef.current) {
+        const point = surfacePoint(e.clientX, e.clientY);
+        const exclude =
+          next.source.type === "existing-node" ? next.source.excludeNodeIds : undefined;
+        next = setPlan(next, computeDrop(point, boxesRef.current, exclude));
+      }
+      updateSession(next);
     };
 
-    const onUp = () => {
-      const current = dragRef.current;
-      pendingRef.current = null;
-      if (paletteDrag) setPaletteDrag(null);
-      if (!current) return;
-      setDrag(null);
-      const plan = current.plan;
-      if (!plan) return; // off-sheet drop = no-op
+    const onUp = (e: PointerEvent) => {
+      // Hygiene: any pointer release invalidates an unconsumed palette arm
+      // (fresh read — same race note as onMove).
+      if (useSketchStore.getState().paletteDrag) setPaletteDrag(null);
+
+      const s = sessionRef.current;
+      if (!s) return;
+      const { session: ended, plan } = commit(s, e.pointerId);
+      if (ended === s) return; // foreign pointer's release — session untouched
+      endGesture();
+      if (!plan) return; // click, or off-sheet drop: zero mutations
+
+      // ONE mutation per gesture, through the existing four ops only.
       if (plan.kind === "insert") {
-        if ("paletteKind" in current.source) {
-          insertNodeAt(plan.containerId, plan.index, current.source.paletteKind);
+        if (s.source.type === "palette") {
+          insertNodeAt(plan.containerId, plan.index, s.source.kind);
         } else {
-          moveNodeTo(current.source.nodeId, plan.containerId, plan.index);
+          moveNodeTo(s.source.nodeId, plan.containerId, plan.index);
         }
-      } else if ("paletteKind" in current.source) {
-        insertNodeBeside(plan.targetNodeId, plan.side, plan.direction, current.source.paletteKind);
+      } else if (s.source.type === "palette") {
+        insertNodeBeside(plan.targetNodeId, plan.side, plan.direction, s.source.kind);
       } else {
-        moveNodeBeside(current.source.nodeId, plan.targetNodeId, plan.side, plan.direction);
+        moveNodeBeside(s.source.nodeId, plan.targetNodeId, plan.side, plan.direction);
       }
+    };
+
+    const onPointerCancel = (e: PointerEvent) => {
+      const s = sessionRef.current;
+      if (s && e.pointerId !== s.pointerId) return; // foreign pointer
+      cancelActive();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cancelActive();
+    };
+    const onBlur = () => cancelActive();
+    const onVisibility = () => {
+      if (document.hidden) cancelActive();
     };
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onPointerCancel);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("visibilitychange", onVisibility);
+      // No cancel here: re-registration must not kill a live gesture —
+      // session state lives in refs. (The arm is deliberately NOT a dep:
+      // handlers read it fresh, so arming never re-registers listeners.)
     };
-  }, [active, paletteDrag, insertNodeAt, moveNodeTo, insertNodeBeside, moveNodeBeside, setPaletteDrag]);
+  }, [active, insertNodeAt, moveNodeTo, insertNodeBeside, moveNodeBeside, setPaletteDrag]);
 
   if (!active) return null;
 
-  const indicator = drag?.plan ? indicatorFor(drag.plan, drag.boxes) : null;
+  const dragging = session?.phase === "dragging" ? session : null;
+  const boxes = boxesRef.current;
+  const indicator = dragging?.plan && boxes ? indicatorFor(dragging.plan, boxes) : null;
   const ringBox =
-    drag?.plan && !indicator
-      ? drag.boxes.find((b) => b.boxId === drag.plan!.targetBoxId)
+    dragging?.plan && !indicator && boxes
+      ? boxes.find((b) => b.boxId === dragging.plan!.targetBoxId)
+      : null;
+  const ghost =
+    dragging && surfaceRef.current
+      ? {
+          ...surfacePoint(dragging.current.clientX, dragging.current.clientY),
+          label: dragging.source.type === "palette" ? dragging.source.kind : dragging.source.label,
+        }
       : null;
 
   return (
@@ -217,7 +196,7 @@ export function SketchCanvas() {
           ? `[data-sk="${selectedNodeId}"] { outline: 2px solid #3b82f6; outline-offset: 1px; }`
           : ""}
         {`[data-sk] { cursor: default; }`}
-        {drag ? `* { cursor: grabbing !important; }` : ""}
+        {dragging ? `* { cursor: grabbing !important; }` : ""}
       </style>
       {/* The surface is a flex column so the root's ROOT_CTX premise holds
           on the canvas: its fill sizing (flex-1/self-stretch) actually
@@ -235,11 +214,25 @@ export function SketchCanvas() {
           selectNode(hit ? hit.getAttribute("data-sk") : active.root.id);
         }}
         onPointerDownCapture={(e) => {
+          if (sessionRef.current) return; // one gesture at a time
           const hit = (e.target as HTMLElement).closest("[data-sk]");
           const nodeId = hit?.getAttribute("data-sk");
-          if (nodeId && nodeId !== active.root.id) {
-            pendingRef.current = { nodeId, x: e.clientX, y: e.clientY };
-          }
+          if (!nodeId || nodeId === active.root.id) return;
+          const found = findNode(active.root, nodeId);
+          if (!found?.parent) return; // root and template roots don't drag
+          updateSession(
+            beginSession(
+              e.pointerId,
+              {
+                type: "existing-node",
+                nodeId,
+                label: found.node.kind,
+                excludeNodeIds: new Set(allNodeIds(found.node)),
+              },
+              e.clientX,
+              e.clientY,
+            ),
+          );
         }}
       >
         {element}
@@ -271,12 +264,12 @@ export function SketchCanvas() {
         )}
         {/* Ghost chip — the "you are dragging X" feedback that follows the
             cursor. Purely visual; the drop decision is the indicator's. */}
-        {drag && (
+        {ghost && (
           <div
             className="absolute z-20 pointer-events-none px-1.5 py-0.5 rounded bg-slate-900/80 text-white text-[10px] leading-tight shadow"
-            style={{ left: drag.pointer.x + 10, top: drag.pointer.y + 12 }}
+            style={{ left: ghost.x + 10, top: ghost.y + 12 }}
           >
-            {drag.label}
+            {ghost.label}
           </div>
         )}
       </div>
