@@ -231,7 +231,9 @@ export function nodeAtOffset(parsed: ParsedSketch, offset: number): string | nul
   return best?.id ?? null;
 }
 
-function defaultNode(kind: NodeKind): SketchNode {
+/** The palette's default node per kind — exported since S3 so the drag
+ *  preview can render the exact node a palette drop would insert. */
+export function defaultNode(kind: NodeKind): SketchNode {
   const id = ulid();
   const hug = { mode: "hug" } as const;
   const fill = { mode: "fill" } as const;

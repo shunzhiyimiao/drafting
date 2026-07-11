@@ -3,6 +3,8 @@ import { defaultTheme, sketchToIR, toElement, type CreateElement } from "@drafti
 import { allNodeIds, findNode, useSketchStore } from "../../stores/sketch-store";
 import { computeDrop, indicatorFor, type LayoutBox } from "./insertion";
 import { measureLayoutBoxes } from "./designer/geometry";
+import { SelectionOverlay } from "./designer/SelectionOverlay";
+import { DragPreview } from "./designer/DragPreview";
 import { beginSession, cancel, commit, move, setPlan } from "./interaction/drag-session";
 import type { DragSession } from "./interaction/types";
 
@@ -19,7 +21,6 @@ import type { DragSession } from "./interaction/types";
  *  intercepts native drag/drop. */
 export function SketchCanvas() {
   const active = useSketchStore((s) => s.active);
-  const selectedNodeId = useSketchStore((s) => s.selectedNodeId);
   const selectNode = useSketchStore((s) => s.selectNode);
   const insertNodeAt = useSketchStore((s) => s.insertNodeAt);
   const moveNodeTo = useSketchStore((s) => s.moveNodeTo);
@@ -187,24 +188,23 @@ export function SketchCanvas() {
     dragging?.plan && !indicator && boxes
       ? boxes.find((b) => b.boxId === dragging.plan!.targetBoxId)
       : null;
-  const ghost =
+  const pointer =
     dragging && surfaceRef.current
-      ? {
-          ...surfacePoint(dragging.current.clientX, dragging.current.clientY),
-          label: dragging.source.type === "palette" ? dragging.source.kind : dragging.source.label,
-        }
+      ? surfacePoint(dragging.current.clientX, dragging.current.clientY)
       : null;
+  const draggedNodeId =
+    dragging?.source.type === "existing-node" ? dragging.source.nodeId : null;
 
   return (
     <div className="flex-1 glass-panel overflow-auto p-6 min-h-0">
-      {/* selection ring for the current node — an overlay concern, so it
-          lives here and not in the shared IR */}
+      {/* Selection chrome moved to SelectionOverlay (S3); this style block
+          keeps only cursor rules and the drag source's dimming. */}
       <style>
-        {selectedNodeId
-          ? `[data-sk="${selectedNodeId}"] { outline: 2px solid #3b82f6; outline-offset: 1px; }`
-          : ""}
         {`[data-sk] { cursor: default; }`}
         {dragging ? `* { cursor: grabbing !important; }` : ""}
+        {draggedNodeId
+          ? `[data-sk="${draggedNodeId}"] { opacity: 0.35; }`
+          : ""}
       </style>
       {/* Zoom frame (S2a): reserves the VISUAL footprint of the scaled
           sheet so scrollbars stay honest; the surface itself keeps logical
@@ -278,15 +278,14 @@ export function SketchCanvas() {
             }}
           />
         )}
-        {/* Ghost chip — the "you are dragging X" feedback that follows the
-            cursor. Purely visual; the drop decision is the indicator's. */}
-        {ghost && (
-          <div
-            className="absolute z-20 pointer-events-none px-1.5 py-0.5 rounded bg-slate-900/80 text-white text-[10px] leading-tight shadow"
-            style={{ left: ghost.x + 10, top: ghost.y + 12 }}
-          >
-            {ghost.label}
-          </div>
+        {/* Selection frame + handles + kind chip (S3). Hidden mid-drag so
+            the preview and indicator own the stage. */}
+        {!dragging && <SelectionOverlay surface={surfaceRef.current} />}
+        {/* Real-rendered drag preview (S3) — the dragged node itself (or
+            the exact default node a palette drop inserts) follows the
+            cursor; the source dims via the style block above. */}
+        {dragging && pointer && (
+          <DragPreview session={dragging} boxes={boxes} pointer={pointer} />
         )}
       </div>
       </div>
