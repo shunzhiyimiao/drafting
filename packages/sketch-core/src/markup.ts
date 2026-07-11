@@ -26,6 +26,7 @@ import type {
   ColorToken,
   Container,
   Edges,
+  FrameP,
   ItemField,
   ItemFieldType,
   Layout,
@@ -96,15 +97,19 @@ const ENUMS: Record<string, readonly string[]> = {
 
 const STYLE_ATTRS = ["bg", "fg", "border", "radius"] as const;
 
-/** Fixed attribute order per element — the canonical print order. */
+/** Fixed attribute order per element — the canonical print order.
+ *  `x`/`y` (Rev 5 Frame): position attrs, legal ONLY on a <Frame>'s direct
+ *  children — the parser rejects them elsewhere with a positioned error.
+ *  They sit right after sk:id so a positioned child reads as "what, where". */
 const ATTRS: Record<string, string[]> = {
   Sketch: ["sk:id", "name", "blueprintRef", "schemaVersion"],
-  Stack: ["sk:id", "dir", "gap", "pad", "main", "cross", "w", "h", ...STYLE_ATTRS],
-  Text: ["sk:id", "role", "w", "h", ...STYLE_ATTRS],
-  Button: ["sk:id", "variant", "intent", "w", "h", ...STYLE_ATTRS],
-  Input: ["sk:id", "label", "type", "placeholder", "w", "h", ...STYLE_ATTRS],
-  Image: ["sk:id", "src", "alt", "w", "h", ...STYLE_ATTRS],
-  List: ["sk:id", "dataKey", "w", "h", ...STYLE_ATTRS],
+  Stack: ["sk:id", "x", "y", "dir", "gap", "pad", "main", "cross", "w", "h", ...STYLE_ATTRS],
+  Frame: ["sk:id", "x", "y", "w", "h", ...STYLE_ATTRS],
+  Text: ["sk:id", "x", "y", "role", "w", "h", ...STYLE_ATTRS],
+  Button: ["sk:id", "x", "y", "variant", "intent", "w", "h", ...STYLE_ATTRS],
+  Input: ["sk:id", "x", "y", "label", "type", "placeholder", "w", "h", ...STYLE_ATTRS],
+  Image: ["sk:id", "x", "y", "src", "alt", "w", "h", ...STYLE_ATTRS],
+  List: ["sk:id", "x", "y", "dataKey", "w", "h", ...STYLE_ATTRS],
   ItemShape: [],
   Field: ["name", "type", "key"],
   Template: [],
@@ -112,9 +117,14 @@ const ATTRS: Record<string, string[]> = {
 
 /** Dialect defaults — omitted by the canonical printer, filled by parse.
  *  These are a property of the TEXT FORM (what you may leave unwritten),
- *  independent of what the editor palette inserts. */
+ *  independent of what the editor palette inserts. Frame has no flow layout
+ *  (no gap/pad/axes) and its height defaults to a fixed 200 — absolute
+ *  children give it no intrinsic size, so `hug` is meaningless there.
+ *  x/y are NOT here: they default to 0 under a Frame (position is always
+ *  printed) and are illegal everywhere else. */
 const DEFAULTS: Record<string, Record<string, string | number>> = {
   Stack: { dir: "col", gap: 0, pad: 0, main: "start", cross: "stretch", w: "fill", h: "hug" },
+  Frame: { w: "fill", h: 200 },
   Text: { role: "body", w: "hug", h: "hug" },
   Button: { variant: "secondary", intent: "none", w: "hug", h: "hug" },
   Input: { label: "", type: "text", placeholder: "", w: "fill", h: "hug" },
@@ -139,6 +149,9 @@ interface ParseCtx {
   /** Fields of the enclosing <Template>'s ItemShape; null = not in a template.
    *  {Bind} resolves against this — a lookup, never an evaluation. */
   shape: ItemField[] | null;
+  /** True while parsing a <Frame>'s DIRECT children — x/y are legal (and
+   *  default to 0) exactly there. Resets for deeper flow children. */
+  inFrame: boolean;
   ranges: Record<string, Range>;
   nextTemp: () => string;
 }
@@ -291,6 +304,14 @@ function sizeOf(p: P, raw: Record<string, RawAttr>, key: string, dflt: string | 
   p.fail(`${key}=${fmtVal(v)} 需为 "hug" | "fill" | {像素数}`, pos);
 }
 
+/** Integer attr (x/y): absent → 0. Negative allowed — a child may hang off
+ *  the frame's edge (the canvas crops; the document stays honest). */
+function intOf(p: P, r: RawAttr | undefined, key: string): number {
+  if (!r) return 0;
+  if (typeof r.v === "number" && Number.isInteger(r.v)) return r.v;
+  p.fail(`${key}=${fmtVal(r.v)} 需为整数像素 {n}`, r.pos);
+}
+
 function enumOf<T extends string>(p: P, name: string, raw: Record<string, RawAttr>, key: string): T | undefined {
   const r = raw[key];
   const v = r ? r.v : DEFAULTS[name]?.[key];
@@ -423,7 +444,7 @@ function parseElement(p: P, ctx: ParseCtx): SketchNode {
   const namePos = p.pos;
   const name = p.ident();
   if (!(name in ATTRS) || name === "Sketch" || name === "ItemShape" || name === "Field" || name === "Template") {
-    p.fail(`未知元素 <${name}> — 方言元素: Stack, Text, Button, Input, Image, List`, namePos);
+    p.fail(`未知元素 <${name}> — 方言元素: Stack, Frame, Text, Button, Input, Image, List`, namePos);
   }
   const inTemplate = ctx.shape !== null;
   const raw = p.attrs(name, inTemplate);
@@ -437,6 +458,15 @@ function parseElement(p: P, ctx: ParseCtx): SketchNode {
   }
 
   const finish = (node: SketchNode): SketchNode => {
+    // Position (Rev 5 Frame): x/y attach exactly on a Frame's direct
+    // children (defaulting to 0); anywhere else they are a dialect error.
+    const rx = raw["x"];
+    const ry = raw["y"];
+    if (ctx.inFrame) {
+      node.pos = { x: intOf(p, rx, "x"), y: intOf(p, ry, "y") };
+    } else if (rx || ry) {
+      p.fail(`${rx ? "x" : "y"} 只在 <Frame> 的直接子级上合法`, (rx ?? ry)!.pos);
+    }
     ctx.ranges[node.id] = { start, end: p.pos };
     return node;
   };
@@ -444,11 +474,12 @@ function parseElement(p: P, ctx: ParseCtx): SketchNode {
   if (name === "Stack") {
     const children: SketchNode[] = [];
     if (!selfClosed) {
+      const inner: ParseCtx = { ...ctx, inFrame: false };
       for (;;) {
         p.ws();
         if (p.peek("</")) break;
         if (p.pos >= p.s.length) p.fail("<Stack> 未闭合", start);
-        children.push(parseElement(p, ctx));
+        children.push(parseElement(p, inner));
       }
       p.closeTag("Stack", start);
     }
@@ -463,6 +494,29 @@ function parseElement(p: P, ctx: ParseCtx): SketchNode {
       kind: "stack",
       id: idOf(raw, ctx),
       layout,
+      sizing: sizingOf(p, name, raw),
+      children,
+    };
+    const style = styleOf(p, name, raw);
+    if (style) node.style = style;
+    return finish(node);
+  }
+
+  if (name === "Frame") {
+    const children: SketchNode[] = [];
+    if (!selfClosed) {
+      const inner: ParseCtx = { ...ctx, inFrame: true };
+      for (;;) {
+        p.ws();
+        if (p.peek("</")) break;
+        if (p.pos >= p.s.length) p.fail("<Frame> 未闭合", start);
+        children.push(parseElement(p, inner));
+      }
+      p.closeTag("Frame", start);
+    }
+    const node: FrameP = {
+      kind: "frame",
+      id: idOf(raw, ctx),
       sizing: sizingOf(p, name, raw),
       children,
     };
@@ -657,7 +711,9 @@ function parseTemplate(p: P, ctx: ParseCtx, shape: ItemField[]): Container {
   p.ws();
   p.eat(">", "期望 >");
   p.ws();
-  const inner: ParseCtx = { ...ctx, shape };
+  // The template root is a FLOW child of the list — an enclosing Frame's
+  // positioning context never leaks into it.
+  const inner: ParseCtx = { ...ctx, shape, inFrame: false };
   const tStart = p.pos;
   const node = parseElement(p, inner);
   if (node.kind === "stack") {
@@ -684,6 +740,7 @@ export function parseSketchMarkup(src: string): ParsedSketch {
   let temp = 0;
   const ctx: ParseCtx = {
     shape: null,
+    inFrame: false,
     ranges: {},
     nextTemp: () => `${TEMP_ID_PREFIX}${++temp}`,
   };
@@ -750,7 +807,7 @@ function attrText(a: string, v: string | number): string {
   return typeof v === "number" ? `${a}={${v}}` : `${a}="${escapeAttr(v)}"`;
 }
 
-function nodeAttrs(n: SketchNode): string[] {
+function nodeAttrs(n: SketchNode, inFrame: boolean): string[] {
   const out: string[] = [];
   const push = (a: string, v: string | number | undefined, dflt?: string | number) => {
     if (v === undefined) return;
@@ -758,6 +815,12 @@ function nodeAttrs(n: SketchNode): string[] {
     out.push(attrText(a, v));
   };
   if (!isTempId(n.id) && n.id !== "") out.push(attrText("sk:id", n.id));
+  if (inFrame) {
+    // Position is ALWAYS printed on a Frame's children (0 included) —
+    // explicit placement is the whole point of the region.
+    out.push(attrText("x", n.pos?.x ?? 0));
+    out.push(attrText("y", n.pos?.y ?? 0));
+  }
 
   const style = n.style;
   const styleAttrs = () => {
@@ -777,6 +840,13 @@ function nodeAttrs(n: SketchNode): string[] {
       push("pad", fmtPad(n.layout.padding), d.pad);
       push("main", n.layout.mainAxis, d.main);
       push("cross", n.layout.crossAxis, d.cross);
+      push("w", fmtSize(n.sizing.width), d.w);
+      push("h", fmtSize(n.sizing.height), d.h);
+      styleAttrs();
+      return out;
+    }
+    case "frame": {
+      const d = DEFAULTS.Frame;
       push("w", fmtSize(n.sizing.width), d.w);
       push("h", fmtSize(n.sizing.height), d.h);
       styleAttrs();
@@ -834,15 +904,18 @@ function textBody(v: string | Bind): string {
   return isBind(v) ? `{Bind ${v.bind}}` : escapeText(v);
 }
 
-function printNode(n: SketchNode, d: number): string {
+function printNode(n: SketchNode, d: number, inFrame = false): string {
   const pad = "  ".repeat(d);
-  const attrs = nodeAttrs(n)
+  const attrs = nodeAttrs(n, inFrame)
     .map((x) => " " + x)
     .join("");
   switch (n.kind) {
     case "stack":
       if (n.children.length === 0) return `${pad}<Stack${attrs} />`;
       return `${pad}<Stack${attrs}>\n${n.children.map((c) => printNode(c, d + 1)).join("\n")}\n${pad}</Stack>`;
+    case "frame":
+      if (n.children.length === 0) return `${pad}<Frame${attrs} />`;
+      return `${pad}<Frame${attrs}>\n${n.children.map((c) => printNode(c, d + 1, true)).join("\n")}\n${pad}</Frame>`;
     case "list": {
       const lines: string[] = [`${pad}<List${attrs}>`];
       lines.push(`${pad}  <ItemShape>`);
@@ -928,7 +1001,7 @@ export function canonicalizeForMarkup(sketch: Sketch): Sketch {
     if (out.kind === "input" && out.placeholder === "") {
       delete out.placeholder;
     }
-    if (out.kind === "stack") {
+    if (out.kind === "stack" || out.kind === "frame") {
       out.children = out.children.map(node);
     }
     if (out.kind === "list") {
@@ -947,7 +1020,7 @@ export function canonicalizeForMarkup(sketch: Sketch): Sketch {
 export function stripForLaw(sketch: Sketch): unknown {
   const node = (n: SketchNode): unknown => {
     const base: Record<string, unknown> = { ...n, id: isTempId(n.id) ? "" : n.id };
-    if (n.kind === "stack") base.children = n.children.map(node);
+    if (n.kind === "stack" || n.kind === "frame") base.children = n.children.map(node);
     if (n.kind === "list") base.template = node(n.template);
     return base;
   };

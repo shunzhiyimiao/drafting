@@ -39,10 +39,32 @@ export function validate(sketch: Sketch): ValidationError[] {
   const errors: ValidationError[] = [];
   const dataKeysSeen = new Map<string, string>(); // dataKey → first list node id
 
-  const walk = (node: SketchNode, list: ListP | null) => {
+  /** Frame position rules (Rev 5): pos ⟺ parent is a frame; a frame can't
+   *  hug (absolute children give it no intrinsic size); its children can't
+   *  fill (fill has no meaning at a point). */
+  const checkPos = (node: SketchNode, inFrame: boolean) => {
+    if (inFrame && !node.pos) {
+      errors.push({ nodeId: node.id, message: "frame child is missing pos (x/y)" });
+    }
+    if (!inFrame && node.pos) {
+      errors.push({ nodeId: node.id, message: "pos (x/y) is only legal on a frame's direct children" });
+    }
+    if (inFrame && (node.sizing.width.mode === "fill" || node.sizing.height.mode === "fill")) {
+      errors.push({ nodeId: node.id, message: "frame children cannot use fill sizing — use hug or fixed" });
+    }
+  };
+
+  const walk = (node: SketchNode, list: ListP | null, inFrame: boolean) => {
+    checkPos(node, inFrame);
     switch (node.kind) {
       case "stack":
-        node.children.forEach((child) => walk(child, list));
+        node.children.forEach((child) => walk(child, list, false));
+        return;
+      case "frame":
+        if (node.sizing.width.mode === "hug" || node.sizing.height.mode === "hug") {
+          errors.push({ nodeId: node.id, message: "a frame cannot hug — its positioned children give it no intrinsic size" });
+        }
+        node.children.forEach((child) => walk(child, list, true));
         return;
       case "list": {
         if (list) {
@@ -51,7 +73,7 @@ export function validate(sketch: Sketch): ValidationError[] {
           errors.push({ nodeId: node.id, message: "nested lists are not supported" });
         }
         validateList(node, errors, dataKeysSeen);
-        walk(node.template, node);
+        walk(node.template, node, false);
         return;
       }
       case "text":
@@ -66,7 +88,7 @@ export function validate(sketch: Sketch): ValidationError[] {
     }
   };
 
-  walk(sketch.root, null);
+  walk(sketch.root, null, false);
   return errors;
 }
 

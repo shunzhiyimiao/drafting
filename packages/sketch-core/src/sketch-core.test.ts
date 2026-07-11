@@ -970,3 +970,96 @@ test("image emits img with src/alt and nested containers thread their context", 
   // Parent crossAxis=center → no self-start opt-out anywhere.
   assert.ok(!cls.includes("self-start"));
 });
+
+// ------------------------------------------------------- Frame (Rev 5 / S5) --
+
+const frameOf = (over: Partial<import("./spec.js").FrameP> = {}): import("./spec.js").FrameP => ({
+  kind: "frame",
+  id: "fr1",
+  sizing: sz(fill, fixed(240)),
+  children: [],
+  ...over,
+});
+
+test("frame: emits relative + fill/fixed sizing; children emit absolute left/top", () => {
+  const fr = frameOf({
+    children: [
+      {
+        kind: "button",
+        id: "bt1",
+        label: "Go",
+        variant: "primary",
+        sizing: sz(hug, hug),
+        pos: { x: 40, y: 120 },
+      },
+      {
+        kind: "image",
+        id: "im1",
+        src: "/a.png",
+        alt: "dot",
+        sizing: sz(fixed(16), fixed(16)),
+        pos: { x: -8, y: 0 },
+      },
+    ],
+  });
+  const ir = sketchToIR(sketchWith(fr), defaultTheme);
+  const frameIR = ir.children[0];
+  const frCls = classesOf(frameIR.className);
+  assert.ok(frCls.includes("relative"));
+  assert.ok(frCls.includes("flex-1") || frCls.includes("self-stretch"), "frame fill sizes in its flow parent");
+  assert.ok(frCls.includes("h-[240px]"));
+
+  const [btn, img] = frameIR.children.map((c) => classesOf(c.className));
+  assert.ok(btn.includes("absolute"));
+  assert.ok(btn.includes("left-[40px]"));
+  assert.ok(btn.includes("top-[120px]"));
+  // hug in a frame = natural size: NO flow classes leak in.
+  for (const cls of ["flex-1", "self-stretch", "self-start", "shrink-0"]) {
+    assert.ok(!btn.includes(cls), `${cls} must not appear on a positioned child`);
+  }
+  assert.ok(img.includes("left-[-8px]"), "negative coordinates emit");
+  assert.ok(img.includes("w-[16px]") && img.includes("h-[16px]"));
+
+  // The generated JSX carries the same truth (codegen path).
+  const jsx = toJsxString(sketchWith(fr), defaultTheme, "v.sketch");
+  assert.match(jsx, /relative/);
+  assert.match(jsx, /absolute left-\[40px\] top-\[120px\]/);
+});
+
+test("frame: fill children fold as hug (total) and validate() rejects them", () => {
+  const fr = frameOf({
+    children: [
+      { kind: "input", id: "in1", label: "E", type: "text", sizing: sz(fill, hug), pos: { x: 0, y: 0 } },
+    ],
+  });
+  const ir = sketchToIR(sketchWith(fr), defaultTheme);
+  const input = classesOf(ir.children[0].children[0].className);
+  assert.ok(input.includes("absolute"));
+  assert.ok(!input.includes("flex-1") && !input.includes("self-stretch"));
+  const errs = validate(sketchWith(fr));
+  assert.ok(errs.some((e) => e.nodeId === "in1" && /fill/.test(e.message)));
+});
+
+test("validate: pos ⟺ frame parent, and frames cannot hug", () => {
+  // pos on a flow child → error.
+  const stray = sketchWith(
+    stack({ id: "s2", children: [{ kind: "text", id: "t9", role: "body", content: "x", sizing: sz(hug, hug), pos: { x: 1, y: 1 } }] }),
+  );
+  assert.ok(validate(stray).some((e) => e.nodeId === "t9" && /only legal on a frame/.test(e.message)));
+
+  // frame child missing pos → error.
+  const missing = sketchWith(
+    frameOf({ children: [{ kind: "text", id: "t10", role: "body", content: "x", sizing: sz(hug, hug) }] }),
+  );
+  assert.ok(validate(missing).some((e) => e.nodeId === "t10" && /missing pos/.test(e.message)));
+
+  // hug frame → error.
+  const huggy = sketchWith(frameOf({ id: "fr9", sizing: sz(hug, fixed(100)) }));
+  assert.ok(validate(huggy).some((e) => e.nodeId === "fr9" && /cannot hug/.test(e.message)));
+
+  // A well-formed frame passes clean.
+  const ok = sketchWith(
+    frameOf({ children: [{ kind: "text", id: "t11", role: "body", content: "x", sizing: sz(hug, hug), pos: { x: 4, y: 6 } }] }),
+  );
+  assert.deepEqual(validate(ok), []);
+});

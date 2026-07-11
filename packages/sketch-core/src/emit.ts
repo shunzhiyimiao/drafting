@@ -8,6 +8,7 @@
  * `{direction, crossAxis}` 2-tuple (K2).
  */
 import type {
+  Pos,
   Container,
   Edges,
   ItemFieldType,
@@ -72,6 +73,11 @@ export interface ParentCtx {
    *  Class emission still depends on exactly the {direction, crossAxis}
    *  2-tuple — K2's decidability argument is untouched. */
   repeat?: { itemType: string };
+  /** Rev 5 Frame: the parent is a positioned region — children emit
+   *  `absolute left-[x] top-[y]` instead of flow-sizing classes. This grows
+   *  the downward context to the {direction, crossAxis, frame?} 3-tuple;
+   *  still finite, K2 intact. */
+  frame?: true;
 }
 
 /** The root renders as a screen column (lean, documented): a col that
@@ -80,8 +86,20 @@ export const ROOT_CTX: ParentCtx = { direction: "col", crossAxis: "stretch" };
 
 // -------------------------------------------------------------- class core --
 
-/** Sizing classes, relative to the parent's main axis (§4). */
-export function sizingClasses(sizing: Sizing, parent: ParentCtx): string[] {
+/** Sizing classes, relative to the parent's main axis (§4).
+ *
+ *  Under a Frame parent (Rev 5), flow sizing is replaced wholesale by
+ *  absolute positioning: `absolute left-[x] top-[y]` plus fixed dimensions
+ *  only. `hug` is the natural size (no class); `fill` has no meaning at a
+ *  point — validate() errors it upstream, the fold stays total by treating
+ *  it as hug. */
+export function sizingClasses(sizing: Sizing, parent: ParentCtx, pos?: Pos): string[] {
+  if (parent.frame) {
+    const out = ["absolute", `left-[${pos?.x ?? 0}px]`, `top-[${pos?.y ?? 0}px]`];
+    if (sizing.width.mode === "fixed") out.push(`w-[${sizing.width.px}px]`);
+    if (sizing.height.mode === "fixed") out.push(`h-[${sizing.height.px}px]`);
+    return out;
+  }
   const mainIsWidth = parent.direction === "row";
   const main = mainIsWidth ? sizing.width : sizing.height;
   const cross = mainIsWidth ? sizing.height : sizing.width;
@@ -144,7 +162,7 @@ export function containerClasses(c: Container, parent: ParentCtx, theme: Theme):
     ...paddingClasses(c.layout.padding),
     JUSTIFY[c.layout.mainAxis],
     ITEMS[c.layout.crossAxis],
-    ...sizingClasses(c.sizing, parent),
+    ...sizingClasses(c.sizing, parent, c.pos),
     ...styleClasses(c.style, theme),
   ]);
 }
@@ -202,6 +220,31 @@ export function toIR(node: SketchNode, parent: ParentCtx, theme: Theme): IRNode 
         children: node.children.map((child) => toIR(child, ctx, theme)),
       };
     }
+    case "frame": {
+      // The positioned region (Rev 5): `relative` establishes the containing
+      // block; children place themselves via pos. No flow layout exists
+      // here. Like WPF's Canvas, the frame does NOT clip — a child may hang
+      // off the edge and the document stays honest about it.
+      const ctx: ParentCtx = {
+        direction: "col",
+        crossAxis: "start",
+        frame: true,
+        ...(parent.repeat ? { repeat: parent.repeat } : {}),
+      };
+      return {
+        tag: "div",
+        className: dedup([
+          "relative",
+          ...sizingClasses(node.sizing, parent, node.pos),
+          ...styleClasses(node.style, theme),
+        ]),
+        dataSk: node.id,
+        attrs: {},
+        handlerId: null,
+        text: null,
+        children: node.children.map((child) => toIR(child, ctx, theme)),
+      };
+    }
     case "list": {
       const itemType = itemTypeName(node.dataKey);
       // The wrapper is a plain column (list has no Layout by design — row
@@ -212,7 +255,7 @@ export function toIR(node: SketchNode, parent: ParentCtx, theme: Theme): IRNode 
         className: dedup([
           "flex",
           "flex-col",
-          ...sizingClasses(node.sizing, parent),
+          ...sizingClasses(node.sizing, parent, node.pos),
           ...styleClasses(node.style, theme),
         ]),
         dataSk: node.id,
@@ -241,7 +284,7 @@ export function toIR(node: SketchNode, parent: ParentCtx, theme: Theme): IRNode 
         tag: TEXT_TAG[node.role],
         className: dedup([
           ...theme.type[node.role],
-          ...sizingClasses(node.sizing, parent),
+          ...sizingClasses(node.sizing, parent, node.pos),
           ...styleClasses(eff, theme),
         ]),
         dataSk: node.id,
@@ -259,7 +302,7 @@ export function toIR(node: SketchNode, parent: ParentCtx, theme: Theme): IRNode 
         tag: "button",
         className: dedup([
           ...BUTTON_BASE,
-          ...sizingClasses(node.sizing, parent),
+          ...sizingClasses(node.sizing, parent, node.pos),
           ...styleClasses(merged, theme),
         ]),
         dataSk: node.id,
@@ -279,7 +322,7 @@ export function toIR(node: SketchNode, parent: ParentCtx, theme: Theme): IRNode 
           "flex",
           "flex-col",
           "gap-1",
-          ...sizingClasses(node.sizing, parent),
+          ...sizingClasses(node.sizing, parent, node.pos),
           ...styleClasses(node.style, theme),
         ]),
         dataSk: node.id,
@@ -319,7 +362,7 @@ export function toIR(node: SketchNode, parent: ParentCtx, theme: Theme): IRNode 
       return {
         tag: "img",
         className: dedup([
-          ...sizingClasses(node.sizing, parent),
+          ...sizingClasses(node.sizing, parent, node.pos),
           ...styleClasses(node.style, theme),
         ]),
         dataSk: node.id,
@@ -349,6 +392,9 @@ export function classUniverse(theme: Theme): string[] {
 
   // container statics + sizing statics
   add("flex", "flex-row", "flex-col", "shrink-0", "flex-1", "self-start", "self-stretch");
+  // frame statics (Rev 5) — left/top arbitrary values are the same open
+  // hatch as w-[Npx]: the canvas shims them to inline style.
+  add("relative", "absolute");
   // spacing families over the ramp
   for (const s of [0, 1, 2, 3, 4, 6, 8, 12, 16, 24]) {
     add(`gap-${s}`, `p-${s}`, `px-${s}`, `py-${s}`, `pt-${s}`, `pr-${s}`, `pb-${s}`, `pl-${s}`);
@@ -389,7 +435,7 @@ export function collectHandlerIds(ir: IRNode): string[] {
 export function collectLists(root: SketchNode): ListP[] {
   const out: ListP[] = [];
   const walk = (n: SketchNode) => {
-    if (n.kind === "stack") n.children.forEach(walk);
+    if (n.kind === "stack" || n.kind === "frame") n.children.forEach(walk);
     else if (n.kind === "list") {
       out.push(n);
       walk(n.template);

@@ -24,7 +24,7 @@ export interface Sketch {
   schemaVersion: number;
 }
 
-export type SketchNode = Container | ListP | Primitive; // the auto-layout tree
+export type SketchNode = Container | FrameP | ListP | Primitive; // the auto-layout tree (+ the Frame exception)
 
 export interface Container {
   kind: "stack"; // grid PARKED (needs its own track-sizing model)
@@ -33,6 +33,33 @@ export interface Container {
   sizing: Sizing;
   style?: Style;
   children: SketchNode[];
+  pos?: Pos;
+}
+
+/** Coordinates INSIDE a Frame — the K1 amendment (Rev 5/S5): x/y are
+ *  document attributes (they live in the tree and the `.sketch` text, edit
+ *  through the same parse→mutate→print channel, undo on the same stack).
+ *  Legal iff the parent is a Frame — validate() and the dialect both
+ *  enforce it. Logical px from the Frame's top-left. */
+export interface Pos {
+  x: number;
+  y: number;
+}
+
+/**
+ * The positioned container — the ONE region where coordinates are truth.
+ * No flow layout (no gap/padding/axes): children sit at their own `pos`,
+ * later siblings paint on top (child order = z-order). Sizing must be
+ * fill/fixed — absolute children give a frame no intrinsic size, so `hug`
+ * is a validate() error.
+ */
+export interface FrameP {
+  kind: "frame";
+  id: string;
+  sizing: Sizing;
+  style?: Style;
+  children: SketchNode[];
+  pos?: Pos;
 }
 
 /** A binding expression — legal ONLY inside a list template subtree, where
@@ -55,6 +82,7 @@ export interface TextP {
   sizing: Sizing;
   style?: Style;
   semantics?: SemanticDecl;
+  pos?: Pos;
 }
 export interface ButtonP {
   kind: "button";
@@ -65,6 +93,7 @@ export interface ButtonP {
   style?: Style;
   intent?: Intent;
   semantics?: SemanticDecl;
+  pos?: Pos;
 }
 export interface InputP {
   kind: "input";
@@ -75,6 +104,7 @@ export interface InputP {
   sizing: Sizing;
   style?: Style;
   semantics?: SemanticDecl;
+  pos?: Pos;
 }
 export interface ImageP {
   kind: "image";
@@ -85,6 +115,7 @@ export interface ImageP {
   sizing: Sizing;
   style?: Style;
   semantics?: SemanticDecl;
+  pos?: Pos;
 }
 export type Primitive = TextP | ButtonP | InputP | ImageP; // MVP primitive set: 4 atoms
 
@@ -122,6 +153,7 @@ export interface ListP {
   sampleRows: Record<string, unknown>[];
   sizing: Sizing;
   style?: Style;
+  pos?: Pos;
 }
 
 export interface Layout {

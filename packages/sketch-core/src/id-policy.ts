@@ -55,7 +55,7 @@ export function ensurePersistentIds(sketch: Sketch, mint: () => string): EnsureI
       id = mint();
       minted.push(id);
     }
-    if (n.kind === "stack") {
+    if (n.kind === "stack" || n.kind === "frame") {
       return { ...n, id, children: n.children.map((c) => walk(c, inTemplate)) };
     }
     if (n.kind === "list") {

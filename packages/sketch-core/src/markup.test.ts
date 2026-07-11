@@ -290,3 +290,55 @@ test("escaped text and attributes round-trip", () => {
   const again = parse(printSketchMarkup(t));
   assert.deepEqual(stripForLaw(again), stripForLaw(t));
 });
+
+// ------------------------------------------------------- Frame (Rev 5 / S5) --
+
+test("law: a Frame document round-trips; canonical print always writes x/y", () => {
+  const src = wrap(
+    `<Stack h="fill">
+    <Frame sk:id="fr1" h={240} bg="raised">
+      <Text x={12} y={8} role="heading">Pinned</Text>
+      <Button sk:id="bt1" x={40} y={120} variant="primary">Go</Button>
+      <Image src="/a.png" alt="dot" w={16} h={16} />
+    </Frame>
+  </Stack>`,
+  );
+  const t = parse(src);
+  assert.deepEqual(stripForLaw(parse(printSketchMarkup(t))), stripForLaw(t));
+
+  const frame = t.root.children[0];
+  assert.equal(frame.kind, "frame");
+  const kids = (frame as { children: import("./spec.js").SketchNode[] }).children;
+  assert.deepEqual(kids[0].pos, { x: 12, y: 8 });
+  assert.deepEqual(kids[1].pos, { x: 40, y: 120 });
+  // Missing x/y on the image default to 0 — and canonical print makes them explicit.
+  assert.deepEqual(kids[2].pos, { x: 0, y: 0 });
+  const printed = printSketchMarkup(t);
+  assert.match(printed, /<Image x=\{0\} y=\{0\}/);
+  // Frame defaults (w fill, h 200) omit; h={240} prints.
+  assert.match(printed, /<Frame sk:id="fr1" h=\{240\} bg="raised">/);
+  // Fixpoint with frames present.
+  assert.equal(printSketchMarkup(parse(printed)), printed);
+});
+
+test("Frame: negative positions are legal (a child may hang off the edge)", () => {
+  const t = parse(wrap(`<Stack h="fill"><Frame><Button x={-8} y={4}>b</Button></Frame></Stack>`));
+  const frame = t.root.children[0] as { children: { pos?: { x: number; y: number } }[] };
+  assert.deepEqual(frame.children[0].pos, { x: -8, y: 4 });
+});
+
+test("x/y outside a Frame's direct children are positioned dialect errors", () => {
+  const onStack = err(wrap(`<Stack h="fill"><Button x={10}>b</Button></Stack>`));
+  assert.match(onStack.message, /只在 <Frame> 的直接子级/);
+  assert.ok(onStack.line >= 2, "error carries a position");
+  // A stack INSIDE a frame resets the context: its own children are flow.
+  const nested = err(
+    wrap(`<Stack h="fill"><Frame><Stack x={4} y={4} w={100} h={40}><Text x={1}>t</Text></Stack></Frame></Stack>`),
+  );
+  assert.match(nested.message, /只在 <Frame> 的直接子级/);
+});
+
+test("x/y must be integer pixels", () => {
+  const e = err(wrap(`<Stack h="fill"><Frame><Button x="left">b</Button></Frame></Stack>`));
+  assert.match(e.message, /需为整数像素/);
+});
