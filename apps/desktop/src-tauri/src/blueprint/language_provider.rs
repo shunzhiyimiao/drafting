@@ -240,6 +240,18 @@ pub struct TestReport {
 }
 
 impl TestReport {
+    /// Modules that ran at least one test (Atlas health panel fact).
+    pub fn tested_count(&self) -> usize {
+        self.tested_modules.len()
+    }
+
+    /// Modules with at least one failing test, sorted (Atlas health panel).
+    pub fn failed_module_names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.failed_modules.iter().cloned().collect();
+        v.sort();
+        v
+    }
+
     /// Parse `cargo test` stdout lines: `test <path>::name ... ok|FAILED|ignored`.
     pub fn from_cargo_output(stdout: &str) -> Self {
         let mut tested_modules = HashSet::new();

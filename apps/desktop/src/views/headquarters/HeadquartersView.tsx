@@ -6,6 +6,7 @@ import { ProjectIdentityBar } from "./ProjectIdentityBar";
 import { SmartSuggestion } from "./SmartSuggestion";
 import { ActionCenter } from "./ActionCenter";
 import { AuxiliaryInfo } from "./AuxiliaryInfo";
+import { AtlasReportCard } from "./AtlasReportCard";
 
 export function HeadquartersView() {
   const bpInitialized = useBlueprintStore((s) => s.initialized);
@@ -28,6 +29,7 @@ export function HeadquartersView() {
       <ProjectIdentityBar />
       <SmartSuggestion />
       <ActionCenter />
+      <AtlasReportCard />
       <AuxiliaryInfo />
     </div>
   );
