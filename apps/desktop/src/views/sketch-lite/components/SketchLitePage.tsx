@@ -3,9 +3,10 @@ import { ArrowLeft, Eye, PenTool, Sparkles } from "lucide-react";
 import { printSketchMarkup } from "@drafting/sketch-core";
 import { ulid } from "../../../lib/ulid";
 import { useSketchStore } from "../../../stores/sketch-store";
+import { runTaskCollect } from "../../../lib/ai-api";
 import { SketchCanvas } from "../../sketch/Canvas";
 import { useSketchLiteStore } from "../store";
-import { generateUiFromSketch } from "../pipeline/pipeline";
+import { generateUiSmart, type RunAi } from "../pipeline/ai-generate";
 import { LiteToolbar } from "./LiteToolbar";
 import { LiteCanvas } from "./LiteCanvas";
 import { LiteInspector } from "./LiteInspector";
@@ -24,14 +25,35 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   const generateFromLite = useSketchStore((s) => s.generateFromLite);
   const activeFile = useSketchStore((s) => s.activeFile);
   const activeName = useSketchStore((s) => s.active?.name ?? null);
+  const projectRoot = useSketchStore((s) => s.projectRoot);
   const [mode, setMode] = useState<"sketch" | "preview">("sketch");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<{ mode: "ai" | "fallback"; reason?: string } | null>(
+    null,
+  );
 
   // One napkin per document: (re)bind whenever the active sketch changes.
   useEffect(() => {
     if (activeFile) bindTo(activeFile, activeName ?? "Untitled sketch");
   }, [activeFile, activeName, bindTo]);
+
+  /** The AI seam: the harness injects __liteAiMock; the app routes the
+   *  `sketchGenerate` task through the AI Provider Manager; neither →
+   *  null → offline skeleton (loudly labeled). */
+  const resolveRunAi = (): RunAi | null => {
+    const mock = (window as unknown as { __liteAiMock?: RunAi }).__liteAiMock;
+    if (mock) return mock;
+    if (!projectRoot || projectRoot === "/dev/null") return null;
+    return (system, user) =>
+      runTaskCollect(projectRoot, "sketchGenerate", {
+        model: "", // the task route decides
+        system,
+        messages: [{ role: "user", content: user }],
+        temperature: 0.4,
+        maxTokens: 4096,
+      });
+  };
 
   const onGenerate = async () => {
     if (doc.shapes.length === 0) {
@@ -41,18 +63,13 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await generateUiFromSketch(doc, { sketchId: "sk_pending", mint: ulid });
-      if (result.validationErrors.length > 0) {
-        // 编译器合同被打破 — 响亮失败,绝不落一份非法文档。
-        throw new Error(
-          `编译产物未过校验: ${result.validationErrors.map((e) => e.message).join("; ")}`,
-        );
-      }
+      const result = await generateUiSmart(doc, { mint: ulid, runAi: resolveRunAi() });
       await generateFromLite(
         doc.title,
         (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
         "replace-active",
       );
+      setOutcome({ mode: result.mode, reason: result.reason });
       setMode("preview");
     } catch (e) {
       setError(String(e));
@@ -125,8 +142,24 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
       ) : (
         /* Preview: the EXISTING runtime rendering the current document —
            what Generate wrote (or whatever the doc already holds). */
-        <div data-lite-preview className="flex-1 flex min-h-0">
-          <SketchCanvas />
+        <div data-lite-preview className="flex-1 flex flex-col gap-1.5 min-h-0">
+          {outcome && (
+            <div
+              data-lite-outcome={outcome.mode}
+              className={`shrink-0 px-3 py-1.5 rounded-md text-[11px] ${
+                outcome.mode === "ai"
+                  ? "bg-accent/10 text-accent"
+                  : "bg-warning/10 text-warning"
+              }`}
+            >
+              {outcome.mode === "ai"
+                ? "✨ AI 生成 — 按草图注释与页面描述设计"
+                : `⚠ 已用离线骨架(AI 未生效):${outcome.reason ?? ""}`}
+            </div>
+          )}
+          <div className="flex-1 flex min-h-0">
+            <SketchCanvas />
+          </div>
         </div>
       )}
     </div>

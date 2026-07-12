@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { normalizeBounds, type Bounds } from "../model/types";
 import { MIN_SHAPE_SIZE, useSketchLiteStore } from "../store";
 import { LiteShapeView } from "./LiteShapeView";
@@ -19,8 +19,13 @@ export function LiteCanvas() {
   const addShape = useSketchLiteStore((s) => s.addShape);
   const updateShapeBounds = useSketchLiteStore((s) => s.updateShapeBounds);
   const deleteShape = useSketchLiteStore((s) => s.deleteShape);
+  const setAnnotation = useSketchLiteStore((s) => s.setAnnotation);
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  /** In-place comment editing (L2): double-click a shape → a floating
+   *  textarea right on the canvas. Enter/blur saves, Escape discards. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftComment, setDraftComment] = useState("");
 
   const localPoint = (e: { clientX: number; clientY: number }) => {
     const r = surfaceRef.current!.getBoundingClientRect();
@@ -143,6 +148,31 @@ export function LiteCanvas() {
     });
   };
 
+  const onDoubleClick = (e: React.MouseEvent) => {
+    // Hit-test by COORDINATES, not e.target: the first click's pointer
+    // capture retargets the compat click/dblclick events to the surface,
+    // so the target is useless here (a real-user bug the e2e caught).
+    const p = localPoint(e);
+    const shape = [...useSketchLiteStore.getState().doc.shapes]
+      .reverse() // painted last = on top
+      .find(
+        (s) =>
+          p.x >= s.bounds.x &&
+          p.x <= s.bounds.x + s.bounds.width &&
+          p.y >= s.bounds.y &&
+          p.y <= s.bounds.y + s.bounds.height,
+      );
+    if (!shape) return;
+    select(shape.id);
+    setDraftComment(shape.annotation ?? "");
+    setEditingId(shape.id);
+  };
+
+  const commitComment = () => {
+    if (editingId) setAnnotation(editingId, draftComment.trim());
+    setEditingId(null);
+  };
+
   const onPointerUp = (e: React.PointerEvent) => {
     const g = useSketchLiteStore.getState().gesture;
     if (!g || e.pointerId !== g.pointerId) return;
@@ -167,6 +197,7 @@ export function LiteCanvas() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onDoubleClick={onDoubleClick}
       >
         {doc.shapes.map((s) => (
           <LiteShapeView key={s.id} shape={s} selected={s.id === selectedShapeId} />
@@ -182,6 +213,40 @@ export function LiteCanvas() {
             }}
           />
         )}
+        {editingId &&
+          (() => {
+            const shape = doc.shapes.find((s) => s.id === editingId);
+            if (!shape) return null;
+            const b = shape.bounds;
+            return (
+              <textarea
+                data-lite-comment-editor
+                autoFocus
+                value={draftComment}
+                onChange={(e) => setDraftComment(e.target.value)}
+                onPointerDown={(e) => e.stopPropagation()}
+                onBlur={commitComment}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    commitComment();
+                  }
+                  if (e.key === "Escape") {
+                    e.stopPropagation(); // don't cancel gestures/selection
+                    setEditingId(null);
+                  }
+                }}
+                placeholder="这个区域是什么?要什么内容?"
+                className="absolute z-20 text-[11px] leading-snug p-1.5 rounded-md border-2 border-amber-400 bg-amber-50 text-slate-800 shadow-lg resize-none placeholder:text-slate-400"
+                style={{
+                  left: b.x,
+                  top: b.y,
+                  width: Math.max(b.width, 180),
+                  height: Math.max(52, Math.min(b.height, 96)),
+                }}
+              />
+            );
+          })()}
         {doc.shapes.length === 0 && !gesture && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <p className="text-sm text-slate-300">用矩形工具画几个大概的区域 — 不用画得准</p>

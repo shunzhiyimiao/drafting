@@ -46,7 +46,8 @@ export type TaskId =
   | "blueprintSuggestCriteria"
   | "patchboardSuggestSocket"
   | "patchboardSuggestAdapter"
-  | "gitCommitMessage";
+  | "gitCommitMessage"
+  | "sketchGenerate";
 
 export const TASK_LABELS: Record<TaskId, string> = {
   editorCompletion: "Code Completion",
@@ -59,6 +60,7 @@ export const TASK_LABELS: Record<TaskId, string> = {
   patchboardSuggestSocket: "Suggest Socket",
   patchboardSuggestAdapter: "Suggest Adapter",
   gitCommitMessage: "Commit Message",
+  sketchGenerate: "Sketch Generate",
 };
 
 /** Routes now point at a Profile id (ULID). */

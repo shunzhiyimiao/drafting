@@ -117,6 +117,16 @@ export async function checkDraftHealth(
 
 // --- Streaming ------------------------------------------------------------
 
+/** One-shot task run: server collects the stream, returns the full text.
+ *  The whole AI Provider Manager chain (route/privacy/audit/cost) applies. */
+export async function runTaskCollect(
+  projectRoot: string,
+  taskId: TaskId,
+  request: ChatRequest,
+): Promise<string> {
+  return invoke("ai_run_task_collect", { projectRoot, taskId, request });
+}
+
 export async function streamChat(
   projectRoot: string,
   taskId: TaskId,

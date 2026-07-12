@@ -239,6 +239,7 @@ const translations: Record<string, Record<Locale, string>> = {
   "task.blueprintSuggestCriteria": { zh: "建议准则", en: "Suggest Criteria" },
   "task.patchboardSuggestSocket": { zh: "建议 Socket", en: "Suggest Socket" },
   "task.patchboardSuggestAdapter": { zh: "建议 Adapter", en: "Suggest Adapter" },
+  "task.sketchGenerate": { zh: "草图生成界面", en: "Sketch Generate" },
   "task.gitCommitMessage": { zh: "提交消息", en: "Commit Message" },
 
   // -- AI Generate Dialog -----------------------------------------------
