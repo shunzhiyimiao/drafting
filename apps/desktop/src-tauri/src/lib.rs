@@ -594,6 +594,7 @@ pub fn run() {
             blueprint::commands::blueprint_update_structured,
             blueprint::commands::blueprint_delete,
             blueprint::commands::blueprint_toggle_criterion,
+            blueprint::commands::blueprint_checklist_for_file,
             blueprint::commands::blueprint_list_templates,
             blueprint::commands::blueprint_preview_template,
             blueprint::commands::blueprint_lightweight_check,

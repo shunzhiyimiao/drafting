@@ -144,3 +144,26 @@ export async function rebuildIndex(
 ): Promise<BlueprintIndex> {
   return invoke("blueprint_rebuild_index", { projectRoot });
 }
+
+// --------------------------------------------------------------- checklist --
+
+/** One row of the editor bottom-panel Checklist (mirrors ChecklistEntry). */
+export interface ChecklistEntry {
+  blueprintId: string;
+  blueprintName: string;
+  criterionId: string;
+  criterionIndex: number;
+  text: string;
+  checked: boolean;
+  verdict: "pass" | "fail" | "unclear" | null;
+  stale: boolean;
+  drifted: boolean;
+  explanation: string | null;
+}
+
+export async function checklistForFile(
+  projectRoot: string,
+  file: string,
+): Promise<ChecklistEntry[]> {
+  return invoke("blueprint_checklist_for_file", { projectRoot, file });
+}

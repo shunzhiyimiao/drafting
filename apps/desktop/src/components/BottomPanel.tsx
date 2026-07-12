@@ -1,6 +1,8 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useLayoutStore, type BottomPanelTab } from "../stores/layout-store";
 
+import { ChecklistPanel } from "./ChecklistPanel";
+
 const tabs: { id: BottomPanelTab; label: string }[] = [
   { id: "checklist", label: "Checklist" },
   { id: "terminal", label: "Terminal" },
@@ -57,8 +59,7 @@ export function BottomPanel() {
       </div>
       {!bottomPanelCollapsed && (
         <div className="flex-1 overflow-auto px-3 py-2 text-text-muted text-xs">
-          {bottomPanelActiveTab === "checklist" &&
-            "Acceptance Criteria checklist will appear here."}
+          {bottomPanelActiveTab === "checklist" && <ChecklistPanel />}
           {bottomPanelActiveTab === "terminal" &&
             "Terminal sessions will appear here."}
           {bottomPanelActiveTab === "problems" &&

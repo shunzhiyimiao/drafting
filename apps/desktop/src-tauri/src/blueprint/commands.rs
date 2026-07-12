@@ -344,3 +344,111 @@ pub fn blueprint_rebuild_index(
 
     Ok(index)
 }
+
+// ---------------------------------------------------------------------------
+// Checklist (编辑器下侧面板的核心特色): the current FILE's acceptance
+// criteria — bindings 反查 + 估计器状态合并。勾选即真相:面板的 toggle 走
+// 既有 blueprint_toggle_criterion,写回 MD。
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChecklistEntry {
+    pub blueprint_id: String,
+    pub blueprint_name: String,
+    pub criterion_id: String,
+    /// Index inside the blueprint's AC section — the toggle command's key.
+    pub criterion_index: usize,
+    pub text: String,
+    pub checked: bool,
+    /// "pass" | "fail" | "unclear" | null (never checked).
+    pub verdict: Option<String>,
+    pub stale: bool,
+    pub drifted: bool,
+    pub explanation: Option<String>,
+}
+
+/// Everything the Checklist panel needs for one file, in blueprint order.
+/// Bindings are built live from the loaded blueprints (same as the Atlas
+/// observability aggregation — no staleness games).
+#[tauri::command]
+pub fn blueprint_checklist_for_file(
+    project_root: String,
+    file: String,
+    estimator: State<'_, std::sync::Arc<crate::blueprint::estimator::Estimator>>,
+) -> Result<Vec<ChecklistEntry>, String> {
+    let root = std::path::Path::new(&project_root);
+    let index = storage::load_index(root).map_err(|e| e.to_string())?;
+
+    let mut blueprints = Vec::new();
+    for entry in &index.blueprints {
+        if let Ok(bp) = storage::load_blueprint(root, &entry.blueprint_id) {
+            blueprints.push(bp);
+        }
+    }
+    let refs: Vec<&Blueprint> = blueprints.iter().collect();
+    let bindings_index = crate::blueprint::bindings::build_bindings(&refs, root);
+
+    // criterion ids bound to THIS file
+    let bound: std::collections::BTreeSet<&str> = bindings_index
+        .bindings
+        .iter()
+        .filter(|b| b.file == file)
+        .map(|b| b.criterion_id.as_str())
+        .collect();
+    if bound.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    for bp in &blueprints {
+        let bp_id = &bp.front_matter.blueprint_id;
+        let has_bound = bp
+            .sections
+            .iter()
+            .flat_map(|s| s.criteria.iter())
+            .any(|c| bound.contains(c.id.as_str()));
+        if !has_bound {
+            continue;
+        }
+        // Cold-cache fill, same as blueprint_get_estimates.
+        let mut estimates = estimator.estimates_for(bp_id);
+        if estimates.is_empty() {
+            estimator.refresh_from_checks(root, bp_id);
+            estimates = estimator.estimates_for(bp_id);
+        }
+        let by_criterion: std::collections::HashMap<&str, &crate::blueprint::estimator::Estimate> =
+            estimates.iter().map(|e| (e.criterion_id.as_str(), e)).collect();
+
+        for section in bp.sections.iter().filter(|s| s.kind.is_acceptance_criteria()) {
+            for (i, c) in section.criteria.iter().enumerate() {
+                if !bound.contains(c.id.as_str()) {
+                    continue;
+                }
+                let est = by_criterion.get(c.id.as_str());
+                out.push(ChecklistEntry {
+                    blueprint_id: bp_id.clone(),
+                    blueprint_name: bp.front_matter.display_name.clone(),
+                    criterion_id: c.id.clone(),
+                    criterion_index: i,
+                    text: c.text.clone(),
+                    checked: c.checked,
+                    verdict: est.and_then(|e| {
+                        e.verdict.as_ref().map(|v| {
+                            match v {
+                                crate::blueprint::types::CheckVerdict::Pass => "pass",
+                                crate::blueprint::types::CheckVerdict::Fail => "fail",
+                                crate::blueprint::types::CheckVerdict::Unclear => "unclear",
+                            }
+                            .to_string()
+                        })
+                    }),
+                    stale: est.map(|e| e.stale).unwrap_or(false),
+                    drifted: est.map(|e| e.drifted).unwrap_or(false),
+                    explanation: est.and_then(|e| e.explanation.clone()),
+                });
+            }
+        }
+    }
+    Ok(out)
+}
