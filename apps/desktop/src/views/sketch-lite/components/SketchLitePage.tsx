@@ -3,10 +3,12 @@ import { ArrowLeft, Eye, PenTool, Sparkles } from "lucide-react";
 import { printSketchMarkup } from "@drafting/sketch-core";
 import { ulid } from "../../../lib/ulid";
 import { useSketchStore } from "../../../stores/sketch-store";
+import { useBoundFeature } from "../../sketch/binding";
 import { runTaskCollect } from "../../../lib/ai-api";
 import { SketchCanvas } from "../../sketch/Canvas";
 import { useSketchLiteStore } from "../store";
 import { generateUiSmart, type RunAi } from "../pipeline/ai-generate";
+import { LiteBindingPanel } from "./LiteBindingPanel";
 import { LiteToolbar } from "./LiteToolbar";
 import { LiteCanvas } from "./LiteCanvas";
 import { LiteInspector } from "./LiteInspector";
@@ -32,6 +34,9 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   const [outcome, setOutcome] = useState<{ mode: "ai" | "fallback"; reason?: string } | null>(
     null,
   );
+  // 蓝图闭环:sketch 绑了特性蓝图时,验收标准喂进 Generate 的 prompt ——
+  // 生成的界面直接朝标准去。
+  const [boundFeature] = useBoundFeature();
 
   // One napkin per document: (re)bind whenever the active sketch changes.
   useEffect(() => {
@@ -63,7 +68,10 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await generateUiSmart(doc, { mint: ulid, runAi: resolveRunAi() });
+      const criteria = (boundFeature?.sections ?? [])
+        .filter((s) => s.kind.kind === "acceptanceCriteria")
+        .flatMap((s) => s.criteria.map((c) => c.text));
+      const result = await generateUiSmart(doc, { mint: ulid, runAi: resolveRunAi(), criteria });
       await generateFromLite(
         doc.title,
         (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
@@ -157,8 +165,9 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
                 : `⚠ 已用离线骨架(AI 未生效):${outcome.reason ?? ""}`}
             </div>
           )}
-          <div className="flex-1 flex min-h-0">
+          <div className="flex-1 flex gap-2 min-h-0">
             <SketchCanvas />
+            <LiteBindingPanel />
           </div>
         </div>
       )}

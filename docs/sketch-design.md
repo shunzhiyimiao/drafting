@@ -263,7 +263,7 @@ Sketch and WPF/XAML converged on the same model independently (declarative eleme
 
 ## 12. Sketch Lite (Phase 1, 2026-07-13) — the low-fidelity intent surface
 
-> **2026-07-13 second pass(用户拍板):Lite 完全替代 sketch 工作面。** 入口与列表/创建窗口不变;打开/新建 sketch 直接进 Lite(一文档一张草稿,会话内按文件暂存);Generate UI 写进**当前**文档(replace-active,一步撤销)并自动切到「预览」页签 —— 现有运行时画布在 Lite 内渲染结果。旧设计器 chrome(palette/layers/dock/多 tab 工具栏)不再路由,代码保留(预览复用 SketchCanvas);`.sketch` 文本仍是真相,codegen 照常。**能力后果**:designer Inspector 的 criteria 绑定、Frame 手势编辑、结构化树操作暂时没有入口 —— 若需要,决策是「预览页签升级为完整设计器」或「按需重新路由」,待用户排程。
+> **2026-07-13 second pass(用户拍板):Lite 完全替代 sketch 工作面。** 入口与列表/创建窗口不变;打开/新建 sketch 直接进 Lite(一文档一张草稿,会话内按文件暂存);Generate UI 写进**当前**文档(replace-active,一步撤销)并自动切到「预览」页签 —— 现有运行时画布在 Lite 内渲染结果。旧设计器 chrome(palette/layers/dock/多 tab 工具栏)不再路由,代码保留(预览复用 SketchCanvas);`.sketch` 文本仍是真相,codegen 照常。**能力后果(2026-07-13 部分已还账)**:criteria 绑定已回归 —— Lite 预览页签挂 `LiteBindingPanel`(关联 Blueprint 下拉写 `blueprintRef`;选中预览节点把 criterion 绑上去,§6 写序与 9eada7c 纪律经共享模块 `sketch/binding.ts` 单实现复用,旧 Inspector 同步去重);绑定落地即入 bindings → Checklist/估计器/漂移自动生效;绑了蓝图的 sketch 在 Generate 时把验收标准喂进 AI prompt(蓝图闭环)。Frame 手势编辑与结构化树操作仍无入口,待排程。
 
 **用户画个大概,AI 补全设计。** Sketch Lite 是画在 Spec 之上的输入面,不是第二个设计器,更不是 Figma:矩形 + 注释 + 页级 prompt,仅此而已。它的产物不是真相 —— 真相仍然是 `.sketch` 文本;Generate UI 的终点是一份**合法的现有 Spec 文档**,落进设计器(可编辑、可撤销、可 codegen)。
 

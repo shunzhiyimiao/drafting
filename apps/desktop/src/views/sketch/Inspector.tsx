@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { AlertTriangle, ChevronDown, Link2, Link2Off, Plus, Trash2 } from "lucide-react";
 import {
   BUTTON_VARIANTS,
@@ -22,8 +22,7 @@ import {
 } from "@drafting/sketch-core";
 import { allNodeIds, findEnclosingList, findNode, useSketchStore } from "../../stores/sketch-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
-import { getBlueprint, updateBlueprintStructured } from "../../lib/blueprint-api";
-import type { Blueprint } from "../../types/blueprint-types";
+import { setCriterionBinding, useBoundFeature } from "./binding";
 import { Dropdown } from "../../components/Dropdown";
 
 /** The §7 Inspector: every control is an enumerated dropdown/toggle over the
@@ -762,59 +761,6 @@ function ListSection({ node }: { node: ListP }) {
 }
 
 // ------------------------------------------------------------- bindings --
-
-/** Load the bound feature blueprint for the binding surface. Bind/unbind
- *  writes the CRITERION half via blueprint storage — the §6 write invariant:
- *  Sketch never writes .blueprint.md, this component only edits criteria
- *  through the blueprint API (spreading originals so ids/markerExtras/
- *  sketchNode survive — the 9eada7c discipline). */
-function useBoundFeature(): [Blueprint | null, () => Promise<void>] {
-  const active = useSketchStore((s) => s.active);
-  const projectRoot = useSketchStore((s) => s.projectRoot);
-  const [feature, setFeature] = useState<Blueprint | null>(null);
-
-  const reload = useCallback(async () => {
-    if (!projectRoot || !active?.blueprintRef) {
-      setFeature(null);
-      return;
-    }
-    try {
-      setFeature(await getBlueprint(projectRoot, active.blueprintRef));
-    } catch {
-      setFeature(null);
-    }
-  }, [projectRoot, active?.blueprintRef]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  return [feature, reload];
-}
-
-async function setCriterionBinding(
-  projectRoot: string,
-  feature: Blueprint,
-  criterionId: string,
-  sketchNode: { sketchId: string; nodeId: string } | undefined,
-) {
-  const sections = feature.sections.map((s) =>
-    s.kind.kind === "acceptanceCriteria"
-      ? {
-          ...s,
-          criteria: s.criteria.map((c) =>
-            c.id === criterionId ? { ...c, sketchNode } : c,
-          ),
-        }
-      : s,
-  );
-  await updateBlueprintStructured(
-    projectRoot,
-    feature.frontMatter.blueprintId,
-    feature.frontMatter,
-    sections,
-  );
-}
 
 function BindingSection({ nodeId }: { nodeId: string }) {
   const active = useSketchStore((s) => s.active)!;

@@ -81,6 +81,7 @@ export function buildUserMessage(
   doc: SketchDocument,
   analysis: GeometryAnalysis,
   interp: SketchInterpretation,
+  criteria: string[] = [],
 ): string {
   const lines: string[] = [];
   lines.push(`页面「${doc.title}」`);
@@ -113,6 +114,10 @@ export function buildUserMessage(
     lines.push(
       `待你决定的歧义:${interp.ambiguities.map((a) => a.shapeIds.map((id) => idx(doc, id)).join(",")).join(";")} 号形状意图不明 — 结合上下文给它们合理的角色。`,
     );
+  }
+  if (criteria.length > 0) {
+    lines.push(`这个界面关联的验收标准(生成结果应当满足或为其留位):`);
+    for (const c of criteria) lines.push(`- ${c}`);
   }
   lines.push(`请输出完整的 .sketch 文档。`);
   return lines.join("\n");
@@ -177,7 +182,7 @@ async function aiAttempt(
  */
 export async function generateUiSmart(
   doc: SketchDocument,
-  opts: { mint: () => string; runAi: RunAi | null },
+  opts: { mint: () => string; runAi: RunAi | null; criteria?: string[] },
 ): Promise<SmartGenerateResult> {
   const analysis = analyzeGeometry(doc);
   const interpretation = await interpretSketch(doc, analysis);
@@ -185,7 +190,7 @@ export async function generateUiSmart(
 
   if (opts.runAi) {
     try {
-      const user = buildUserMessage(doc, analysis, interpretation);
+      const user = buildUserMessage(doc, analysis, interpretation, opts.criteria ?? []);
       const sketch = await aiAttempt(opts.runAi, user, counter);
       // Identity is the tool's: the landing rewrites id; the name follows
       // the lite title (the AI's name attr is advisory only).

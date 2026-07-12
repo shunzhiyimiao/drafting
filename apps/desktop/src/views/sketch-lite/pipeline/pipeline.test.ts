@@ -170,3 +170,18 @@ test("full pipeline: dashboard sketch → valid Spec in the EXISTING dialect", a
   const strip = (s: string) => s.replace(/ sk:id="[^"]*"/g, "");
   assert.equal(strip(again.markup), strip(result.markup));
 });
+
+test("bound criteria ride into the AI user message (蓝图闭环)", async () => {
+  const doc = emptyDocument("d6", "Dash");
+  doc.shapes = [shape("s1", 0, 0, 900, 60, { annotation: "顶部栏" })];
+  const analysis = analyzeGeometry(doc);
+  const interp = await interpretSketch(doc, analysis);
+  const { buildUserMessage } = await import("./ai-generate.js");
+  const msg = buildUserMessage(doc, analysis, interp, ["列表页显示客户总数", "支持按名称搜索"]);
+  assert.match(msg, /验收标准/);
+  assert.match(msg, /- 列表页显示客户总数/);
+  assert.match(msg, /- 支持按名称搜索/);
+  // Without criteria the section is absent.
+  const bare = buildUserMessage(doc, analysis, interp);
+  assert.ok(!bare.includes("验收标准"));
+});
