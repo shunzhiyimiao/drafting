@@ -104,6 +104,14 @@ fn ensure_builtins(cfg: &mut AiConfig) {
             cfg.profiles.push(builtin.clone());
         }
     }
+    // Tasks added after a config was written need their default route
+    // backfilled, or resolve_route errors on a fresh feature (the
+    // user-config → project-default → builtin-default chain, honored).
+    for route in &defaults.routes {
+        if !cfg.routes.iter().any(|r| r.task_id == route.task_id) {
+            cfg.routes.push(route.clone());
+        }
+    }
 }
 
 fn migrate_from_legacy(_project_root: &Path, legacy: legacy::LegacyAiConfig) -> AiConfig {

@@ -653,6 +653,7 @@ pub fn run() {
             ai_provider::commands::ai_check_draft_health,
             ai_provider::commands::ai_import_from_claude_code,
             ai_provider::commands::ai_stream_chat,
+            ai_provider::commands::ai_run_task_collect,
             ai_provider::commands::ai_cancel_stream,
             lsp::commands::lsp_did_open,
             lsp::commands::lsp_did_change,

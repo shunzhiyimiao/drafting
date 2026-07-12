@@ -114,6 +114,9 @@ pub enum TaskId {
     PatchboardSuggestSocket,
     PatchboardSuggestAdapter,
     GitCommitMessage,
+    /// Sketch Lite → a full `.sketch` dialect document (O2 decision:
+    /// the AI writes the Spec's text form directly; parse+validate gate it).
+    SketchGenerate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,7 +231,8 @@ fn default_routes(anthropic_id: &str) -> Vec<TaskRoute> {
         TaskRoute { task_id: BlueprintSuggestCriteria, profile_id: p.clone(), model: "claude-sonnet-4-6".into() },
         TaskRoute { task_id: PatchboardSuggestSocket, profile_id: p.clone(), model: "claude-sonnet-4-6".into() },
         TaskRoute { task_id: PatchboardSuggestAdapter, profile_id: p.clone(), model: "claude-sonnet-4-6".into() },
-        TaskRoute { task_id: GitCommitMessage, profile_id: p, model: "claude-sonnet-4-6".into() },
+        TaskRoute { task_id: GitCommitMessage, profile_id: p.clone(), model: "claude-sonnet-4-6".into() },
+        TaskRoute { task_id: SketchGenerate, profile_id: p, model: "claude-sonnet-4-6".into() },
     ]
 }
 

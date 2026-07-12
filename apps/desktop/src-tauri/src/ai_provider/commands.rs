@@ -259,6 +259,23 @@ pub async fn ai_stream_chat(
     Ok(stream_id)
 }
 
+/// One-shot task run: stream server-side, return the collected text.
+/// Sketch Lite's Generate (and future one-shot features) use this — the
+/// full route/privacy/audit/cost chain applies exactly as for streams.
+#[tauri::command]
+pub async fn ai_run_task_collect(
+    project_root: String,
+    task_id: TaskId,
+    request: ChatRequest,
+    runner: State<'_, Arc<AiRunner>>,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<String, String> {
+    let bus = sync_bus.inner().clone();
+    runner
+        .run_task_collect(Path::new(&project_root), task_id, request, bus)
+        .await
+}
+
 #[tauri::command]
 pub async fn ai_cancel_stream(
     stream_id: String,
