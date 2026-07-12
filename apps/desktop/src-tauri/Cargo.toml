@@ -39,6 +39,7 @@ eventsource-stream = "0.2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"
+syn = { version = "2", features = ["full", "visit"] }
 async-stream = "0.3"
 
 [target.'cfg(unix)'.dependencies]

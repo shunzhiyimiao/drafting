@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { generateSockets } from "./generators/socket-generator.js";
 import { migrateSketches } from "./generators/sketch-migrator.js";
 import { printNewSketch, scanSketches } from "./generators/sketch-scan.js";
+import { atlasScanTs } from "./generators/atlas-scan.js";
 import { generateAdapterSkeleton } from "./generators/adapter-skeleton.js";
 import { generateWiring } from "./generators/wiring-generator.js";
 import { generateScaffolding } from "./generators/scaffolding.js";
@@ -805,4 +806,45 @@ test("rpc: ping round-trips, unknown method is -32601, handler errors are -32000
   });
   assert.equal(bad.error?.code, -32000);
   assert.equal(bad.id, 3);
+});
+
+// ------------------------------------------------------ atlas TS leg (B1) --
+
+test("atlasScanTs surveys packages, internal edges and external imports deterministically", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "atlas-ts-"));
+  const pkg = path.join(root, "packages", "mini-ts");
+  fs.mkdirSync(path.join(pkg, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({ name: "workspace-root", devDependencies: { typescript: "5" } }),
+  );
+  fs.writeFileSync(
+    path.join(pkg, "package.json"),
+    JSON.stringify({ name: "@fix/mini-ts", dependencies: { zustand: "5", react: "19" } }),
+  );
+  fs.writeFileSync(
+    path.join(pkg, "src", "a.ts"),
+    `import { b } from "./b";\nimport { create } from "zustand";\nexport const a = () => b() + String(create);\n`,
+  );
+  fs.writeFileSync(
+    path.join(pkg, "src", "b.ts"),
+    `import * as React from "react";\nexport const b = () => String(React.version);\n`,
+  );
+  // noise that must be skipped
+  fs.mkdirSync(path.join(pkg, "node_modules", "zustand"), { recursive: true });
+  fs.writeFileSync(path.join(pkg, "node_modules", "zustand", "index.ts"), "export {};");
+
+  const survey = atlasScanTs({ projectRoot: root });
+  assert.equal(survey.packages.length, 2);
+  const mini = survey.packages.find((p) => p.name === "@fix/mini-ts");
+  assert.ok(mini);
+  assert.equal(mini.fileCount, 2, "node_modules never counts");
+  assert.deepEqual(mini.deps, ["react", "zustand"]);
+  assert.deepEqual(mini.externalImports, ["react", "zustand"]);
+  assert.deepEqual(mini.internalEdges, [
+    { from: "packages/mini-ts/src/a.ts", to: "packages/mini-ts/src/b.ts" },
+  ]);
+  // Determinism: a second scan is byte-identical.
+  assert.deepEqual(atlasScanTs({ projectRoot: root }), survey);
+  fs.rmSync(root, { recursive: true, force: true });
 });

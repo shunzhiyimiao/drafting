@@ -6,6 +6,7 @@ import { generateScaffolding } from "./generators/scaffolding.js";
 import { generateSketch } from "./generators/sketch-generator.js";
 import { migrateSketches } from "./generators/sketch-migrator.js";
 import { printNewSketch, scanSketches } from "./generators/sketch-scan.js";
+import { atlasScanTs } from "./generators/atlas-scan.js";
 
 type Handler = (params: any) => unknown;
 
@@ -40,6 +41,7 @@ const handlers: Record<string, Handler> = {
   migrateSketches: (params) => migrateSketches(params),
 
   scanSketches: (params) => scanSketches(params),
+  atlasScanTs: (params) => atlasScanTs(params),
 
   printNewSketch: (params) => printNewSketch(params),
 };

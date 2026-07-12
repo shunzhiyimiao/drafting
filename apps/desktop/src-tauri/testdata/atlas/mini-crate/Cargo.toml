@@ -1,0 +1,10 @@
+# Atlas survey fixture — never built, never a workspace member; the syn
+# scanner reads the sources and the metadata test uses a canned document.
+[package]
+name = "mini-crate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "1"
+tokio = "1"
