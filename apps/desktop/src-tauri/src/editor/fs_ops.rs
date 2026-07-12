@@ -106,6 +106,63 @@ pub fn write_file(project_root: &Path, rel_path: &str, content: &str) -> std::io
     Ok(())
 }
 
+/// Create an empty file (parents included). Refuses to clobber.
+pub fn create_file(project_root: &Path, rel_path: &str) -> std::io::Result<()> {
+    let path = resolve(project_root, rel_path)?;
+    if path.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "already exists",
+        ));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, "")
+}
+
+pub fn create_dir(project_root: &Path, rel_path: &str) -> std::io::Result<()> {
+    let path = resolve(project_root, rel_path)?;
+    if path.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "already exists",
+        ));
+    }
+    std::fs::create_dir_all(&path)
+}
+
+/// Rename/move within the project (both ends confined). Refuses to clobber.
+pub fn rename(project_root: &Path, from_rel: &str, to_rel: &str) -> std::io::Result<()> {
+    let from = resolve(project_root, from_rel)?;
+    let to = resolve(project_root, to_rel)?;
+    if !from.exists() {
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "source missing"));
+    }
+    if to.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "target already exists",
+        ));
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::rename(&from, &to)
+}
+
+/// Delete a file or a directory tree. The UI owns the confirmation; this
+/// stays a plain project-confined operation.
+pub fn delete(project_root: &Path, rel_path: &str) -> std::io::Result<()> {
+    let path = resolve(project_root, rel_path)?;
+    let meta = std::fs::symlink_metadata(&path)?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(&path)
+    } else {
+        std::fs::remove_file(&path)
+    }
+}
+
 fn resolve(project_root: &Path, rel_path: &str) -> std::io::Result<PathBuf> {
     confine(rel_path)?;
     let path = project_root.join(rel_path);

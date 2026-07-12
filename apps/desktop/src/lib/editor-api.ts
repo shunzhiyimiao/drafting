@@ -67,3 +67,25 @@ export async function onSearchProgress(
     cb(e.payload),
   );
 }
+
+// ------------------------------------------------- file-tree mutations (M2) --
+
+export async function createFile(projectRoot: string, relPath: string): Promise<void> {
+  return invoke("editor_create_file", { projectRoot, relPath });
+}
+
+export async function createDir(projectRoot: string, relPath: string): Promise<void> {
+  return invoke("editor_create_dir", { projectRoot, relPath });
+}
+
+export async function renamePath(
+  projectRoot: string,
+  fromRel: string,
+  toRel: string,
+): Promise<void> {
+  return invoke("editor_rename_path", { projectRoot, fromRel, toRel });
+}
+
+export async function deletePath(projectRoot: string, relPath: string): Promise<void> {
+  return invoke("editor_delete_path", { projectRoot, relPath });
+}

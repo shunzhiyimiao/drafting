@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { defaultTheme, sketchToIR, toElement, type CreateElement, type Pos } from "@drafting/sketch-core";
 import { allNodeIds, findNode, useSketchStore } from "../../stores/sketch-store";
+import { ContextMenu, useContextMenu } from "../../components/ContextMenu";
 import { computeDrop, indicatorFor, type LayoutBox, type Rect } from "./insertion";
 import { measureLayoutBoxes } from "./designer/geometry";
 import { computeFrameMove } from "./designer/frame-move";
@@ -28,6 +29,10 @@ export function SketchCanvas() {
   const insertNodeBeside = useSketchStore((s) => s.insertNodeBeside);
   const moveNodeBeside = useSketchStore((s) => s.moveNodeBeside);
   const updateNode = useSketchStore((s) => s.updateNode);
+  const deleteNode = useSketchStore((s) => s.deleteNode);
+  const wrapInStack = useSketchStore((s) => s.wrapInStack);
+  const moveNode = useSketchStore((s) => s.moveNode);
+  const nodeMenu = useContextMenu<string>();
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
   const canvasWidth = useSketchStore((s) => s.canvasWidth);
   const zoom = useSketchStore((s) => s.zoom);
@@ -362,9 +367,18 @@ export function SketchCanvas() {
           const hit = (e.target as HTMLElement).closest("[data-sk]");
           selectNode(hit ? hit.getAttribute("data-sk") : active.root.id);
         }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const hit = (e.target as HTMLElement).closest("[data-sk]");
+          const nodeId = hit?.getAttribute("data-sk");
+          if (!nodeId || nodeId === active.root.id) return;
+          selectNode(nodeId);
+          nodeMenu.open(e, nodeId);
+        }}
         onPointerDownCapture={(e) => {
           if ((e.target as HTMLElement).closest("[data-designer-overlay]")) return;
           setWrapHint(null); // any fresh press dismisses the hint
+          if (e.button !== 0) return; // right-click = menu, never a gesture
           if (sessionRef.current || frameMoveRef.current) return; // one gesture at a time
           const hit = (e.target as HTMLElement).closest("[data-sk]");
           const nodeId = hit?.getAttribute("data-sk");
@@ -489,6 +503,24 @@ export function SketchCanvas() {
         )}
       </div>
       </div>
+      {nodeMenu.menu && (
+        <ContextMenu
+          x={nodeMenu.menu.x}
+          y={nodeMenu.menu.y}
+          onClose={nodeMenu.close}
+          items={[
+            { label: "上移", onSelect: () => moveNode(nodeMenu.menu!.subject, "up") },
+            { label: "下移", onSelect: () => moveNode(nodeMenu.menu!.subject, "down") },
+            { label: "包一层 Stack", onSelect: () => wrapInStack(nodeMenu.menu!.subject) },
+            { separator: true, label: "" },
+            {
+              label: "删除节点",
+              danger: true,
+              onSelect: () => deleteNode(nodeMenu.menu!.subject),
+            },
+          ]}
+        />
+      )}
     </div>
   );
 }

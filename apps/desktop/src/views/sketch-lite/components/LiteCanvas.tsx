@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ContextMenu, useContextMenu } from "../../../components/ContextMenu";
 import { normalizeBounds, type Bounds } from "../model/types";
 import { MIN_SHAPE_SIZE, useSketchLiteStore } from "../store";
 import { LiteShapeView } from "./LiteShapeView";
@@ -19,7 +20,9 @@ export function LiteCanvas() {
   const addShape = useSketchLiteStore((s) => s.addShape);
   const updateShapeBounds = useSketchLiteStore((s) => s.updateShapeBounds);
   const deleteShape = useSketchLiteStore((s) => s.deleteShape);
+  const reorderShape = useSketchLiteStore((s) => s.reorderShape);
   const setAnnotation = useSketchLiteStore((s) => s.setAnnotation);
+  const { menu, open: openMenu, close: closeMenu } = useContextMenu<string>();
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   /** In-place comment editing (L2): double-click a shape → a floating
@@ -148,6 +151,23 @@ export function LiteCanvas() {
     });
   };
 
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const p = localPoint(e);
+    const shape = [...useSketchLiteStore.getState().doc.shapes]
+      .reverse()
+      .find(
+        (s) =>
+          p.x >= s.bounds.x &&
+          p.x <= s.bounds.x + s.bounds.width &&
+          p.y >= s.bounds.y &&
+          p.y <= s.bounds.y + s.bounds.height,
+      );
+    if (!shape) return;
+    select(shape.id);
+    openMenu(e, shape.id);
+  };
+
   const onDoubleClick = (e: React.MouseEvent) => {
     // Hit-test by COORDINATES, not e.target: the first click's pointer
     // capture retargets the compat click/dblclick events to the surface,
@@ -198,6 +218,7 @@ export function LiteCanvas() {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
       >
         {doc.shapes.map((s) => (
           <LiteShapeView key={s.id} shape={s} selected={s.id === selectedShapeId} />
@@ -247,6 +268,29 @@ export function LiteCanvas() {
               />
             );
           })()}
+        {menu && (
+          <ContextMenu
+            x={menu.x}
+            y={menu.y}
+            onClose={closeMenu}
+            items={[
+              {
+                label: "编辑注释…",
+                onSelect: () => {
+                  const sh = useSketchLiteStore.getState().doc.shapes.find((s) => s.id === menu.subject);
+                  if (!sh) return;
+                  setDraftComment(sh.annotation ?? "");
+                  setEditingId(sh.id);
+                },
+              },
+              { separator: true, label: "" },
+              { label: "上移一层", onSelect: () => reorderShape(menu.subject, "forward") },
+              { label: "下移一层", onSelect: () => reorderShape(menu.subject, "backward") },
+              { separator: true, label: "" },
+              { label: "删除", danger: true, onSelect: () => deleteShape(menu.subject) },
+            ]}
+          />
+        )}
         {doc.shapes.length === 0 && !gesture && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <p className="text-sm text-slate-300">用矩形工具画几个大概的区域 — 不用画得准</p>

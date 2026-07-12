@@ -158,3 +158,59 @@ mod tests {
         assert!(rx.try_recv().is_err(), "rejected write must publish nothing");
     }
 }
+
+// ------------------------------------------------- file-tree mutations (M2) --
+// 宪法 Part 14 的文件树右键四件套。全部走 fs_ops 的 P0-1 硬化解析
+// (词法 confine + 物理 canonicalize),变更后发 SyncBus 事件让打开的
+// tab / 文件树 / 关联系统自行响应。
+
+#[tauri::command]
+pub fn editor_create_file(
+    project_root: String,
+    rel_path: String,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<(), String> {
+    fs_ops::create_file(Path::new(&project_root), &rel_path).map_err(|e| e.to_string())?;
+    sync_bus.publish(
+        Origin::new("editor"),
+        SyncBusEvent::Editor(EditorEvent::FileSaved { path: rel_path }),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn editor_create_dir(project_root: String, rel_path: String) -> Result<(), String> {
+    fs_ops::create_dir(Path::new(&project_root), &rel_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn editor_rename_path(
+    project_root: String,
+    from_rel: String,
+    to_rel: String,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<(), String> {
+    fs_ops::rename(Path::new(&project_root), &from_rel, &to_rel).map_err(|e| e.to_string())?;
+    sync_bus.publish(
+        Origin::new("editor"),
+        SyncBusEvent::Editor(EditorEvent::FileRenamed {
+            old_path: from_rel,
+            new_path: to_rel,
+        }),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn editor_delete_path(
+    project_root: String,
+    rel_path: String,
+    sync_bus: State<'_, SyncBus>,
+) -> Result<(), String> {
+    fs_ops::delete(Path::new(&project_root), &rel_path).map_err(|e| e.to_string())?;
+    sync_bus.publish(
+        Origin::new("editor"),
+        SyncBusEvent::Editor(EditorEvent::FileClosed { path: rel_path }),
+    );
+    Ok(())
+}

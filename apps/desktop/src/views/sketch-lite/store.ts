@@ -58,6 +58,8 @@ export interface SketchLiteState {
   addShape: (bounds: Bounds) => string;
   updateShapeBounds: (id: string, bounds: Bounds) => void;
   deleteShape: (id: string) => void;
+  /** 数组序即画序(后画者在上);zIndex 随位置归一。 */
+  reorderShape: (id: string, dir: "forward" | "backward") => void;
   setAnnotation: (id: string, annotation: string) => void;
   setSemanticHint: (id: string, hint: string) => void;
   setPagePrompt: (prompt: string) => void;
@@ -130,6 +132,16 @@ export const useSketchLiteStore = create<SketchLiteState>((set) => ({
         shapes: s.doc.shapes.map((sh) => (sh.id === id ? { ...sh, bounds: round(bounds) } : sh)),
       },
     })),
+
+  reorderShape: (id, dir) =>
+    set((s) => {
+      const i = s.doc.shapes.findIndex((sh) => sh.id === id);
+      const j = dir === "forward" ? i + 1 : i - 1;
+      if (i < 0 || j < 0 || j >= s.doc.shapes.length) return s;
+      const shapes = [...s.doc.shapes];
+      [shapes[i], shapes[j]] = [shapes[j], shapes[i]];
+      return { doc: { ...s.doc, shapes: shapes.map((sh, k) => ({ ...sh, zIndex: k })) } };
+    }),
 
   deleteShape: (id) =>
     set((s) => ({
