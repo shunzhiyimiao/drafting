@@ -7,6 +7,7 @@ import {
 } from "../lib/blueprint-api";
 import { getProjectRoot } from "../lib/app-bootstrap";
 import { useEditorStore } from "../stores/editor-store";
+import { useSketchStore } from "../stores/sketch-store";
 import { useBlueprintStore } from "../stores/blueprint-store";
 import { useNavigationStore } from "../stores/navigation-store";
 
@@ -14,9 +15,14 @@ import { useNavigationStore } from "../stores/navigation-store";
  *  编辑器脚下。勾选状态即真相(toggle 写回 Blueprint MD,走既有通道);
  *  verdict/过时/漂移徽章来自估计器(只读,反映检查现状,不装确定)。 */
 export function ChecklistPanel() {
-  const activeTabPath = useEditorStore((s) => s.activeTabPath);
+  const editorFile = useEditorStore((s) => s.activeTabPath);
+  const sketchFile = useSketchStore((s) => s.activeFile);
+  const activeView = useNavigationStore((s) => s.activeView);
   const loadBlueprint = useBlueprintStore((s) => s.loadBlueprint);
   const setActiveView = useNavigationStore((s) => s.setActiveView);
+  // 面板是全局的,"当前文件"随视图走:Sketch 视图跟踪当前草图文件
+  // (绑定过 criterion 的 .sketch 自己就是绑定文件),其余跟编辑器 tab。
+  const activeTabPath = activeView === "sketch" ? (sketchFile ?? editorFile) : editorFile;
 
   const [root, setRoot] = useState<string | null>(null);
   const [entries, setEntries] = useState<ChecklistEntry[]>([]);
@@ -67,7 +73,11 @@ export function ChecklistPanel() {
   };
 
   if (!activeTabPath) {
-    return <p className="text-xs text-text-muted">打开一个文件,这里会显示它承诺要满足的验收标准。</p>;
+    return (
+      <p className="text-xs text-text-muted">
+        在编辑器打开一个文件、或在 Sketch 里打开一个草图 — 这里会显示它承诺要满足的验收标准。
+      </p>
+    );
   }
   if (entries.length === 0 && !loading) {
     return (
