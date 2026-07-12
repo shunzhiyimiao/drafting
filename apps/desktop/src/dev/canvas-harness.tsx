@@ -5,10 +5,13 @@
  * the app (only index.html is the Tauri entry) and autosave invokes fail
  * loudly into lastError, which is fine here.
  */
+import { useState } from "react";
 import ReactDOM from "react-dom/client";
 import { parseSketchMarkup, printSketchMarkup, type Sketch } from "@drafting/sketch-core";
 import { SketchCanvas } from "../views/sketch/Canvas";
 import { SketchTextPanel } from "../views/sketch/SketchTextPanel";
+import { SketchLitePage } from "../views/sketch-lite/components/SketchLitePage";
+import { useSketchLiteStore } from "../views/sketch-lite/store";
 import { useSketchStore, type NodeKind } from "../stores/sketch-store";
 import "../index.css";
 
@@ -20,6 +23,7 @@ import "../index.css";
   parseSketchMarkup,
   printSketchMarkup,
 };
+(window as unknown as { __liteStore: typeof useSketchLiteStore }).__liteStore = useSketchLiteStore;
 
 const FIXTURE: Sketch = {
   id: "sk_harness",
@@ -99,10 +103,18 @@ function outlineOf(sketch: Sketch): string {
 }
 
 function Harness() {
+  const [lite, setLite] = useState(window.location.search.includes("lite"));
   const active = useSketchStore((s) => s.active);
   const paletteDrag = useSketchStore((s) => s.paletteDrag);
   const setPaletteDrag = useSketchStore((s) => s.setPaletteDrag);
   const kinds: NodeKind[] = ["stack", "frame", "text", "button", "input", "image", "list"];
+  if (lite) {
+    return (
+      <div className="h-screen bg-slate-800">
+        <SketchLitePage onExit={() => setLite(false)} landing="replace-active" />
+      </div>
+    );
+  }
   return (
     <div className="h-screen flex flex-col gap-2 p-3 bg-slate-800">
       <div className="flex items-center gap-2">

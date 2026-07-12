@@ -97,6 +97,15 @@ interface SketchState {
   initialize: (projectRoot: string) => Promise<void>;
   refresh: () => Promise<void>;
   createSketch: (name: string, blueprintRef: string | null) => Promise<void>;
+  /** Sketch Lite 的落点。`build` 拿到最终文档的 sk:id — 生成器据此重印,
+   *  保证文本身份与索引一致。mode "new-doc"(默认)新建 sketch 文件并写入;
+   *  创建失败时抛错,绝不覆盖当前文档。"replace-active"(harness/无 Tauri)
+   *  直接替换活动文档(一步撤销)。 */
+  generateFromLite: (
+    name: string,
+    build: (sketchId: string) => string,
+    mode?: "new-doc" | "replace-active",
+  ) => Promise<void>;
   openSketch: (sketchId: string) => Promise<void>;
   deleteSketchById: (sketchId: string) => Promise<void>;
   /** Back to the list screen — open tabs stay alive (S2b). */
@@ -512,6 +521,23 @@ export const useSketchStore = create<SketchState>((set, get) => {
       } catch (e) {
         set({ lastError: String(e) });
       }
+    },
+
+    generateFromLite: async (name, build, mode = "new-doc") => {
+      if (mode === "new-doc") {
+        const prevFile = get().activeFile;
+        await get().createSketch(name, null); // creates + opens the new doc
+        const created = get().activeFile !== prevFile && get().active;
+        if (!created) {
+          // Never clobber the current doc on a failed creation — loudly.
+          throw new Error(get().lastError ?? "创建 sketch 失败");
+        }
+      }
+      const id = get().active?.id;
+      if (!id) throw new Error("没有可写入的活动文档");
+      writeText(build(id)); // one undo unit; autosave takes it from here
+      const root = get().parsed?.sketch.root;
+      if (root) set({ selectedNodeId: root.id });
     },
 
     openSketch: async (sketchId) => {

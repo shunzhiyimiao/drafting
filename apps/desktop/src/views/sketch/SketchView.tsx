@@ -4,6 +4,7 @@ import {
   PenTool,
   Plus,
   Redo2,
+  Sparkles,
   Trash2,
   Undo2,
   X,
@@ -17,6 +18,7 @@ import { SketchCanvas } from "./Canvas";
 import { SketchInspector } from "./Inspector";
 import { SketchPalette } from "./Palette";
 import { BottomDock } from "./BottomDock";
+import { SketchLitePage } from "../sketch-lite/components/SketchLitePage";
 
 /** Sheet width presets (visual viewport only — K1 untouched). */
 const WIDTHS = [375, 768, 1024, 1280];
@@ -61,6 +63,13 @@ export function SketchView() {
   // deleting a sketch also drops its generated React (bound criteria go
   // dangling, never cascaded).
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  // Sketch Lite (Phase 1): the low-fidelity intent surface. Its Generate UI
+  // lands a new document and exits back here.
+  const [liteMode, setLiteMode] = useState(false);
+
+  if (liteMode) {
+    return <SketchLitePage onExit={() => setLiteMode(false)} />;
+  }
 
   if (!active) {
     return (
@@ -146,6 +155,13 @@ export function SketchView() {
               Create
             </button>
           </div>
+          <button
+            onClick={() => setLiteMode(true)}
+            className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-accent/30 text-accent hover:bg-accent/10"
+          >
+            <Sparkles size={12} />
+            Sketch Lite — 画个草稿让 AI 起稿
+          </button>
           {lastError && <p className="text-[10px] text-error mt-2">{lastError}</p>}
         </div>
       </div>
@@ -206,6 +222,13 @@ export function SketchView() {
           className="text-[10px] text-accent hover:text-accent-hover shrink-0"
         >
           + new
+        </button>
+        <button
+          onClick={() => setLiteMode(true)}
+          title="Sketch Lite — 画个草稿让 AI 起稿"
+          className="text-text-muted hover:text-accent shrink-0"
+        >
+          <Sparkles size={13} />
         </button>
 
         <span className="mx-1 h-4 w-px bg-border/60" />

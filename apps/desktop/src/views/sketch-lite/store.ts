@@ -1,0 +1,150 @@
+/**
+ * Sketch Lite state — zustand, following the app's store conventions.
+ *
+ * 铁律:SketchDocument 只装文档事实;工具/选中/拖拽这些 UI 临时态住在
+ * store 的独立字段,绝不混进文档。Generate 的落点不在这里 —— 管线产物
+ * 交给 sketch-store 的 generateFromLite(真相进现有 `.sketch` 体系)。
+ */
+import { create } from "zustand";
+import { ulid } from "../../lib/ulid";
+import {
+  emptyDocument,
+  normalizeBounds,
+  type Bounds,
+  type SketchDocument,
+  type SketchShape,
+} from "./model/types";
+
+export type LiteTool = "select" | "rectangle";
+
+/** One in-flight pointer gesture on the Lite canvas (UI-only state). */
+export type LiteGesture =
+  | { kind: "draw"; pointerId: number; start: { x: number; y: number }; draft: Bounds }
+  | {
+      kind: "move";
+      pointerId: number;
+      shapeId: string;
+      start: { x: number; y: number };
+      startBounds: Bounds;
+      moved: boolean;
+    }
+  | {
+      kind: "resize";
+      pointerId: number;
+      shapeId: string;
+      /** Which corner is being dragged: 0|1 per axis. */
+      hx: 0 | 1;
+      hy: 0 | 1;
+      startBounds: Bounds;
+    };
+
+export interface SketchLiteState {
+  doc: SketchDocument;
+  tool: LiteTool;
+  selectedShapeId: string | null;
+  gesture: LiteGesture | null;
+
+  setTool: (t: LiteTool) => void;
+  select: (id: string | null) => void;
+  setGesture: (g: LiteGesture | null) => void;
+
+  addShape: (bounds: Bounds) => string;
+  updateShapeBounds: (id: string, bounds: Bounds) => void;
+  deleteShape: (id: string) => void;
+  setAnnotation: (id: string, annotation: string) => void;
+  setSemanticHint: (id: string, hint: string) => void;
+  setPagePrompt: (prompt: string) => void;
+  setTitle: (title: string) => void;
+  reset: () => void;
+}
+
+/** 最小可辨形状 — 比这小的一律当误点丢弃。 */
+export const MIN_SHAPE_SIZE = 8;
+
+function round(b: Bounds): Bounds {
+  return {
+    x: Math.round(b.x),
+    y: Math.round(b.y),
+    width: Math.round(b.width),
+    height: Math.round(b.height),
+  };
+}
+
+export const useSketchLiteStore = create<SketchLiteState>((set) => ({
+  doc: emptyDocument(ulid(), "Untitled sketch"),
+  tool: "rectangle",
+  selectedShapeId: null,
+  gesture: null,
+
+  setTool: (tool) => set({ tool }),
+  select: (selectedShapeId) => set({ selectedShapeId }),
+  setGesture: (gesture) => set({ gesture }),
+
+  addShape: (bounds) => {
+    const id = ulid();
+    set((s) => ({
+      doc: {
+        ...s.doc,
+        shapes: [
+          ...s.doc.shapes,
+          {
+            id,
+            type: "rectangle",
+            bounds: round(bounds),
+            zIndex: s.doc.shapes.length,
+          } satisfies SketchShape,
+        ],
+      },
+      selectedShapeId: id,
+      tool: "select", // 画完即选中,顺手进入调整
+    }));
+    return id;
+  },
+
+  updateShapeBounds: (id, bounds) =>
+    set((s) => ({
+      doc: {
+        ...s.doc,
+        shapes: s.doc.shapes.map((sh) => (sh.id === id ? { ...sh, bounds: round(bounds) } : sh)),
+      },
+    })),
+
+  deleteShape: (id) =>
+    set((s) => ({
+      doc: { ...s.doc, shapes: s.doc.shapes.filter((sh) => sh.id !== id) },
+      selectedShapeId: s.selectedShapeId === id ? null : s.selectedShapeId,
+    })),
+
+  setAnnotation: (id, annotation) =>
+    set((s) => ({
+      doc: {
+        ...s.doc,
+        shapes: s.doc.shapes.map((sh) =>
+          sh.id === id ? { ...sh, annotation: annotation || undefined } : sh,
+        ),
+      },
+    })),
+
+  setSemanticHint: (id, hint) =>
+    set((s) => ({
+      doc: {
+        ...s.doc,
+        shapes: s.doc.shapes.map((sh) =>
+          sh.id === id ? { ...sh, semanticHint: hint || undefined } : sh,
+        ),
+      },
+    })),
+
+  setPagePrompt: (pagePrompt) => set((s) => ({ doc: { ...s.doc, pagePrompt } })),
+  setTitle: (title) => set((s) => ({ doc: { ...s.doc, title } })),
+
+  reset: () =>
+    set({
+      doc: emptyDocument(ulid(), "Untitled sketch"),
+      selectedShapeId: null,
+      gesture: null,
+      tool: "rectangle",
+    }),
+}));
+
+export { normalizeBounds };
