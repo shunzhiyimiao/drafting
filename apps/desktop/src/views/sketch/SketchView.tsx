@@ -1,58 +1,31 @@
 import { useEffect, useState } from "react";
-import {
-  ArrowLeft,
-  PenTool,
-  Plus,
-  Redo2,
-  Sparkles,
-  Trash2,
-  Undo2,
-  X,
-} from "lucide-react";
+import { PenTool, Plus, Trash2 } from "lucide-react";
 import { useSketchStore } from "../../stores/sketch-store";
 import { useBlueprintStore } from "../../stores/blueprint-store";
 import { getProjectRoot } from "../../lib/app-bootstrap";
-import { Dropdown } from "../../components/Dropdown";
-import { SketchOutline } from "./Outline";
-import { SketchCanvas } from "./Canvas";
-import { SketchInspector } from "./Inspector";
-import { SketchPalette } from "./Palette";
-import { BottomDock } from "./BottomDock";
 import { SketchLitePage } from "../sketch-lite/components/SketchLitePage";
 
-/** Sheet width presets (visual viewport only — K1 untouched). */
-const WIDTHS = [375, 768, 1024, 1280];
-const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5];
-
+/** The Sketch view. 入口与创建窗口不变(列表卡片);打开/新建一个 sketch
+ *  之后,工作面就是 Sketch Lite —— 画个大概,Generate UI 写进当前文档,
+ *  预览页签用现有运行时看结果。旧设计器 chrome(palette/layers/dock/
+ *  多 tab 工具栏)不再路由;真相仍是 `.sketch` 文本,codegen 照常。 */
 export function SketchView() {
   const sketches = useSketchStore((s) => s.sketches);
   const active = useSketchStore((s) => s.active);
-  const dirty = useSketchStore((s) => s.dirty);
-  const saving = useSketchStore((s) => s.saving);
   const lastError = useSketchStore((s) => s.lastError);
   const initialize = useSketchStore((s) => s.initialize);
   const createSketch = useSketchStore((s) => s.createSketch);
   const openSketch = useSketchStore((s) => s.openSketch);
   const closeSketch = useSketchStore((s) => s.closeSketch);
   const deleteSketchById = useSketchStore((s) => s.deleteSketchById);
-  const openDocs = useSketchStore((s) => s.openDocs);
-  const activeFile = useSketchStore((s) => s.activeFile);
-  const switchDoc = useSketchStore((s) => s.switchDoc);
-  const closeDoc = useSketchStore((s) => s.closeDoc);
-  const undoBuffer = useSketchStore((s) => s.undoBuffer);
-  const redoBuffer = useSketchStore((s) => s.redoBuffer);
-  const canvasWidth = useSketchStore((s) => s.canvasWidth);
-  const zoom = useSketchStore((s) => s.zoom);
-  const setCanvasWidth = useSketchStore((s) => s.setCanvasWidth);
-  const setZoom = useSketchStore((s) => s.setZoom);
 
   useEffect(() => {
     void getProjectRoot().then(async (root) => {
       if (useSketchStore.getState().projectRoot !== root) {
         await initialize(root);
       }
-      // The Inspector's binding surface joins blueprint data — make sure the
-      // blueprint store is alive even if its view was never opened.
+      // The binding surface joins blueprint data — keep that store alive
+      // even if its view was never opened.
       const bp = useBlueprintStore.getState();
       if (!bp.initialized) void bp.initialize(root);
     });
@@ -63,13 +36,6 @@ export function SketchView() {
   // deleting a sketch also drops its generated React (bound criteria go
   // dangling, never cascaded).
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
-  // Sketch Lite (Phase 1): the low-fidelity intent surface. Its Generate UI
-  // lands a new document and exits back here.
-  const [liteMode, setLiteMode] = useState(false);
-
-  if (liteMode) {
-    return <SketchLitePage onExit={() => setLiteMode(false)} />;
-  }
 
   if (!active) {
     return (
@@ -155,139 +121,11 @@ export function SketchView() {
               Create
             </button>
           </div>
-          <button
-            onClick={() => setLiteMode(true)}
-            className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-accent/30 text-accent hover:bg-accent/10"
-          >
-            <Sparkles size={12} />
-            Sketch Lite — 画个草稿让 AI 起稿
-          </button>
           {lastError && <p className="text-[10px] text-error mt-2">{lastError}</p>}
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="h-full flex flex-col gap-2 p-2">
-      {/* Designer toolbar (S2a): document identity · undo/redo (the ONE
-          Monaco stack) · viewport width/zoom · save state. */}
-      <div className="glass-panel px-3 py-1.5 flex items-center gap-2 shrink-0">
-        <button
-          onClick={() => void closeSketch()}
-          title="返回列表（先保存）"
-          className="text-text-muted hover:text-accent"
-        >
-          <ArrowLeft size={13} />
-        </button>
-        <PenTool size={12} className="text-accent" />
-        {/* Document tabs (S2b): every open doc, dirty dot, close, add. */}
-        <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto">
-          {openDocs.map((d) => (
-            <span
-              key={d.file}
-              className={`group flex items-center gap-1 pl-2 pr-1 py-1 rounded-md text-[11px] cursor-pointer shrink-0 ${
-                d.file === activeFile
-                  ? "bg-bg-hover text-text-primary"
-                  : "text-text-muted hover:text-text-secondary hover:bg-bg-hover/50"
-              }`}
-              onClick={() => d.file !== activeFile && void switchDoc(d.file)}
-            >
-              {d.name}
-              {(d.file === activeFile ? dirty : d.dirty) && (
-                <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void closeDoc(d.file);
-                }}
-                title="关闭（先保存）"
-                className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-error transition-opacity"
-              >
-                <X size={10} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <Dropdown
-          className="min-w-28"
-          value={active.id}
-          options={sketches.map((s) => ({ value: s.id, label: s.name }))}
-          onChange={(v) => void openSketch(v)}
-        />
-        <button
-          onClick={() => void closeSketch()}
-          title="回列表新建"
-          className="text-[10px] text-accent hover:text-accent-hover shrink-0"
-        >
-          + new
-        </button>
-        <button
-          onClick={() => setLiteMode(true)}
-          title="Sketch Lite — 画个草稿让 AI 起稿"
-          className="text-text-muted hover:text-accent shrink-0"
-        >
-          <Sparkles size={13} />
-        </button>
-
-        <span className="mx-1 h-4 w-px bg-border/60" />
-        <button onClick={undoBuffer} title="撤销 (⌘Z)" className="text-text-muted hover:text-text-primary">
-          <Undo2 size={13} />
-        </button>
-        <button onClick={redoBuffer} title="重做 (⇧⌘Z)" className="text-text-muted hover:text-text-primary">
-          <Redo2 size={13} />
-        </button>
-
-        <span className="flex-1" />
-
-        <Dropdown
-          className="w-24"
-          value={String(canvasWidth)}
-          options={WIDTHS.map((w) => ({ value: String(w), label: `${w} px` }))}
-          onChange={(v) => setCanvasWidth(Number(v))}
-        />
-        <Dropdown
-          className="w-20"
-          value={String(zoom)}
-          options={ZOOMS.map((z) => ({ value: String(z), label: `${Math.round(z * 100)}%` }))}
-          onChange={(v) => setZoom(Number(v))}
-        />
-        <span className="text-[10px] text-text-muted w-40 text-right">
-          {saving ? "saving…" : dirty ? "unsaved" : "saved · codegen follows in ~1s"}
-        </span>
-      </div>
-
-      <div className="flex-1 min-h-0 flex gap-2">
-        {/* Left — palette + layers */}
-        <div className="w-52 flex flex-col gap-2 shrink-0 min-h-0">
-          <SketchPalette />
-          <div className="glass-panel flex-1 overflow-auto p-2 min-h-0">
-            <h3 className="text-[9px] uppercase tracking-widest text-text-muted px-1 mb-1.5">
-              Layers
-            </h3>
-            <SketchOutline />
-          </div>
-        </div>
-
-        {/* Center — canvas over the bottom dock (markup/code) */}
-        <div className="flex-1 flex flex-col gap-2 min-w-0 min-h-0">
-          <div className="flex-[5] min-h-0 flex flex-col">
-            <SketchCanvas />
-          </div>
-          <div className="flex-[4] min-h-0">
-            <BottomDock />
-          </div>
-          {lastError && (
-            <p className="text-[10px] text-error px-1 shrink-0">{lastError}</p>
-          )}
-        </div>
-
-        {/* Right — inspector */}
-        <div className="w-80 shrink-0 glass-panel overflow-auto min-h-0">
-          <SketchInspector />
-        </div>
-      </div>
-    </div>
-  );
+  return <SketchLitePage onExit={() => void closeSketch()} />;
 }

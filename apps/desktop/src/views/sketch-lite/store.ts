@@ -40,10 +40,17 @@ export type LiteGesture =
 
 export interface SketchLiteState {
   doc: SketchDocument;
+  /** The sketch FILE this napkin belongs to (Lite is the sketch surface
+   *  now — one drawing per document, stashed per file for the session). */
+  boundFile: string | null;
+  stash: Record<string, SketchDocument>;
   tool: LiteTool;
   selectedShapeId: string | null;
   gesture: LiteGesture | null;
 
+  /** Bind the surface to a sketch file: restore its stashed drawing or
+   *  start an empty one titled after the sketch. Idempotent per file. */
+  bindTo: (file: string, name: string) => void;
   setTool: (t: LiteTool) => void;
   select: (id: string | null) => void;
   setGesture: (g: LiteGesture | null) => void;
@@ -72,10 +79,25 @@ function round(b: Bounds): Bounds {
 
 export const useSketchLiteStore = create<SketchLiteState>((set) => ({
   doc: emptyDocument(ulid(), "Untitled sketch"),
+  boundFile: null,
+  stash: {},
   tool: "rectangle",
   selectedShapeId: null,
   gesture: null,
 
+  bindTo: (file, name) =>
+    set((s) => {
+      if (s.boundFile === file) return s;
+      const stash = s.boundFile ? { ...s.stash, [s.boundFile]: s.doc } : s.stash;
+      return {
+        stash,
+        boundFile: file,
+        doc: stash[file] ?? emptyDocument(ulid(), name),
+        selectedShapeId: null,
+        gesture: null,
+        tool: "rectangle",
+      };
+    }),
   setTool: (tool) => set({ tool }),
   select: (selectedShapeId) => set({ selectedShapeId }),
   setGesture: (gesture) => set({ gesture }),

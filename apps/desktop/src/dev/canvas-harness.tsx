@@ -111,7 +111,7 @@ function Harness() {
   if (lite) {
     return (
       <div className="h-screen bg-slate-800">
-        <SketchLitePage onExit={() => setLite(false)} landing="replace-active" />
+        <SketchLitePage onExit={() => setLite(false)} />
       </div>
     );
   }
