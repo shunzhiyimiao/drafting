@@ -261,6 +261,14 @@ Sketch and WPF/XAML converged on the same model independently (declarative eleme
 | **拒收（带案底）** | `{Binding}` 表达式语言（converter/path/ElementName 的图灵泥潭） | the dialect has no expressions — `{Bind field}` is a LOOKUP against a declared shape; anything richer is the sibling's TypeScript |
 | **拒收（带案底）** | Styles/Triggers/Resources 资源系统 | the token system (§5) is the styling model: finite, enumerable, theme-swappable; a resource cascade would break K2's decidability |
 
+## 12. Sketch Lite (Phase 1, 2026-07-13) — the low-fidelity intent surface
+
+**用户画个大概,AI 补全设计。** Sketch Lite 是画在 Spec 之上的输入面,不是第二个设计器,更不是 Figma:矩形 + 注释 + 页级 prompt,仅此而已。它的产物不是真相 —— 真相仍然是 `.sketch` 文本;Generate UI 的终点是一份**合法的现有 Spec 文档**,落进设计器(可编辑、可撤销、可 codegen)。
+
+管线(四层分离,层与层不许混):`SketchDocument →` **analyzeGeometry**(确定性:方位/包含/重叠/对齐/横排分组,画布相对容差)`→` **interpretSketch**(今天是确定性 mock、明天换 AI,接口不变:hint 当先验、几何原型当证据 —— 宽顶=header、高左=sidebar、相似横排=card_group、包含=children;说不清的进 `ambiguities`,绝不静默瞎猜)`→` **UI Intent**(语义层:role/layout/content)`→` **compileIntent**(确定性编译进现有字母表,px 吸附到 spacing 档;合同 = `validate() === []` + 方言往返)。原则:可测量的几何绝不问 AI;AI 只解释语义;编译器只执行。
+
+落点:`generateFromLite`("new-doc" 建真文件写入,创建失败响亮抛错绝不覆盖当前文档;"replace-active" 供 harness)。UI 临时态(工具/选中/手势)与 SketchDocument 严格分离。Phase 1 有意不做:钢笔/路径/图层面板/吸附/像素级还原 —— 草图不是最终 UI。AI 接入点 = 替换 interpret/generate-intent 两个 mock 的实现体(经 AI Provider Manager 走任务路由),类型与管线两侧零改动。
+
 ## Appendix — reference implementation status
 
 The TS reference (`emit.ts` = class core + `toIR` + `toJsxString`; `to-element.ts` = the injected-`createElement` serializer; `spec.ts`; `theme.ts`) is, per the K3 corollary, the implementation that ships — extracted into a shared TS package consumed by both the frontend canvas and the codegen-server. Tests: **27 codegen** (141 finite-alphabet points enumerated for totality + goldens) + **3 parity** (both serializers, one IR) = **30 green**. Next build step when resumed: extract the reference into the shared package (**no Rust port of the class core**), then `apps/desktop` Rust gets Spec serde + storage (heal-on-load, write-back) + index rebuild only, with serde round-trip tests; the exhaustive + parity suites stay in TS, where the fold lives.
