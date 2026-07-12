@@ -269,7 +269,7 @@ Sketch and WPF/XAML converged on the same model independently (declarative eleme
 
 管线(四层分离,层与层不许混):`SketchDocument →` **analyzeGeometry**(确定性:方位/包含/重叠/对齐/横排分组,画布相对容差)`→` **interpretSketch**(今天是确定性 mock、明天换 AI,接口不变:hint 当先验、几何原型当证据 —— 宽顶=header、高左=sidebar、相似横排=card_group、包含=children;说不清的进 `ambiguities`,绝不静默瞎猜)`→` **UI Intent**(语义层:role/layout/content)`→` **compileIntent**(确定性编译进现有字母表,px 吸附到 spacing 档;合同 = `validate() === []` + 方言往返)。原则:可测量的几何绝不问 AI;AI 只解释语义;编译器只执行。
 
-落点:`generateFromLite`("new-doc" 建真文件写入,创建失败响亮抛错绝不覆盖当前文档;"replace-active" 供 harness)。UI 临时态(工具/选中/手势)与 SketchDocument 严格分离。Phase 1 有意不做:钢笔/路径/图层面板/吸附/像素级还原 —— 草图不是最终 UI。AI 接入点 = 替换 interpret/generate-intent 两个 mock 的实现体(经 AI Provider Manager 走任务路由),类型与管线两侧零改动。
+**O2 修正案(2026-07-13,用户拍板)**:AI 阶段不产 UIIntent,**直出 `.sketch` 方言**——表现力=全字母表,方言自身的门卫(全函数 parse 的行列号错误 + validate())就是修复重试的信号;intent+编译器降级为**离线回落路径**(无 key/AI 关/两轮修复仍败),预览页签响亮标示「✨ AI 生成」或「⚠ 离线骨架+原因」,绝不静默。任务 `sketchGenerate` 走 AI Provider Manager(collect 一次性调用,路由默认 Sonnet,隐私/审计/预算全链生效);comment 支持画布上双击就地编辑。落点:`generateFromLite`("new-doc" 建真文件写入,创建失败响亮抛错绝不覆盖当前文档;"replace-active" 供 harness)。UI 临时态(工具/选中/手势)与 SketchDocument 严格分离。Phase 1 有意不做:钢笔/路径/图层面板/吸附/像素级还原 —— 草图不是最终 UI。AI 接入点 = 替换 interpret/generate-intent 两个 mock 的实现体(经 AI Provider Manager 走任务路由),类型与管线两侧零改动。
 
 ## Appendix — reference implementation status
 
