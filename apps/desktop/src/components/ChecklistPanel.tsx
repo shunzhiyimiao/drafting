@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { ExternalLink, RefreshCw } from "lucide-react";
+import { ExternalLink, ListPlus, RefreshCw } from "lucide-react";
 import {
   checklistForFile,
+  createBlueprint,
   toggleCriterion,
   type ChecklistEntry,
 } from "../lib/blueprint-api";
@@ -28,6 +29,11 @@ export function ChecklistPanel() {
   const [entries, setEntries] = useState<ChecklistEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 手动清单模式:就地新建一张特性蓝图(MD 即真相),relatedFiles 指向
+  // 当前文件,标准一行一条 —— Checklist 立即点亮,勾选照常写回。
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newItems, setNewItems] = useState("");
 
   useEffect(() => {
     void getProjectRoot().then(setRoot);
@@ -67,10 +73,87 @@ export function ChecklistPanel() {
     void refresh();
   };
 
+  const saveNewChecklist = async () => {
+    if (!root || !activeTabPath) return;
+    const name = newName.trim() || `${activeTabPath.split("/").pop()} 检查单`;
+    const items = newItems
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (items.length === 0) {
+      setError("至少写一条标准(一行一条)");
+      return;
+    }
+    const md = [
+      "---",
+      "type: feature",
+      `displayName: ${JSON.stringify(name)}`,
+      "status: draft",
+      "priority: medium",
+      "owner: human",
+      "relatedFiles:",
+      `  - ${JSON.stringify(activeTabPath)}`,
+      "---",
+      "",
+      `# ${name}`,
+      "",
+      "## Goal",
+      "",
+      `手动检查单,盯住 \`${activeTabPath}\`。`,
+      "",
+      "## Acceptance Criteria",
+      "",
+      ...items.map((i) => `- [ ] ${i}`),
+      "",
+    ].join("\n");
+    setError(null);
+    try {
+      await createBlueprint(root, md);
+      setCreating(false);
+      setNewName("");
+      setNewItems("");
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const jump = (entry: ChecklistEntry) => {
     void loadBlueprint(entry.blueprintId);
     setActiveView("blueprint");
   };
+
+  const creationForm = creating && (
+    <div data-checklist-create className="flex flex-col gap-1.5 p-2 rounded-md border border-border/50 bg-bg-primary/30 max-w-xl">
+      <input
+        autoFocus
+        className="text-xs px-2 py-1.5 rounded-md"
+        placeholder={`清单名(默认:${activeTabPath?.split("/").pop() ?? ""} 检查单)`}
+        value={newName}
+        onChange={(e) => setNewName(e.target.value)}
+      />
+      <textarea
+        className="text-xs px-2 py-1.5 rounded-md min-h-[72px] resize-y font-mono"
+        placeholder={"一行一条验收标准,例:\n列表页显示客户总数\n支持按名称搜索"}
+        value={newItems}
+        onChange={(e) => setNewItems(e.target.value)}
+      />
+      <div className="flex items-center gap-2">
+        <button onClick={() => void saveNewChecklist()} className="glass-button-primary text-xs px-3 py-1">
+          创建清单
+        </button>
+        <button
+          onClick={() => setCreating(false)}
+          className="text-xs text-text-muted hover:text-text-primary"
+        >
+          取消
+        </button>
+        <span className="text-[10px] text-text-muted">
+          落盘为一张特性蓝图(relatedFiles = 当前文件),勾选即真相。
+        </span>
+      </div>
+    </div>
+  );
 
   if (!activeTabPath) {
     return (
@@ -81,15 +164,24 @@ export function ChecklistPanel() {
   }
   if (entries.length === 0 && !loading) {
     return (
-      <div className="text-xs text-text-muted flex items-center gap-2">
-        <span>
-          此文件没有关联的验收标准 — 在 Blueprint 的 relatedFiles 里关联它,或给 criterion 绑定
-          sketch 节点。
-        </span>
-        <button onClick={() => void refresh()} title="刷新" className="hover:text-text-primary">
-          <RefreshCw size={11} />
-        </button>
-        {error && <span className="text-error">{error}</span>}
+      <div className="flex flex-col gap-2">
+        <div className="text-xs text-text-muted flex items-center gap-2">
+          <span>此文件还没有验收标准。</span>
+          <button
+            data-checklist-new
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-1 text-accent hover:underline"
+          >
+            <ListPlus size={11} />
+            新建检查单
+          </button>
+          <span>或在 Blueprint 的 relatedFiles 里关联、给 criterion 绑定 sketch 节点。</span>
+          <button onClick={() => void refresh()} title="刷新" className="hover:text-text-primary">
+            <RefreshCw size={11} />
+          </button>
+          {error && <span className="text-error">{error}</span>}
+        </div>
+        {creationForm}
       </div>
     );
   }
@@ -126,8 +218,17 @@ export function ChecklistPanel() {
         >
           <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
         </button>
+        <button
+          data-checklist-new
+          onClick={() => setCreating((v) => !v)}
+          title="为此文件新建一份检查单"
+          className="text-text-muted hover:text-accent"
+        >
+          <ListPlus size={11} />
+        </button>
         {error && <span className="text-[10px] text-error">{error}</span>}
       </div>
+      {creationForm}
       {groups.map((g) => (
         <div key={g.id}>
           <button
