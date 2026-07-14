@@ -342,3 +342,31 @@ test("x/y must be integer pixels", () => {
   const e = err(wrap(`<Stack h="fill"><Frame><Button x="left">b</Button></Frame></Stack>`));
   assert.match(e.message, /需为整数像素/);
 });
+
+// ------------------------------------------------- panel variant (Phase 2) --
+
+test("panel variant: parses, prints canonically, plain stays unwritten", () => {
+  const src = wrap(
+    `<Stack h="fill"><Stack variant="card"><Text>a</Text></Stack><Stack variant="island" /><Stack gap={2} /></Stack>`,
+  );
+  const t = parse(src);
+  const [card, island, plain] = t.root.children as Container[];
+  assert.equal(card.variant, "card");
+  assert.equal(island.variant, "island");
+  assert.equal(plain.variant, undefined, "plain ≡ absent");
+  const printed = printSketchMarkup(t);
+  assert.match(printed, /variant="card"/);
+  assert.match(printed, /variant="island"/);
+  assert.equal(printSketchMarkup(parse(printed)), printed, "fixpoint holds");
+  // explicit plain normalizes to absent
+  const p2 = parse(wrap(`<Stack h="fill"><Stack variant="plain" /></Stack>`));
+  assert.ok(!printSketchMarkup(p2).includes("variant="));
+});
+
+test("panel variant: Stack alphabet is plain/card/island; Button keeps its own variant alphabet", () => {
+  const e = err(wrap(`<Stack h="fill"><Stack variant="primary" /></Stack>`));
+  assert.match(e.message, /plain, card, island/);
+  // Button variant untouched by the qualification
+  const ok = parse(wrap(`<Stack h="fill"><Button variant="ghost">b</Button></Stack>`));
+  assert.equal((ok.root.children[0] as { variant: string }).variant, "ghost");
+});

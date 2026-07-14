@@ -34,7 +34,14 @@ export interface Container {
   style?: Style;
   children: SketchNode[];
   pos?: Pos;
+  /** Panel INTENT (Magic Frame, Phase 2): what this container wants to BE,
+   *  not how it looks — the fold owns each variant's visual fidelity, and
+   *  explicit style tokens override it. Absent ≡ "plain". */
+  variant?: PanelVariant;
 }
+
+export type PanelVariant = "plain" | "card" | "island";
+export const PANEL_VARIANTS: readonly PanelVariant[] = ["plain", "card", "island"];
 
 /** Coordinates INSIDE a Frame — the K1 amendment (Rev 5/S5): x/y are
  *  document attributes (they live in the tree and the `.sketch` text, edit

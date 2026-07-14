@@ -152,9 +152,31 @@ function dedup(classes: string[]): string {
   return [...new Set(classes.filter((c) => c.length > 0))].join(" ");
 }
 
+/** Panel variant (Magic Frame) → the fold's visual decision. INTENT is
+ *  stored; fidelity is decided HERE, per variant, in style tokens the
+ *  document's own explicit style may override (spread order — the button
+ *  variant precedent). `island` additionally floats via a static shadow. */
+function panelVariantStyle(v: Container["variant"]): {
+  style: Partial<NonNullable<Container["style"]>>;
+  extra: string[];
+} {
+  switch (v) {
+    case "card":
+      return {
+        style: { bg: "raised", radius: "md", border: { width: "thin", color: "border" } },
+        extra: [],
+      };
+    case "island":
+      return { style: { bg: "raised", radius: "xl" }, extra: ["shadow-lg"] };
+    default:
+      return { style: {}, extra: [] };
+  }
+}
+
 /** Container className — fixed 6-segment order + sizing + style, dedup →
  *  byte-stable string: base(flex) · direction · gap · padding · justify · items. */
 export function containerClasses(c: Container, parent: ParentCtx, theme: Theme): string {
+  const panel = panelVariantStyle(c.variant);
   return dedup([
     "flex",
     c.layout.direction === "row" ? "flex-row" : "flex-col",
@@ -163,7 +185,8 @@ export function containerClasses(c: Container, parent: ParentCtx, theme: Theme):
     JUSTIFY[c.layout.mainAxis],
     ITEMS[c.layout.crossAxis],
     ...sizingClasses(c.sizing, parent, c.pos),
-    ...styleClasses(c.style, theme),
+    ...panel.extra,
+    ...styleClasses({ ...panel.style, ...(c.style ?? {}) }, theme),
   ]);
 }
 
@@ -395,6 +418,8 @@ export function classUniverse(theme: Theme): string[] {
   // frame statics (Rev 5) — left/top arbitrary values are the same open
   // hatch as w-[Npx]: the canvas shims them to inline style.
   add("relative", "absolute");
+  // panel variants (Magic Frame): island floats.
+  add("shadow-lg");
   // spacing families over the ramp
   for (const s of [0, 1, 2, 3, 4, 6, 8, 12, 16, 24]) {
     add(`gap-${s}`, `p-${s}`, `px-${s}`, `py-${s}`, `pt-${s}`, `pr-${s}`, `pb-${s}`, `pl-${s}`);

@@ -1063,3 +1063,31 @@ test("validate: pos ⟺ frame parent, and frames cannot hug", () => {
   );
   assert.deepEqual(validate(ok), []);
 });
+
+// ------------------------------------------------- panel variant (Phase 2) --
+
+test("panel variant folds to tokens; explicit style overrides the variant", () => {
+  const card = stack({ id: "pv1", variant: "card" });
+  const cls = classesOf(containerClasses(card, ROOT_CTX, defaultTheme));
+  assert.ok(cls.includes(`bg-${defaultTheme.colors.raised}`));
+  assert.ok(cls.includes(defaultTheme.radius.md));
+  assert.ok(cls.includes("border"));
+
+  const island = stack({ id: "pv2", variant: "island" });
+  const icls = classesOf(containerClasses(island, ROOT_CTX, defaultTheme));
+  assert.ok(icls.includes("shadow-lg"));
+  assert.ok(icls.includes(defaultTheme.radius.xl));
+
+  // The document's own style wins over the variant's defaults.
+  const overridden = stack({ id: "pv3", variant: "card", style: { bg: "danger" } });
+  const ocls = classesOf(containerClasses(overridden, ROOT_CTX, defaultTheme));
+  assert.ok(ocls.includes(`bg-${defaultTheme.colors.danger}`));
+  assert.ok(!ocls.includes(`bg-${defaultTheme.colors.raised}`));
+
+  // plain adds nothing.
+  const plain = stack({ id: "pv4" });
+  assert.equal(
+    containerClasses(plain, ROOT_CTX, defaultTheme),
+    containerClasses({ ...plain, variant: undefined }, ROOT_CTX, defaultTheme),
+  );
+});

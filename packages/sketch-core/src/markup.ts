@@ -39,6 +39,7 @@ import type {
 } from "./spec.js";
 import {
   BUTTON_VARIANTS,
+  PANEL_VARIANTS,
   COLOR_TOKENS,
   CROSS_AXES,
   ITEM_FIELD_TYPES,
@@ -83,9 +84,13 @@ export interface Range {
 
 // -------------------------------------------------------------- alphabets --
 
+/** Attribute-name → alphabet. `variant` is the one name shared by two
+ *  elements with DIFFERENT alphabets (Button: primary/…, Stack: panel
+ *  intent) — element-qualified keys ("Stack.variant") take precedence. */
 const ENUMS: Record<string, readonly string[]> = {
   role: TYPE_TOKENS,
   variant: BUTTON_VARIANTS,
+  "Stack.variant": PANEL_VARIANTS,
   dir: ["row", "col"],
   main: MAIN_AXES,
   cross: CROSS_AXES,
@@ -103,7 +108,7 @@ const STYLE_ATTRS = ["bg", "fg", "border", "radius"] as const;
  *  They sit right after sk:id so a positioned child reads as "what, where". */
 const ATTRS: Record<string, string[]> = {
   Sketch: ["sk:id", "name", "blueprintRef", "schemaVersion"],
-  Stack: ["sk:id", "x", "y", "dir", "gap", "pad", "main", "cross", "w", "h", ...STYLE_ATTRS],
+  Stack: ["sk:id", "x", "y", "dir", "gap", "pad", "main", "cross", "variant", "w", "h", ...STYLE_ATTRS],
   Frame: ["sk:id", "x", "y", "w", "h", ...STYLE_ATTRS],
   Text: ["sk:id", "x", "y", "role", "w", "h", ...STYLE_ATTRS],
   Button: ["sk:id", "x", "y", "variant", "intent", "w", "h", ...STYLE_ATTRS],
@@ -123,7 +128,7 @@ const ATTRS: Record<string, string[]> = {
  *  x/y are NOT here: they default to 0 under a Frame (position is always
  *  printed) and are illegal everywhere else. */
 const DEFAULTS: Record<string, Record<string, string | number>> = {
-  Stack: { dir: "col", gap: 0, pad: 0, main: "start", cross: "stretch", w: "fill", h: "hug" },
+  Stack: { dir: "col", gap: 0, pad: 0, main: "start", cross: "stretch", variant: "plain", w: "fill", h: "hug" },
   Frame: { w: "fill", h: 200 },
   Text: { role: "body", w: "hug", h: "hug" },
   Button: { variant: "secondary", intent: "none", w: "hug", h: "hug" },
@@ -316,8 +321,9 @@ function enumOf<T extends string>(p: P, name: string, raw: Record<string, RawAtt
   const r = raw[key];
   const v = r ? r.v : DEFAULTS[name]?.[key];
   if (v === undefined) return undefined;
-  if (typeof v !== "string" || !ENUMS[key].includes(v)) {
-    p.fail(`${key}=${fmtVal(v)} 不在字母表 {${ENUMS[key].join(", ")}}`, r ? r.pos : 0);
+  const alphabet = ENUMS[`${name}.${key}`] ?? ENUMS[key];
+  if (typeof v !== "string" || !alphabet.includes(v)) {
+    p.fail(`${key}=${fmtVal(v)} 不在字母表 {${alphabet.join(", ")}}`, r ? r.pos : 0);
   }
   return v as T;
 }
@@ -497,6 +503,8 @@ function parseElement(p: P, ctx: ParseCtx): SketchNode {
       sizing: sizingOf(p, name, raw),
       children,
     };
+    const variant = enumOf<PanelVariant>(p, name, raw, "variant");
+    if (variant && variant !== "plain") node.variant = variant;
     const style = styleOf(p, name, raw);
     if (style) node.style = style;
     return finish(node);
@@ -840,6 +848,7 @@ function nodeAttrs(n: SketchNode, inFrame: boolean): string[] {
       push("pad", fmtPad(n.layout.padding), d.pad);
       push("main", n.layout.mainAxis, d.main);
       push("cross", n.layout.crossAxis, d.cross);
+      push("variant", n.variant ?? "plain", d.variant);
       push("w", fmtSize(n.sizing.width), d.w);
       push("h", fmtSize(n.sizing.height), d.h);
       styleAttrs();
