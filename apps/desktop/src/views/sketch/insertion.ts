@@ -72,6 +72,15 @@ export type DropPlan =
        *  actually lands where the pointer is. Both are pointer geometry;
        *  neither infers structure. */
       spread: boolean;
+    }
+  | {
+      /** Magic Frame (Phase 2): the marquee's sole outcome — wrap these
+       *  nodes (topmost-only, document order) in ONE new panel, or nothing.
+       *  Never persistent multi-selection. */
+      kind: "marquee";
+      nodeIds: string[];
+      /** Enclosed rendered boxes — the live highlight while drawing. */
+      boxIds: string[];
     };
 
 /** Outer fraction of a leaf's cross-axis extent that triggers a wrap. */
@@ -251,6 +260,46 @@ export function computeDrop(
   };
 }
 
+/**
+ * Magic Frame enclosure (Phase 2). Sloppy by design: a box is enclosed iff
+ * its CENTER lies inside the marquee. Only the TOPMOST enclosed nodes count
+ * (an enclosed ancestor absorbs its enclosed descendants); `excludeNodeIds`
+ * carries the root and every template-interior node — the frame never
+ * reaches inside a template (the list wraps as a whole when ITS center is
+ * enclosed). Output order = rendered document order. Empty → null.
+ */
+export function computeMarquee(
+  rect: Rect,
+  boxes: LayoutBox[],
+  excludeNodeIds?: ReadonlySet<string>,
+): Extract<DropPlan, { kind: "marquee" }> | null {
+  const inside = (b: LayoutBox) => {
+    const cx = b.rect.x + b.rect.width / 2;
+    const cy = b.rect.y + b.rect.height / 2;
+    return cx >= rect.x && cx <= rect.x + rect.width && cy >= rect.y && cy <= rect.y + rect.height;
+  };
+  const enclosed = boxes.filter((b) => !excludeNodeIds?.has(b.nodeId) && inside(b));
+  if (enclosed.length === 0) return null;
+
+  const enclosedIds = new Set(enclosed.map((b) => b.boxId));
+  const byId = new Map(boxes.map((b) => [b.boxId, b]));
+  const topmost = enclosed.filter((b) => {
+    let cur = b.parentBoxId;
+    while (cur) {
+      if (enclosedIds.has(cur)) return false; // an enclosed ancestor absorbs it
+      cur = byId.get(cur)?.parentBoxId ?? null;
+    }
+    return true;
+  });
+  if (topmost.length === 0) return null;
+
+  const nodeIds: string[] = [];
+  for (const b of topmost) {
+    if (!nodeIds.includes(b.nodeId)) nodeIds.push(b.nodeId);
+  }
+  return { kind: "marquee", nodeIds, boxIds: topmost.map((b) => b.boxId) };
+}
+
 /** Indicator for a full DropPlan: the gap line for insertions (null → the
  *  caller rings the empty container), or a translucent zone for a wrap.
  *  Snuggle wraps highlight the target's joined half; spread wraps highlight
@@ -264,6 +313,7 @@ export function indicatorFor(
     const rect = indicatorRect(plan, boxes);
     return rect ? { rect, kind: "line" } : null;
   }
+  if (plan.kind === "marquee") return null; // the canvas draws the marquee itself
   const target = boxes.find((b) => b.boxId === plan.targetBoxId);
   if (!target) return null;
   const r = target.rect;

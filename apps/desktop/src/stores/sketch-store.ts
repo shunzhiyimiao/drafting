@@ -159,6 +159,11 @@ interface SketchState {
     spread?: boolean,
   ) => string | null;
   wrapInStack: (nodeId: string) => void;
+  /** Magic Frame (Phase 2): wrap SEVERAL nodes in ONE new panel under their
+   *  nearest common ancestor, at the first member's slot, document order
+   *  preserved — one applyTreeEdit = one undo unit. Returns the wrapper id
+   *  (selection lands on it), or null when the set is refused. */
+  wrapNodesInPanel: (nodeIds: string[]) => string | null;
   updateSketchMeta: (patch: { name?: string; blueprintRef?: string | null }) => void;
   /** persist-on-need case (a): give a node a durable sk:id and FLUSH the
    *  save, so the criterion marker (blueprint domain) never references an
@@ -197,6 +202,18 @@ export function allNodeIds(root: SketchNode, out: string[] = []): string[] {
     for (const child of root.children) allNodeIds(child, out);
   }
   if (root.kind === "list") allNodeIds(root.template, out);
+  return out;
+}
+
+/** Every node id INSIDE a list template (the template root and below) —
+ *  the Magic Frame never reaches into these; the list wraps as a whole. */
+export function templateInteriorIds(root: SketchNode, out = new Set<string>()): Set<string> {
+  if (root.kind === "stack" || root.kind === "frame") {
+    for (const child of root.children) templateInteriorIds(child, out);
+  }
+  if (root.kind === "list") {
+    for (const id of allNodeIds(root.template)) out.add(id);
+  }
   return out;
 }
 
@@ -881,6 +898,75 @@ export const useSketchStore = create<SketchState>((set, get) => {
         }
         hit.parent.children[i] = wrapper;
       }, wrapper.id);
+    },
+
+    wrapNodesInPanel: (nodeIds) => {
+      const { active } = get();
+      if (!active || nodeIds.length === 0) return null;
+
+      // Paths up front: reject the root, template interiors, and missing
+      // nodes; drop members that sit INSIDE another member (outermost wins).
+      const paths = new Map<string, number[]>();
+      for (const id of nodeIds) {
+        const p = pathOfNode(active.root, id);
+        if (!p || p.length === 0 || p.includes(-1)) return null;
+        paths.set(id, p);
+      }
+      const isPrefix = (a: number[], b: number[]) =>
+        a.length < b.length && a.every((v, i) => b[i] === v);
+      const members = nodeIds.filter((id) => {
+        const p = paths.get(id)!;
+        return !nodeIds.some((other) => other !== id && isPrefix(paths.get(other)!, p));
+      });
+      if (members.length === 0) return null;
+
+      // Document order + the nearest common ancestor of the member set.
+      members.sort((a, b) => {
+        const pa = paths.get(a)!;
+        const pb = paths.get(b)!;
+        for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+          if (pa[i] !== pb[i]) return pa[i] - pb[i];
+        }
+        return pa.length - pb.length;
+      });
+      let prefix = paths.get(members[0])!.slice(0, -1);
+      for (const id of members.slice(1)) {
+        const p = paths.get(id)!;
+        let i = 0;
+        while (i < prefix.length && i < p.length - 1 && prefix[i] === p[i]) i++;
+        prefix = prefix.slice(0, i);
+      }
+      const anchorIndex = paths.get(members[0])![prefix.length];
+
+      const wrapper = makeWrapper("col", { width: { mode: "fill" }, height: { mode: "hug" } });
+      wrapper.layout.gap = 2;
+      wrapper.layout.padding = { top: 2, right: 2, bottom: 2, left: 2 };
+
+      get().applyTreeEdit((draft) => {
+        const nca = nodeAtPath(draft.root, prefix);
+        if (!nca || (nca.kind !== "stack" && nca.kind !== "frame")) return;
+        const picked: SketchNode[] = [];
+        for (const id of members) {
+          const hit = findNode(draft.root, id);
+          if (!hit?.parent) return; // vanished mid-gesture — refuse whole wrap
+          picked.push(hit.node);
+        }
+        // Entering a frame? The wrapper takes the first member's position.
+        if (nca.kind === "frame") {
+          placeInFrame(wrapper, picked[0].pos);
+        }
+        for (const id of members) {
+          const hit = findNode(draft.root, id)!;
+          hit.parent!.children = hit.parent!.children.filter((c) => c.id !== id);
+        }
+        for (const n of picked) {
+          delete n.pos; // members are flow children of the panel now
+        }
+        wrapper.children = picked;
+        const at = Math.max(0, Math.min(anchorIndex, nca.children.length));
+        nca.children.splice(at, 0, wrapper);
+      }, wrapper.id);
+      return wrapper.id;
     },
 
     updateSketchMeta: (patch) => {

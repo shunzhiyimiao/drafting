@@ -1,8 +1,8 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { defaultTheme, sketchToIR, toElement, type CreateElement, type Pos } from "@drafting/sketch-core";
-import { allNodeIds, findNode, useSketchStore } from "../../stores/sketch-store";
+import { allNodeIds, findNode, templateInteriorIds, useSketchStore } from "../../stores/sketch-store";
 import { ContextMenu, useContextMenu } from "../../components/ContextMenu";
-import { computeDrop, indicatorFor, type LayoutBox, type Rect } from "./insertion";
+import { computeDrop, computeMarquee, indicatorFor, type LayoutBox, type Rect } from "./insertion";
 import { measureLayoutBoxes } from "./designer/geometry";
 import { computeFrameMove } from "./designer/frame-move";
 import { SelectionOverlay } from "./designer/SelectionOverlay";
@@ -29,6 +29,7 @@ export function SketchCanvas() {
   const insertNodeBeside = useSketchStore((s) => s.insertNodeBeside);
   const moveNodeBeside = useSketchStore((s) => s.moveNodeBeside);
   const updateNode = useSketchStore((s) => s.updateNode);
+  const wrapNodesInPanel = useSketchStore((s) => s.wrapNodesInPanel);
   const deleteNode = useSketchStore((s) => s.deleteNode);
   const wrapInStack = useSketchStore((s) => s.wrapInStack);
   const moveNode = useSketchStore((s) => s.moveNode);
@@ -87,6 +88,11 @@ export function SketchCanvas() {
   const sessionRef = useRef<DragSession | null>(null);
   /** Boxes measured once per gesture, at activation. */
   const boxesRef = useRef<LayoutBox[] | null>(null);
+  /** Marquee support (Magic Frame): the start point in LOGICAL surface
+   *  coords (frozen at activation, scroll-proof) and the enclosure
+   *  exclusions (root + template interiors, frozen per gesture). */
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeExcludeRef = useRef<Set<string> | null>(null);
 
   const updateSession = (next: DragSession | null) => {
     sessionRef.current = next;
@@ -122,6 +128,8 @@ export function SketchCanvas() {
     /** Tear down the gesture's transient state. Never touches the document. */
     const endGesture = () => {
       boxesRef.current = null;
+      marqueeStartRef.current = null;
+      marqueeExcludeRef.current = null;
       updateSession(null);
     };
 
@@ -208,12 +216,32 @@ export function SketchCanvas() {
 
       if (s.phase === "pending" && next.phase === "dragging") {
         boxesRef.current = measureLayoutBoxes(surface, active.root, zoomRef.current);
+        if (next.source.type === "marquee") {
+          marqueeStartRef.current = surfacePoint(next.start.clientX, next.start.clientY);
+          const exclude = templateInteriorIds(active.root);
+          exclude.add(active.root.id);
+          marqueeExcludeRef.current = exclude;
+        }
       }
       if (next.phase === "dragging" && boxesRef.current) {
         const point = surfacePoint(e.clientX, e.clientY);
-        const exclude =
-          next.source.type === "existing-node" ? next.source.excludeNodeIds : undefined;
-        next = setPlan(next, computeDrop(point, boxesRef.current, exclude));
+        if (next.source.type === "marquee") {
+          const start = marqueeStartRef.current!;
+          const rect = {
+            x: Math.min(start.x, point.x),
+            y: Math.min(start.y, point.y),
+            width: Math.abs(point.x - start.x),
+            height: Math.abs(point.y - start.y),
+          };
+          next = setPlan(
+            next,
+            computeMarquee(rect, boxesRef.current, marqueeExcludeRef.current ?? undefined),
+          );
+        } else {
+          const exclude =
+            next.source.type === "existing-node" ? next.source.excludeNodeIds : undefined;
+          next = setPlan(next, computeDrop(point, boxesRef.current, exclude));
+        }
       }
       updateSession(next);
     };
@@ -247,7 +275,13 @@ export function SketchCanvas() {
       endGesture();
       if (!plan) return; // click, or off-sheet drop: zero mutations
 
-      // ONE mutation per gesture, through the existing four ops only.
+      // ONE mutation per gesture, through the existing tree ops only.
+      if (plan.kind === "marquee") {
+        // Magic Frame: the gesture's sole outcome — one wrap, or nothing.
+        wrapNodesInPanel(plan.nodeIds);
+        setWrapHint(null);
+        return;
+      }
       if (plan.kind === "insert") {
         // A frame target consumes the pointer as the new child's position
         // (frame-local, logical units — the store rounds).
@@ -261,7 +295,7 @@ export function SketchCanvas() {
             : undefined;
         if (s.source.type === "palette") {
           insertNodeAt(plan.containerId, plan.index, s.source.kind, framePos);
-        } else {
+        } else if (s.source.type === "existing-node") {
           moveNodeTo(s.source.nodeId, plan.containerId, plan.index, framePos);
         }
         setWrapHint(null); // a new edit outdates any lingering hint
@@ -269,7 +303,9 @@ export function SketchCanvas() {
         const wrapperId =
           s.source.type === "palette"
             ? insertNodeBeside(plan.targetNodeId, plan.side, plan.direction, s.source.kind, plan.spread)
-            : moveNodeBeside(s.source.nodeId, plan.targetNodeId, plan.side, plan.direction, plan.spread);
+            : s.source.type === "existing-node"
+              ? moveNodeBeside(s.source.nodeId, plan.targetNodeId, plan.side, plan.direction, plan.spread)
+              : null; // marquee never reaches here (its plan kind returned above)
         // Snuggle wraps get the one-click "spread apart" affordance (§7.1
         // amendment, option B): the alignment vocabulary is already in the
         // alphabet — this makes it discoverable at the moment it applies.
@@ -315,9 +351,31 @@ export function SketchCanvas() {
   const boxes = boxesRef.current;
   const indicator = dragging?.plan && boxes ? indicatorFor(dragging.plan, boxes) : null;
   const ringBox =
-    dragging?.plan && !indicator && boxes
-      ? boxes.find((b) => b.boxId === dragging.plan!.targetBoxId)
+    dragging?.plan && dragging.plan.kind !== "marquee" && !indicator && boxes
+      ? boxes.find(
+          (b) => dragging.plan!.kind !== "marquee" && b.boxId === dragging.plan!.targetBoxId,
+        )
       : null;
+  // Magic Frame visuals: the marquee rect (logical) + enclosed highlights.
+  const marqueeRect = (() => {
+    if (dragging?.source.type !== "marquee" || !marqueeStartRef.current || !surfaceRef.current) {
+      return null;
+    }
+    const start = marqueeStartRef.current;
+    const cur = surfacePoint(dragging.current.clientX, dragging.current.clientY);
+    return {
+      x: Math.min(start.x, cur.x),
+      y: Math.min(start.y, cur.y),
+      width: Math.abs(cur.x - start.x),
+      height: Math.abs(cur.y - start.y),
+    };
+  })();
+  const marqueeHits =
+    dragging?.plan?.kind === "marquee" && boxes
+      ? dragging.plan.boxIds
+          .map((id) => boxes.find((b) => b.boxId === id))
+          .filter((b): b is LayoutBox => b !== undefined)
+      : [];
   const pointer =
     dragging && surfaceRef.current
       ? surfacePoint(dragging.current.clientX, dragging.current.clientY)
@@ -331,7 +389,9 @@ export function SketchCanvas() {
           keeps only cursor rules and the drag source's dimming. */}
       <style>
         {`[data-sk] { cursor: default; }`}
-        {dragging ? `* { cursor: grabbing !important; }` : ""}
+        {dragging
+          ? `* { cursor: ${dragging.source.type === "marquee" ? "crosshair" : "grabbing"} !important; }`
+          : ""}
         {draggedNodeId
           ? `[data-sk="${draggedNodeId}"] { opacity: 0.35; }`
           : ""}
@@ -382,7 +442,13 @@ export function SketchCanvas() {
           if (sessionRef.current || frameMoveRef.current) return; // one gesture at a time
           const hit = (e.target as HTMLElement).closest("[data-sk]");
           const nodeId = hit?.getAttribute("data-sk");
-          if (!nodeId || nodeId === active.root.id) return;
+          if (!nodeId) return;
+          if (nodeId === active.root.id) {
+            // Empty sheet space: the press arms a MARQUEE (Magic Frame).
+            // Below the threshold it stays the selection click it always was.
+            updateSession(beginSession(e.pointerId, { type: "marquee" }, e.clientX, e.clientY));
+            return;
+          }
           const found = findNode(active.root, nodeId);
           if (!found?.parent) return; // root and template roots don't drag
 
@@ -485,6 +551,24 @@ export function SketchCanvas() {
             </div>
           </div>
         )}
+        {marqueeRect && (
+          <div
+            className="absolute pointer-events-none z-10 border-2 border-dashed border-accent bg-accent/5 rounded-sm"
+            style={{
+              left: marqueeRect.x,
+              top: marqueeRect.y,
+              width: marqueeRect.width,
+              height: marqueeRect.height,
+            }}
+          />
+        )}
+        {marqueeHits.map((b) => (
+          <div
+            key={b.boxId}
+            className="absolute pointer-events-none z-10 border-2 border-accent rounded"
+            style={{ left: b.rect.x, top: b.rect.y, width: b.rect.width, height: b.rect.height }}
+          />
+        ))}
         {/* Selection frame + handles + kind chip (S3). Hidden mid-drag so
             the preview and indicator own the stage. */}
         {!dragging && !frameLive && <SelectionOverlay surface={surfaceRef.current} />}
@@ -498,7 +582,7 @@ export function SketchCanvas() {
         {/* Real-rendered drag preview (S3) — the dragged node itself (or
             the exact default node a palette drop inserts) follows the
             cursor; the source dims via the style block above. */}
-        {dragging && pointer && (
+        {dragging && dragging.source.type !== "marquee" && pointer && (
           <DragPreview session={dragging} boxes={boxes} pointer={pointer} />
         )}
       </div>

@@ -20,6 +20,12 @@ export type DragSource =
   | {
       type: "palette";
       kind: NodeKind;
+    }
+  | {
+      /** Magic Frame (Phase 2): a marquee drawn from empty canvas space.
+       *  Its only possible outcome is ONE wrap mutation or nothing — it
+       *  NEVER produces persistent multi-selection. */
+      type: "marquee";
     };
 
 export type DragPhase = "pending" | "dragging" | "committed" | "cancelled";

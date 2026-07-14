@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   computeDrop,
   computeInsertion,
+  computeMarquee,
   indicatorFor,
   indicatorRect,
   type LayoutBox,
@@ -445,4 +446,47 @@ test("frame targets: pointer = placement — append insert, no side zones, no fl
   // The dragged subtree's own frame never receives itself.
   const excluded = computeDrop({ x: 100, y: 180 }, boxes, new Set(["fr"]));
   assert.equal(excluded?.kind === "insert" && excluded.containerId, "root");
+});
+
+// ------------------------------------------------- Magic Frame (Phase 2) --
+
+test("marquee: center-enclosure, topmost collapse, template exclusion, document order", () => {
+  const boxes: LayoutBox[] = [
+    {
+      boxId: "root",
+      nodeId: "root",
+      rect: { x: 0, y: 0, width: 400, height: 400 },
+      container: { direction: "col" },
+      parentBoxId: null,
+      childBoxIds: ["a", "grp", "half"],
+    },
+    { boxId: "a", nodeId: "a", rect: { x: 10, y: 10, width: 100, height: 40 }, parentBoxId: "root", childBoxIds: [] },
+    {
+      boxId: "grp",
+      nodeId: "grp",
+      rect: { x: 10, y: 60, width: 200, height: 100 },
+      container: { direction: "row" },
+      parentBoxId: "root",
+      childBoxIds: ["inner"],
+    },
+    { boxId: "inner", nodeId: "inner", rect: { x: 20, y: 70, width: 80, height: 40 }, parentBoxId: "grp", childBoxIds: [] },
+    // Center (260, 30) OUTSIDE the marquee even though the box overlaps it.
+    { boxId: "half", nodeId: "half", rect: { x: 180, y: 10, width: 160, height: 40 }, parentBoxId: "root", childBoxIds: [] },
+  ];
+  const plan = computeMarquee({ x: 0, y: 0, width: 230, height: 200 }, boxes, new Set(["root"]));
+  assert.ok(plan);
+  // a ✓ (center 60,30); grp ✓ (center 110,110) absorbs inner; half ✗ (center 260,30).
+  assert.deepEqual(plan!.nodeIds, ["a", "grp"]);
+
+  // Template interiors are excluded by the caller's set — the frame never
+  // reaches inside; the list wraps as a whole via its own center.
+  const excluded = computeMarquee(
+    { x: 0, y: 0, width: 230, height: 200 },
+    boxes,
+    new Set(["root", "inner", "grp"]),
+  );
+  assert.deepEqual(excluded!.nodeIds, ["a"]);
+
+  // Nothing enclosed → null (the gesture is one wrap or NOTHING).
+  assert.equal(computeMarquee({ x: 300, y: 300, width: 50, height: 50 }, boxes, new Set(["root"])), null);
 });

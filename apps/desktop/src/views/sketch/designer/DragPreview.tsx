@@ -52,6 +52,9 @@ export function DragPreview({
     if (session.source.type === "palette") {
       return { node: defaultNode(session.source.kind), width: 200 };
     }
+    if (session.source.type !== "existing-node") {
+      return { node: null, width: 200 }; // marquee draws its own visuals
+    }
     const found = active ? findNode(active.root, session.source.nodeId) : null;
     const box = boxes?.find(
       (b) => session.source.type === "existing-node" && b.nodeId === session.source.nodeId,

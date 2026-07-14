@@ -51,6 +51,7 @@ function ended(phase: DragPhase): boolean {
 
 function qualifies(session: DragSession, clientX: number, clientY: number): boolean {
   if (session.source.type === "palette") return true;
+  // Marquee shares the node threshold: below it the press stays a click.
   return (
     Math.hypot(clientX - session.start.clientX, clientY - session.start.clientY) >=
     NODE_DRAG_THRESHOLD

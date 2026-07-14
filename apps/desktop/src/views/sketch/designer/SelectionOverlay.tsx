@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { SketchNode } from "@drafting/sketch-core";
 import { findNode, useSketchStore } from "../../../stores/sketch-store";
 import { computeResize, type Handle, type Rect, type ResizeResult } from "./resize";
+import { PANEL_VARIANTS, type PanelVariant } from "@drafting/sketch-core";
 
 /** Professional selection chrome (S3) + live resize handles (S4).
  *
@@ -243,6 +244,42 @@ export function SelectionOverlay({ surface }: { surface: HTMLElement | null }) {
           {i === 0 && node && (
             <div className="absolute -top-5 left-0 px-1.5 py-0.5 rounded-t bg-blue-500 text-white text-[9px] font-medium leading-tight whitespace-nowrap">
               {labelOf(node)}
+            </div>
+          )}
+          {/* Panel intent chips (Magic Frame): what should this panel BE?
+              Plain/card/island — intent only; the fold owns the look. Shown
+              for any selected non-root stack, so the post-marquee picker is
+              just "the wrapper got selected". */}
+          {i === 0 && node && node.kind === "stack" && !isRoot && (
+            <div
+              data-designer-overlay
+              data-variant-chips
+              className="absolute left-0 flex items-center gap-1 pointer-events-auto"
+              style={{ top: "100%", marginTop: 4 }}
+            >
+              {PANEL_VARIANTS.map((v) => {
+                const current = node.variant ?? "plain";
+                return (
+                  <button
+                    key={v}
+                    data-variant-chip={v}
+                    onClick={() =>
+                      updateNode(selectedNodeId, (n) => {
+                        if (n.kind !== "stack") return;
+                        if (v === "plain") delete (n as { variant?: PanelVariant }).variant;
+                        else n.variant = v;
+                      })
+                    }
+                    className={`px-1.5 py-0.5 rounded-full text-[9px] leading-tight border ${
+                      current === v
+                        ? "bg-blue-500 text-white border-blue-500"
+                        : "bg-white/90 text-slate-600 border-slate-300 hover:border-blue-400"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

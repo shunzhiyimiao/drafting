@@ -135,3 +135,32 @@ test("setPlan only takes effect while dragging", () => {
   const cancelled = cancel(move(pending, 1, 10, 10));
   assert.equal(setPlan(cancelled, PLAN).plan, null);
 });
+
+// ------------------------------------------------- Magic Frame (Phase 2) --
+
+test("marquee source rides the same laws: threshold, single commit, cancel", () => {
+  let s = beginSession(7, { type: "marquee" }, 100, 100);
+  assert.equal(s.phase, "pending");
+  // Below the threshold it is still a click…
+  s = move(s, 7, 102, 101);
+  assert.equal(s.phase, "pending");
+  // …and a pending release is a cancelled click: NO plan, no mutation.
+  const click = commit(s, 7);
+  assert.equal(click.plan, null);
+  assert.equal(click.session.phase, "cancelled");
+
+  // Crossing the threshold drags; commit yields the plan exactly once.
+  let d = beginSession(8, { type: "marquee" }, 100, 100);
+  d = move(d, 8, 140, 160);
+  assert.equal(d.phase, "dragging");
+  const plan: import("../insertion").DropPlan = {
+    kind: "marquee",
+    nodeIds: ["a"],
+    boxIds: ["b0"],
+  };
+  d = setPlan(d, plan);
+  const first = commit(d, 8);
+  assert.equal(first.plan, plan);
+  const second = commit(first.session, 8);
+  assert.equal(second.plan, null, "law 7/10: never twice");
+});
