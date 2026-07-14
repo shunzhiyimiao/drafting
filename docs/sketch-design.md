@@ -218,6 +218,12 @@ The parked §9.1 interaction shipped at a deliberately smaller scope. **Scope la
 - **Mechanics:** the decision is a pure function — `computeInsertion(point, layoutBoxes) → { containerId, index }` (+`indicatorRect`), DOM-free and unit-tested (row/col, edges, nesting, empty containers, subtree exclusion). The event layer only collects the pointer, measures rendered `[data-sk]` boxes once per drag, and dispatches the *existing* tree ops (`insertNodeAt` / `moveNodeTo`). Boxes are per rendered element, so template instances (plural data-sk) resolve to the template container — dropping into any instance edits the template, and all instances update. Pointer events, not HTML5 DnD (the Tauri webview intercepts native drag/drop). Self-nesting is excluded at candidacy (the dragged subtree can't receive itself); the sketch root and template roots don't drag.
 - **Canvas surface honors ROOT_CTX** (post-rehearsal fix): the sheet the canvas renders into is a flex column, so the root's screen-column premise (`flex-1`/`self-stretch`) actually stretches and the root's box covers the whole sheet. Consequence for drag: the visually-empty area below the content **is** the root container, so dropping there appends to the root via the ordinary insertion rule — no whitespace special case exists, and points outside the sheet remain no-ops. A ghost chip (the dragged kind) follows the cursor and the cursor switches to grabbing — affordance only; the indicator still owns the drop decision.
 
+### 7.3 The Magic Frame (Phase 2, 2026-07-15)
+
+Napkin 的成组笔画:**从空白处起笔的 marquee**,骑在 S1 会话机上的第三种 DragSource(同阈值、同十一定律)。圈入规则**故意宽松**:盒中心在框内即算;被圈的祖先吸收被圈的后代;**永不穿透 list 模板**(内部整体排除,list 以自身中心整只入圈);产出 = 在最近公共祖先下、首成员位插入**一个**新容器,成员按文档序,**一手势 = 一 wrap = 一 Monaco undo**;圈空 = 无事发生;**绝不产生持久多选**(选择落在唯一的 wrapper 上)。
+
+**Panel variant 词汇**(`variant="plain|card|island"`,Stack 专属,plain≡缺省):存的是"这个面板想是什么"的**意图**,折叠(fold)拥有每档的视觉决议(card=raised+md+细边;island=raised+xl+shadow),文档自身的显式 style token 覆盖 variant(button variant 合并先例);属性名与 Button 的 variant 跨元素撞名 → 枚举表引入元素限定键("Stack.variant")。chips 挂在 SelectionOverlay:任何选中的非根 Stack 都可点 —— "wrap 后出 picker" 即 "wrapper 被选中"。禁区不变:无多选、无对齐工具、无样式检查器。
+
 ## 8. How Sketch closes into v1.5
 
 Generated React becomes 代码现状 (Atlas) the moment it lands; criteria verify UI acceptance conditions against it via `data-sk`. **Sketch sits *on* the intent↔reality loop, not beside it.** Editor autosave is one more FileSaved producer feeding the same verdict/drift machinery (S2–S6).
