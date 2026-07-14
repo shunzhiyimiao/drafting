@@ -31,6 +31,7 @@ import type {
   ItemFieldType,
   Layout,
   ListP,
+  PanelVariant,
   Size,
   Sizing,
   Sketch,
