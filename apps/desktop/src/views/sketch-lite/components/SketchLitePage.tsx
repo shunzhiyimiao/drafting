@@ -43,6 +43,44 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
     if (activeFile) bindTo(activeFile, activeName ?? "Untitled sketch");
   }, [activeFile, activeName, bindTo]);
 
+  // P3.0 paste SPIKE (dev builds only): does the WKWebView deliver clipboard
+  // images through the paste event? Explicit gesture only (⌘V), no clipboard
+  // polling, no pixels retained/logged — metadata to the console + a
+  // transient banner. Decides the P3.2 entry (webview event vs Rust plugin).
+  const [pasteProbe, setPasteProbe] = useState<string | null>(null);
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const img = items.find((i) => i.type.startsWith("image/"));
+      if (!img) {
+        setPasteProbe(`粘贴探针:无图像(items: ${items.map((i) => i.type).join(", ") || "空"})`);
+        return;
+      }
+      const file = img.getAsFile();
+      if (!file) {
+        setPasteProbe(`粘贴探针:${img.type} 存在但 getAsFile() 为空 — WKWebView 限制,P3.2 走 Rust 剪贴板插件`);
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      const probe = new Image();
+      probe.onload = () => {
+        setPasteProbe(
+          `粘贴探针:✓ ${img.type} ${probe.naturalWidth}×${probe.naturalHeight} (${Math.round(file.size / 1024)}KB) — webview paste 事件可用`,
+        );
+        URL.revokeObjectURL(url); // no retention — the spike measures, never keeps
+      };
+      probe.onerror = () => {
+        setPasteProbe(`粘贴探针:${img.type} 取到但解码失败 — P3.2 走 Rust 剪贴板插件`);
+        URL.revokeObjectURL(url);
+      };
+      probe.src = url;
+      console.info("[paste-spike] image item:", img.type, file.size, "bytes");
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
+
   /** The AI seam: the harness injects __liteAiMock; the app routes the
    *  `sketchGenerate` task through the AI Provider Manager; neither →
    *  null → offline skeleton (loudly labeled). */
@@ -125,6 +163,15 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
           预览
         </button>
         <div className="flex-1" />
+        {pasteProbe && (
+          <button
+            onClick={() => setPasteProbe(null)}
+            title="点击关闭(dev 探针)"
+            className="text-[10px] text-text-muted hover:text-text-secondary max-w-96 truncate"
+          >
+            {pasteProbe}
+          </button>
+        )}
         {error && <span className="text-[10px] text-error max-w-72 truncate">{error}</span>}
         <button
           data-lite-generate
