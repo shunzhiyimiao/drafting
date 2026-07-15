@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Eye, PenTool, Sparkles } from "lucide-react";
-import { printSketchMarkup } from "@drafting/sketch-core";
+import { printSketchMarkup, reconcileSketch } from "@drafting/sketch-core";
 import { ulid } from "../../../lib/ulid";
 import { useSketchStore } from "../../../stores/sketch-store";
 import { useBoundFeature } from "../../sketch/binding";
@@ -31,9 +31,11 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   const [mode, setMode] = useState<"sketch" | "preview">("sketch");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<{ mode: "ai" | "fallback"; reason?: string } | null>(
-    null,
-  );
+  const [outcome, setOutcome] = useState<{
+    mode: "ai" | "fallback";
+    reason?: string;
+    reattached?: number;
+  } | null>(null);
   // 蓝图闭环:sketch 绑了特性蓝图时,验收标准喂进 Generate 的 prompt ——
   // 生成的界面直接朝标准去。
   const [boundFeature] = useBoundFeature();
@@ -110,12 +112,24 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
         .filter((s) => s.kind.kind === "acceptanceCriteria")
         .flatMap((s) => s.criteria.map((c) => c.text));
       const result = await generateUiSmart(doc, { mint: ulid, runAi: resolveRunAi(), criteria });
+      // O3: identity continuity across regeneration — re-attach the OLD
+      // tree's persistent sk:ids (criteria bindings live on them) onto
+      // matching new nodes BEFORE landing. Runs strictly after the
+      // pipeline's parse/validate gates; ambiguity dangles honestly.
+      const previous = useSketchStore.getState().active;
+      let landed = result.sketch;
+      let reattached = 0;
+      if (previous) {
+        const r = reconcileSketch(previous, result.sketch);
+        landed = r.sketch;
+        reattached = r.reattached.length;
+      }
       await generateFromLite(
         doc.title,
-        (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
+        (sketchId) => printSketchMarkup({ ...landed, id: sketchId }),
         "replace-active",
       );
-      setOutcome({ mode: result.mode, reason: result.reason });
+      setOutcome({ mode: result.mode, reason: result.reason, reattached });
       setMode("preview");
     } catch (e) {
       setError(String(e));
@@ -210,6 +224,7 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
               {outcome.mode === "ai"
                 ? "✨ AI 生成 — 按草图注释与页面描述设计"
                 : `⚠ 已用离线骨架(AI 未生效):${outcome.reason ?? ""}`}
+              {outcome.reattached ? ` · ${outcome.reattached} 个节点身份已延续` : ""}
             </div>
           )}
           <div className="flex-1 flex gap-2 min-h-0">

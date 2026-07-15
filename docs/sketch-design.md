@@ -277,7 +277,7 @@ Sketch and WPF/XAML converged on the same model independently (declarative eleme
 
 **O2 修正案(2026-07-13,用户拍板)**:AI 阶段不产 UIIntent,**直出 `.sketch` 方言**——表现力=全字母表,方言自身的门卫(全函数 parse 的行列号错误 + validate())就是修复重试的信号;intent+编译器降级为**离线回落路径**(无 key/AI 关/两轮修复仍败),预览页签响亮标示「✨ AI 生成」或「⚠ 离线骨架+原因」,绝不静默。任务 `sketchGenerate` 走 AI Provider Manager(collect 一次性调用,路由默认 Sonnet,隐私/审计/预算全链生效);comment 支持画布上双击就地编辑。落点:`generateFromLite`("new-doc" 建真文件写入,创建失败响亮抛错绝不覆盖当前文档;"replace-active" 供 harness)。UI 临时态(工具/选中/手势)与 SketchDocument 严格分离。Phase 1 有意不做:钢笔/路径/图层面板/吸附/像素级还原 —— 草图不是最终 UI。AI 接入点 = 替换 interpret/generate-intent 两个 mock 的实现体(经 AI Provider Manager 走任务路由),类型与管线两侧零改动。
 
-**O3 缺口(2026-07-15 审计在案)**:O3 = 再生成的**身份延续** reconcile(成功 parse/validate 之后:kind+文本签名匹配、回挂 sk:id,保住已绑 criteria 的节点身份),2026-07-13 拍板,**至今零代码零文档**——本条即文档侧补账。消费者 = lite 再生成路径;与修复重试环(parse/validate 失败回炉)不同阶段、不同职责,严禁混同;paste 转写(P3)不需要它(初次粘贴全是新节点)。状态:未开工,待排程。
+**O3(2026-07-15 落地,`sketch-core/reconcile.ts`)**:再生成的**身份延续** reconcile——成功 parse/validate 之后,新旧树按 kind+文本签名匹配(叶子=自身可见文本;容器=variant+后代文本窗口;list=dataKey),**两侧唯一才回挂** sk:id,歧义永不猜测(绑定诚实悬垂,面板有信号);永不制造重复 id、temp id 不作源、纯函数幂等。消费者 = lite 再生成落点(reconcileSketch 在 Generate 落库前运行,横幅报延续数)。与修复重试环(失败回炉)不同阶段、不同职责,严禁混同;paste 转写(P3)不需要它(初次粘贴全是新节点)。
 
 ## Appendix — reference implementation status
 
