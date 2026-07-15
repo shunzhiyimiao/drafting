@@ -49,6 +49,14 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   // images through the paste event? Explicit gesture only (⌘V), no clipboard
   // polling, no pixels retained/logged — metadata to the console + a
   // transient banner. Decides the P3.2 entry (webview event vs Rust plugin).
+  //
+  // 裁决备忘(2026-07-16):macOS 键盘等价键经 NSApp 菜单路由 —— 本应用
+  // 未设自定义菜单,Tauri 2 的默认菜单自动在场,⌘V 路由因此白送;探针
+  // 阴性时第一嫌疑人是【菜单/焦点路由】,不是 WKWebView 能力。测试用
+  // ⌘⇧⌃4 截屏到剪贴板(⌘⇧4 是落文件)。若最终定 Rust 入口:
+  // clipboard-manager 插件有在案的 macOS 崩溃(tokio worker 线程碰
+  // NSPasteboard,与 WebKit 主线程 pasteboard 监听竞态,EXC_BAD_ACCESS)
+  // —— P3.2 落地时剪贴板操作必须压回主线程执行。
   const [pasteProbe, setPasteProbe] = useState<string | null>(null);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -56,7 +64,9 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
       const items = Array.from(e.clipboardData?.items ?? []);
       const img = items.find((i) => i.type.startsWith("image/"));
       if (!img) {
-        setPasteProbe(`粘贴探针:无图像(items: ${items.map((i) => i.type).join(", ") || "空"})`);
+        setPasteProbe(
+          `粘贴探针:无图像(items: ${items.map((i) => i.type).join(", ") || "空"})— 若剪贴板确有截图(⌘⇧⌃4),先查菜单/焦点路由,再怀疑 WKWebView`,
+        );
         return;
       }
       const file = img.getAsFile();
