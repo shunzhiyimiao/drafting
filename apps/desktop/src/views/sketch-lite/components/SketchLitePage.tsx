@@ -57,6 +57,11 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   // clipboard-manager 插件有在案的 macOS 崩溃(tokio worker 线程碰
   // NSPasteboard,与 WebKit 主线程 pasteboard 监听竞态,EXC_BAD_ACCESS)
   // —— P3.2 落地时剪贴板操作必须压回主线程执行。
+  //
+  // 判定(2026-07-17 真机):【阳性】—— ✓ image/png 完整送达(getAsFile
+  // 成功且解码出尺寸);⌘V 键盘路由与 Edit→Paste 菜单路径均验证通过
+  // (早期一次阴性系焦点/时机,非能力缺失)。P3.2 入口 = webview paste
+  // 事件,不引入 Rust 剪贴板插件,上述 NSPasteboard 竞态崩溃整体绕开。
   const [pasteProbe, setPasteProbe] = useState<string | null>(null);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
