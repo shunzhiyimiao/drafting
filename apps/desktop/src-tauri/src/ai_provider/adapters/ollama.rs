@@ -10,6 +10,50 @@ use super::{ProviderAdapter, ProviderContext};
 
 pub struct OllamaAdapter;
 
+/// Assemble the /api/chat body. Vision (P3.2): Ollama takes a bare-base64
+/// `images` array on the message itself (llava / qwen-vl local models).
+fn build_body(request: &ChatRequest) -> Value {
+    let mut messages: Vec<Value> = Vec::new();
+    if let Some(sys) = &request.system {
+        if !sys.is_empty() {
+            messages.push(json!({ "role": "system", "content": sys }));
+        }
+    }
+    for m in &request.messages {
+        let role = match m.role {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+        };
+        messages.push(json!({ "role": role, "content": m.content }));
+    }
+
+    if !request.images.is_empty() {
+        if !messages.iter().any(|m| m["role"] == "user") {
+            messages.push(json!({ "role": "user", "content": "" }));
+        }
+        if let Some(last_user) = messages.iter_mut().rev().find(|m| m["role"] == "user") {
+            let imgs: Vec<&str> = request.images.iter().map(|i| i.data_base64.as_str()).collect();
+            last_user["images"] = json!(imgs);
+        }
+    }
+
+    let mut options = json!({});
+    if let Some(t) = request.temperature {
+        options["temperature"] = json!(t);
+    }
+    if let Some(m) = request.max_tokens {
+        options["num_predict"] = json!(m);
+    }
+
+    json!({
+        "model": request.model,
+        "messages": messages,
+        "stream": true,
+        "options": options,
+    })
+}
+
 #[async_trait]
 impl ProviderAdapter for OllamaAdapter {
     fn id(&self) -> &'static str {
@@ -22,35 +66,7 @@ impl ProviderAdapter for OllamaAdapter {
         stream_id: String,
         request: ChatRequest,
     ) -> Result<BoxStream<'static, StreamEvent>, String> {
-        let mut messages: Vec<Value> = Vec::new();
-        if let Some(sys) = &request.system {
-            if !sys.is_empty() {
-                messages.push(json!({ "role": "system", "content": sys }));
-            }
-        }
-        for m in &request.messages {
-            let role = match m.role {
-                Role::System => "system",
-                Role::User => "user",
-                Role::Assistant => "assistant",
-            };
-            messages.push(json!({ "role": role, "content": m.content }));
-        }
-
-        let mut options = json!({});
-        if let Some(t) = request.temperature {
-            options["temperature"] = json!(t);
-        }
-        if let Some(m) = request.max_tokens {
-            options["num_predict"] = json!(m);
-        }
-
-        let body = json!({
-            "model": request.model,
-            "messages": messages,
-            "stream": true,
-            "options": options,
-        });
+        let body = build_body(&request);
 
         let url = ctx.url();
         let headers = ctx.build_headers()?;
@@ -159,5 +175,34 @@ impl ProviderAdapter for OllamaAdapter {
         } else {
             Err(format!("ollama health status {}", resp.status()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_provider::types::{ChatMessage, ImageAttachment};
+
+    #[test]
+    fn images_ride_bare_base64_on_final_user_message() {
+        let mut r = ChatRequest {
+            model: "llava".into(),
+            system: None,
+            messages: vec![ChatMessage {
+                role: Role::User,
+                content: "transcribe this".into(),
+            }],
+            temperature: None,
+            max_tokens: None,
+            included_files: vec![],
+            images: vec![],
+        };
+        r.images.push(ImageAttachment {
+            media_type: "image/png".into(),
+            data_base64: "QUJD".into(),
+        });
+        let body = build_body(&r);
+        assert_eq!(body["messages"][0]["images"][0], "QUJD");
+        assert_eq!(body["messages"][0]["content"], "transcribe this");
     }
 }

@@ -38,9 +38,9 @@ export interface SmartGenerateResult {
   interpretation: SketchInterpretation;
 }
 
-const SYSTEM = `你是资深产品 UI 设计师。用户给你一张低保真草图(矩形+注释)和页面描述,你输出一份 Drafting 的 .sketch 方言文档 —— 它会被直接渲染成界面并生成 React 代码。
-
-输出规则(硬性):
+/** The dialect contract, shared verbatim by Generate (O2) and Transcribe
+ *  (P3.2) — one source so the two prompts can never drift apart. */
+export const DIALECT_RULES = `输出规则(硬性):
 - 只输出文档本身:从 <Sketch 开始,到 </Sketch> 结束。不要 markdown 围栏,不要任何解释。
 - 根:<Sketch name="..." schemaVersion={3}> 内恰好一个根 <Stack>。
 - 不要写 sk:id。x/y 只在 <Frame> 的直接子元素上合法。
@@ -55,7 +55,11 @@ border="thin <颜色token>" 或 "thick <颜色token>";radius="none|sm|md|lg|xl|f
 <Image src="/image.png" alt="..." w={px} h={px} ... />(必须自闭合)
 <Frame w h ...>自由定位区,直接子元素带 x={整数} y={整数}</Frame>
 
-布局法则:结构用嵌套 Stack(col 竖排 / row 横排);w/h 用 fill(占满)/ hug(自适应)/ 固定像素;间距只有那十档;横排里要"左右分开"用 main="between"。
+布局法则:结构用嵌套 Stack(col 竖排 / row 横排);w/h 用 fill(占满)/ hug(自适应)/ 固定像素;间距只有那十档;横排里要"左右分开"用 main="between"。`;
+
+const SYSTEM = `你是资深产品 UI 设计师。用户给你一张低保真草图(矩形+注释)和页面描述,你输出一份 Drafting 的 .sketch 方言文档 —— 它会被直接渲染成界面并生成 React 代码。
+
+${DIALECT_RULES}
 
 设计要求:
 - 每条注释(comment)的要求都必须落实;注释没说的,按页面描述和常识补全:菜单项、示例文案、按钮标签、合理的留白与层次。
@@ -138,9 +142,12 @@ export function extractDocument(text: string): string {
 }
 
 /** One AI attempt chain: initial call, then at most one parse-repair and
- *  one validate-repair round. Throws with the last reason on defeat. */
-async function aiAttempt(
+ *  one validate-repair round. Throws with the last reason on defeat.
+ *  Shared by Generate and Transcribe (which passes its own system prompt
+ *  and a vision-carrying runAi closure). */
+export async function aiAttempt(
   runAi: RunAi,
+  system: string,
   user: string,
   counter: { attempts: number },
 ): Promise<Sketch> {
@@ -150,7 +157,7 @@ async function aiAttempt(
 
   for (;;) {
     counter.attempts += 1;
-    const raw = await runAi(SYSTEM, message);
+    const raw = await runAi(system, message);
     const docText = extractDocument(raw);
     let sketch: Sketch;
     try {
@@ -191,7 +198,7 @@ export async function generateUiSmart(
   if (opts.runAi) {
     try {
       const user = buildUserMessage(doc, analysis, interpretation, opts.criteria ?? []);
-      const sketch = await aiAttempt(opts.runAi, user, counter);
+      const sketch = await aiAttempt(opts.runAi, SYSTEM, user, counter);
       // Identity is the tool's: the landing rewrites id; the name follows
       // the lite title (the AI's name attr is advisory only).
       const named: Sketch = { ...sketch, name: doc.title, blueprintRef: null };

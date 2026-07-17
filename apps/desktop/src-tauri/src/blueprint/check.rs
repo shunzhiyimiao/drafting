@@ -120,6 +120,7 @@ pub async fn run_check(
         temperature: Some(0.1),
         max_tokens: Some(4000),
         included_files: bundle.included.clone(),
+        images: vec![],
     };
 
     // Collect streamed deltas into a buffer; signal completion via oneshot.

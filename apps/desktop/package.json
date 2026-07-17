@@ -8,7 +8,7 @@
     "build": "tsc && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "tsx --test src/views/sketch/insertion.test.ts src/views/sketch/interaction/drag-session.test.ts src/views/sketch/designer/resize.test.ts src/views/sketch/designer/frame-move.test.ts src/views/sketch-lite/pipeline/pipeline.test.ts",
+    "test": "tsx --test src/views/sketch/insertion.test.ts src/views/sketch/interaction/drag-session.test.ts src/views/sketch/designer/resize.test.ts src/views/sketch/designer/frame-move.test.ts src/views/sketch-lite/pipeline/pipeline.test.ts src/views/sketch-lite/pipeline/transcribe.test.ts",
     "gen:sketch-safelist": "pnpm --filter @drafting/sketch-core gen-safelist ../../apps/desktop/src/lib/sketch-safelist.generated.ts"
   },
   "dependencies": {

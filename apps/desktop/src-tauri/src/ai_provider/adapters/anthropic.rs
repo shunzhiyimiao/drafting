@@ -33,6 +33,39 @@ fn build_body(request: &ChatRequest) -> Value {
         }
     }
 
+    // Vision (P3.2): images ride on the FINAL user message as content
+    // blocks, image before text (Anthropic's recommended order). A request
+    // with images but no user message gets one, so pixels are never
+    // silently dropped.
+    if !request.images.is_empty() {
+        if !messages.iter().any(|m| m["role"] == "user") {
+            messages.push(json!({ "role": "user", "content": "" }));
+        }
+        if let Some(last_user) = messages
+            .iter_mut()
+            .rev()
+            .find(|m| m["role"] == "user")
+        {
+            let text = last_user["content"].as_str().unwrap_or_default().to_string();
+            let mut blocks: Vec<Value> = request
+                .images
+                .iter()
+                .map(|img| {
+                    json!({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type,
+                            "data": img.data_base64,
+                        },
+                    })
+                })
+                .collect();
+            blocks.push(json!({ "type": "text", "text": text }));
+            last_user["content"] = json!(blocks);
+        }
+    }
+
     let mut sys_combined = request.system.clone().unwrap_or_default();
     if !sys_from_messages.is_empty() {
         if !sys_combined.is_empty() {
@@ -284,6 +317,7 @@ mod tests {
             temperature: Some(0.1),
             max_tokens: Some(1000),
             included_files: vec![],
+            images: vec![],
         }
     }
 
@@ -301,6 +335,30 @@ mod tests {
     fn no_system_means_no_system_key() {
         let body = build_body(&req(None, "hi"));
         assert!(body.get("system").is_none());
+    }
+
+    #[test]
+    fn images_attach_to_final_user_message_before_text() {
+        use crate::ai_provider::types::ImageAttachment;
+        let mut r = req(Some("sys"), "transcribe this");
+        r.images.push(ImageAttachment {
+            media_type: "image/png".into(),
+            data_base64: "QUJD".into(),
+        });
+        let body = build_body(&r);
+        let content = body["messages"][0]["content"].as_array().expect("blocks");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["media_type"], "image/png");
+        assert_eq!(content[0]["source"]["data"], "QUJD");
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "transcribe this");
+    }
+
+    #[test]
+    fn no_images_keeps_plain_string_content() {
+        let body = build_body(&req(None, "hi"));
+        assert!(body["messages"][0]["content"].is_string());
     }
 
     #[test]

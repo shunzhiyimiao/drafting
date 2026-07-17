@@ -47,7 +47,8 @@ export type TaskId =
   | "patchboardSuggestSocket"
   | "patchboardSuggestAdapter"
   | "gitCommitMessage"
-  | "sketchGenerate";
+  | "sketchGenerate"
+  | "sketchTranscribe";
 
 export const TASK_LABELS: Record<TaskId, string> = {
   editorCompletion: "Code Completion",
@@ -61,6 +62,7 @@ export const TASK_LABELS: Record<TaskId, string> = {
   patchboardSuggestAdapter: "Suggest Adapter",
   gitCommitMessage: "Commit Message",
   sketchGenerate: "Sketch Generate",
+  sketchTranscribe: "Sketch Transcribe",
 };
 
 /** Routes now point at a Profile id (ULID). */
@@ -97,6 +99,15 @@ export interface ChatMessage {
   content: string;
 }
 
+/** Vision attachment (P3.2 拓印). Pixels live in memory and on the wire
+ *  only — never persisted, never logged (audit records metadata only). */
+export interface ImageAttachment {
+  /** e.g. "image/png" */
+  mediaType: string;
+  /** Raw base64, no data: URL prefix. */
+  dataBase64: string;
+}
+
 export interface ChatRequest {
   /** Empty string means "use the route's default model". */
   model: string;
@@ -104,6 +115,8 @@ export interface ChatRequest {
   messages: ChatMessage[];
   temperature?: number | null;
   maxTokens?: number | null;
+  /** Adapters attach these to the final user message. */
+  images?: ImageAttachment[];
 }
 
 export type StreamEvent =

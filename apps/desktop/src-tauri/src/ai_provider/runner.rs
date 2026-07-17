@@ -126,6 +126,16 @@ impl AiRunner {
         let profile_id_for_event = profile.id.clone();
         let task_label = format!("{:?}", task_id);
         let included_files = req.included_files.clone();
+        // Audit metadata for vision calls — media type + approximate decoded
+        // size, never the pixels (paste ruling 法 4).
+        let images_meta: Vec<String> = req
+            .images
+            .iter()
+            .map(|i| {
+                let approx_kb = i.data_base64.len() * 3 / 4 / 1024;
+                format!("{} ~{}KB", i.media_type, approx_kb)
+            })
+            .collect();
 
         // Open the upstream stream first so we report errors synchronously.
         // An establishment-time failure (e.g. a 401 from a bad/missing API key)
@@ -190,6 +200,7 @@ impl AiRunner {
         let audit_provider = profile.name.clone();
         let audit_model = model.clone();
         let audit_files = included_files;
+        let audit_images = images_meta;
         let mut on_event = on_event;
         let wrapped = move |ev: StreamEvent| {
             match &ev {
@@ -218,6 +229,7 @@ impl AiRunner {
                             input_tokens: *input_tokens,
                             output_tokens: *output_tokens,
                             included_files: audit_files.clone(),
+                            images: audit_images.clone(),
                             error: None,
                         },
                     );
@@ -240,6 +252,7 @@ impl AiRunner {
                             input_tokens: 0,
                             output_tokens: 0,
                             included_files: audit_files.clone(),
+                            images: audit_images.clone(),
                             error: None,
                         },
                     );
@@ -263,6 +276,7 @@ impl AiRunner {
                             input_tokens: 0,
                             output_tokens: 0,
                             included_files: audit_files.clone(),
+                            images: audit_images.clone(),
                             error: Some(error.clone()),
                         },
                     );

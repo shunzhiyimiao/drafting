@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Eye, PenTool, Sparkles } from "lucide-react";
 import { printSketchMarkup, reconcileSketch } from "@drafting/sketch-core";
 import { ulid } from "../../../lib/ulid";
@@ -8,6 +8,11 @@ import { runTaskCollect } from "../../../lib/ai-api";
 import { SketchCanvas } from "../../sketch/Canvas";
 import { useSketchLiteStore } from "../store";
 import { generateUiSmart, type RunAi } from "../pipeline/ai-generate";
+import {
+  encodePastedImage,
+  transcribeImage,
+  type RunAiVision,
+} from "../pipeline/ai-transcribe";
 import { LiteBindingPanel } from "./LiteBindingPanel";
 import { LiteToolbar } from "./LiteToolbar";
 import { LiteCanvas } from "./LiteCanvas";
@@ -32,9 +37,10 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<{
-    mode: "ai" | "fallback";
+    mode: "ai" | "fallback" | "transcribe";
     reason?: string;
     reattached?: number;
+    attempts?: number;
   } | null>(null);
   // 蓝图闭环:sketch 绑了特性蓝图时,验收标准喂进 Generate 的 prompt ——
   // 生成的界面直接朝标准去。
@@ -45,58 +51,80 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
     if (activeFile) bindTo(activeFile, activeName ?? "Untitled sketch");
   }, [activeFile, activeName, bindTo]);
 
-  // P3.0 paste SPIKE (dev builds only): does the WKWebView deliver clipboard
-  // images through the paste event? Explicit gesture only (⌘V), no clipboard
-  // polling, no pixels retained/logged — metadata to the console + a
-  // transient banner. Decides the P3.2 entry (webview event vs Rust plugin).
-  //
-  // 裁决备忘(2026-07-16):macOS 键盘等价键经 NSApp 菜单路由 —— 本应用
-  // 未设自定义菜单,Tauri 2 的默认菜单自动在场,⌘V 路由因此白送;探针
-  // 阴性时第一嫌疑人是【菜单/焦点路由】,不是 WKWebView 能力。测试用
-  // ⌘⇧⌃4 截屏到剪贴板(⌘⇧4 是落文件)。若最终定 Rust 入口:
-  // clipboard-manager 插件有在案的 macOS 崩溃(tokio worker 线程碰
-  // NSPasteboard,与 WebKit 主线程 pasteboard 监听竞态,EXC_BAD_ACCESS)
-  // —— P3.2 落地时剪贴板操作必须压回主线程执行。
-  //
-  // 判定(2026-07-17 真机):【阳性】—— ✓ image/png 完整送达(getAsFile
-  // 成功且解码出尺寸);⌘V 键盘路由与 Edit→Paste 菜单路径均验证通过
-  // (早期一次阴性系焦点/时机,非能力缺失)。P3.2 入口 = webview paste
-  // 事件,不引入 Rust 剪贴板插件,上述 NSPasteboard 竞态崩溃整体绕开。
-  const [pasteProbe, setPasteProbe] = useState<string | null>(null);
+  // P3.2 拓印:粘贴截图 → AI 转写成 .sketch(取代 P3.0 探针;探针判定
+  // 2026-07-17 真机阳性 —— webview paste 事件完整送达 image/png,⌘V 与
+  // Edit→Paste 双路径通过,故不引入 Rust 剪贴板插件。裁决与隐私契约见
+  // pipeline/ai-transcribe.ts 头注:显式手势 only、永不轮询剪贴板、像素
+  // 不落盘不进日志、初次粘贴不走 reconcile、AI 伪造的 sk:id 一律剥除)。
+  const transcribingRef = useRef(false);
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
     const onPaste = (e: ClipboardEvent) => {
-      const items = Array.from(e.clipboardData?.items ?? []);
-      const img = items.find((i) => i.type.startsWith("image/"));
-      if (!img) {
-        setPasteProbe(
-          `粘贴探针:无图像(items: ${items.map((i) => i.type).join(", ") || "空"})— 若剪贴板确有截图(⌘⇧⌃4),先查菜单/焦点路由,再怀疑 WKWebView`,
-        );
-        return;
-      }
-      const file = img.getAsFile();
-      if (!file) {
-        setPasteProbe(`粘贴探针:${img.type} 存在但 getAsFile() 为空 — WKWebView 限制,P3.2 走 Rust 剪贴板插件`);
-        return;
-      }
-      const url = URL.createObjectURL(file);
-      const probe = new Image();
-      probe.onload = () => {
-        setPasteProbe(
-          `粘贴探针:✓ ${img.type} ${probe.naturalWidth}×${probe.naturalHeight} (${Math.round(file.size / 1024)}KB) — webview paste 事件可用`,
-        );
-        URL.revokeObjectURL(url); // no retention — the spike measures, never keeps
-      };
-      probe.onerror = () => {
-        setPasteProbe(`粘贴探针:${img.type} 取到但解码失败 — P3.2 走 Rust 剪贴板插件`);
-        URL.revokeObjectURL(url);
-      };
-      probe.src = url;
-      console.info("[paste-spike] image item:", img.type, file.size, "bytes");
+      const el = e.target as HTMLElement | null;
+      const typing =
+        !!el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if (typing) return; // 文字粘贴归输入框,不劫持
+      const item = Array.from(e.clipboardData?.items ?? []).find((i) =>
+        i.type.startsWith("image/"),
+      );
+      const file = item?.getAsFile();
+      if (!file) return; // 剪贴板里没有图片 — 与拓印无关
+      e.preventDefault();
+      if (transcribingRef.current) return;
+      void runTranscribe(file);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** The vision seam: harness injects __liteTranscribeMock; the app routes
+   *  the `sketchTranscribe` task; neither → null → loud error (transcription
+   *  has NO offline fallback — without vision it would be fiction). */
+  const resolveRunAiVision = (): RunAiVision | null => {
+    const mock = (window as unknown as { __liteTranscribeMock?: RunAiVision })
+      .__liteTranscribeMock;
+    if (mock) return mock;
+    const root = useSketchStore.getState().projectRoot;
+    if (!root || root === "/dev/null") return null;
+    return (system, user, image) =>
+      runTaskCollect(root, "sketchTranscribe", {
+        model: "", // the task route decides (vision-capable model)
+        system,
+        messages: [{ role: "user", content: user }],
+        temperature: 0.2,
+        maxTokens: 4096,
+        images: [image],
+      });
+  };
+
+  const runTranscribe = async (file: Blob) => {
+    const runAi = resolveRunAiVision();
+    if (!runAi) {
+      setError("拓印需要 AI:请先配置 provider(任务「截图拓印草图」)");
+      return;
+    }
+    transcribingRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const image = await encodePastedImage(file);
+      const title = useSketchLiteStore.getState().doc.title;
+      const result = await transcribeImage(image, { runAi, title });
+      await useSketchStore.getState().generateFromLite(
+        title,
+        (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
+        "replace-active",
+      );
+      setOutcome({ mode: "transcribe", attempts: result.attempts });
+      setMode("preview");
+    } catch (e) {
+      setError(`拓印失败:${String(e instanceof Error ? e.message : e)}`);
+    } finally {
+      transcribingRef.current = false;
+      setBusy(false);
+    }
+  };
 
   /** The AI seam: the harness injects __liteAiMock; the app routes the
    *  `sketchGenerate` task through the AI Provider Manager; neither →
@@ -192,15 +220,6 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
           预览
         </button>
         <div className="flex-1" />
-        {pasteProbe && (
-          <button
-            onClick={() => setPasteProbe(null)}
-            title="点击关闭(dev 探针)"
-            className="text-[10px] text-text-muted hover:text-text-secondary max-w-96 truncate"
-          >
-            {pasteProbe}
-          </button>
-        )}
         {error && <span className="text-[10px] text-error max-w-72 truncate">{error}</span>}
         <button
           data-lite-generate
@@ -231,14 +250,18 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
             <div
               data-lite-outcome={outcome.mode}
               className={`shrink-0 px-3 py-1.5 rounded-md text-[11px] ${
-                outcome.mode === "ai"
-                  ? "bg-accent/10 text-accent"
-                  : "bg-warning/10 text-warning"
+                outcome.mode === "fallback"
+                  ? "bg-warning/10 text-warning"
+                  : "bg-accent/10 text-accent"
               }`}
             >
-              {outcome.mode === "ai"
-                ? "✨ AI 生成 — 按草图注释与页面描述设计"
-                : `⚠ 已用离线骨架(AI 未生效):${outcome.reason ?? ""}`}
+              {outcome.mode === "transcribe"
+                ? `📷 已拓印 — 从粘贴的截图转写${
+                    (outcome.attempts ?? 1) > 1 ? `(经 ${outcome.attempts} 轮修复)` : ""
+                  }`
+                : outcome.mode === "ai"
+                  ? "✨ AI 生成 — 按草图注释与页面描述设计"
+                  : `⚠ 已用离线骨架(AI 未生效):${outcome.reason ?? ""}`}
               {outcome.reattached ? ` · ${outcome.reattached} 个节点身份已延续` : ""}
             </div>
           )}

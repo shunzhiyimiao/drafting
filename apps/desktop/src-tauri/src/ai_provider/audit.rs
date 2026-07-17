@@ -23,6 +23,10 @@ pub struct AuditRecord {
     pub output_tokens: u64,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub included_files: Vec<String>,
+    /// Vision calls: image METADATA only ("image/png ~123KB") — the paste
+    /// ruling (法 4): pixels never reach any log.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -76,6 +80,7 @@ mod tests {
             input_tokens: 10,
             output_tokens: 20,
             included_files: vec!["src/a.ts".to_string()],
+            images: vec![],
             error: None,
         }
     }

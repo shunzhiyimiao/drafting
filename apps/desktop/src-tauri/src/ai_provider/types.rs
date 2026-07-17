@@ -117,6 +117,10 @@ pub enum TaskId {
     /// Sketch Lite → a full `.sketch` dialect document (O2 decision:
     /// the AI writes the Spec's text form directly; parse+validate gate it).
     SketchGenerate,
+    /// Pasted screenshot → `.sketch` dialect document (P3.2 拓印). Vision
+    /// task: the request carries `images`; route it at a vision-capable
+    /// model (Claude / qwen-vl / kimi vision).
+    SketchTranscribe,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,7 +236,8 @@ fn default_routes(anthropic_id: &str) -> Vec<TaskRoute> {
         TaskRoute { task_id: PatchboardSuggestSocket, profile_id: p.clone(), model: "claude-sonnet-4-6".into() },
         TaskRoute { task_id: PatchboardSuggestAdapter, profile_id: p.clone(), model: "claude-sonnet-4-6".into() },
         TaskRoute { task_id: GitCommitMessage, profile_id: p.clone(), model: "claude-sonnet-4-6".into() },
-        TaskRoute { task_id: SketchGenerate, profile_id: p, model: "claude-sonnet-4-6".into() },
+        TaskRoute { task_id: SketchGenerate, profile_id: p.clone(), model: "claude-sonnet-4-6".into() },
+        TaskRoute { task_id: SketchTranscribe, profile_id: p, model: "claude-sonnet-4-6".into() },
     ]
 }
 
@@ -292,6 +297,7 @@ pub fn builtin_presets() -> Vec<ProfilePreset> {
                 "kimi-k2-0905-preview".into(),
                 "kimi-latest".into(),
                 "kimi-latest-128k".into(),
+                "moonshot-v1-32k-vision-preview".into(),
                 "moonshot-v1-auto".into(),
                 "moonshot-v1-128k".into(),
                 "moonshot-v1-32k".into(),
@@ -309,6 +315,8 @@ pub fn builtin_presets() -> Vec<ProfilePreset> {
             suggested_models: vec![
                 "qwen3-max-preview".into(),
                 "qwen3-coder-plus".into(),
+                "qwen3-vl-plus".into(),
+                "qwen-vl-max".into(),
                 "qwen-max".into(),
                 "qwen-plus".into(),
                 "qwen-turbo".into(),
@@ -430,6 +438,20 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// An image carried alongside a chat request (P3.2 paste-transcribe).
+/// Request-level, not per-message: adapters attach every image to the FINAL
+/// user message at serialization time (transcription has exactly one).
+/// The pixels exist only in memory and on the wire — never persisted, never
+/// logged; the audit records metadata (media type + approximate size) only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAttachment {
+    /// e.g. "image/png".
+    pub media_type: String,
+    /// Raw base64 payload, no `data:` URL prefix.
+    pub data_base64: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatRequest {
@@ -447,6 +469,9 @@ pub struct ChatRequest {
     /// must set this after running the privacy filter.
     #[serde(default)]
     pub included_files: Vec<String>,
+    /// Images for vision tasks (see ImageAttachment for the privacy contract).
+    #[serde(default)]
+    pub images: Vec<ImageAttachment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

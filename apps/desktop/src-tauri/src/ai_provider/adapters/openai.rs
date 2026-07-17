@@ -13,6 +13,64 @@ use super::{ProviderAdapter, ProviderContext};
 
 pub struct OpenAiAdapter;
 
+/// Assemble the /v1/chat/completions body. Vision (P3.2): images become
+/// `image_url` data-URL parts on the FINAL user message — the shape qwen-vl /
+/// kimi vision / gpt-4o all accept through the compatible endpoint.
+fn build_body(request: &ChatRequest) -> Value {
+    // OpenAI takes system as a regular message at the head.
+    let mut messages: Vec<Value> = Vec::new();
+    if let Some(sys) = &request.system {
+        if !sys.is_empty() {
+            messages.push(json!({ "role": "system", "content": sys }));
+        }
+    }
+    for m in &request.messages {
+        let role = match m.role {
+            Role::System => "system",
+            Role::User => "user",
+            Role::Assistant => "assistant",
+        };
+        messages.push(json!({ "role": role, "content": m.content }));
+    }
+
+    if !request.images.is_empty() {
+        if !messages.iter().any(|m| m["role"] == "user") {
+            messages.push(json!({ "role": "user", "content": "" }));
+        }
+        if let Some(last_user) = messages.iter_mut().rev().find(|m| m["role"] == "user") {
+            let text = last_user["content"].as_str().unwrap_or_default().to_string();
+            let mut parts: Vec<Value> = request
+                .images
+                .iter()
+                .map(|img| {
+                    json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:{};base64,{}", img.media_type, img.data_base64),
+                        },
+                    })
+                })
+                .collect();
+            parts.push(json!({ "type": "text", "text": text }));
+            last_user["content"] = json!(parts);
+        }
+    }
+
+    let mut body = json!({
+        "model": request.model,
+        "messages": messages,
+        "stream": true,
+        "stream_options": { "include_usage": true },
+    });
+    if let Some(t) = request.temperature {
+        body["temperature"] = json!(t);
+    }
+    if let Some(m) = request.max_tokens {
+        body["max_tokens"] = json!(m);
+    }
+    body
+}
+
 #[async_trait]
 impl ProviderAdapter for OpenAiAdapter {
     fn id(&self) -> &'static str {
@@ -25,34 +83,7 @@ impl ProviderAdapter for OpenAiAdapter {
         stream_id: String,
         request: ChatRequest,
     ) -> Result<BoxStream<'static, StreamEvent>, String> {
-        // OpenAI takes system as a regular message at the head.
-        let mut messages: Vec<Value> = Vec::new();
-        if let Some(sys) = &request.system {
-            if !sys.is_empty() {
-                messages.push(json!({ "role": "system", "content": sys }));
-            }
-        }
-        for m in &request.messages {
-            let role = match m.role {
-                Role::System => "system",
-                Role::User => "user",
-                Role::Assistant => "assistant",
-            };
-            messages.push(json!({ "role": role, "content": m.content }));
-        }
-
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-            "stream": true,
-            "stream_options": { "include_usage": true },
-        });
-        if let Some(t) = request.temperature {
-            body["temperature"] = json!(t);
-        }
-        if let Some(m) = request.max_tokens {
-            body["max_tokens"] = json!(m);
-        }
+        let body = build_body(&request);
 
         let url = ctx.url();
         let headers = ctx.build_headers()?;
@@ -187,5 +218,52 @@ impl ProviderAdapter for OpenAiAdapter {
         } else {
             Err(format!("openai health status {status} (chat HEAD: {})", head_resp.status()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_provider::types::{ChatMessage, ImageAttachment};
+
+    fn req(user: &str) -> ChatRequest {
+        ChatRequest {
+            model: "gpt-x".into(),
+            system: Some("sys".into()),
+            messages: vec![ChatMessage {
+                role: Role::User,
+                content: user.into(),
+            }],
+            temperature: None,
+            max_tokens: None,
+            included_files: vec![],
+            images: vec![],
+        }
+    }
+
+    #[test]
+    fn images_become_data_url_parts_on_final_user_message() {
+        let mut r = req("transcribe this");
+        r.images.push(ImageAttachment {
+            media_type: "image/png".into(),
+            data_base64: "QUJD".into(),
+        });
+        let body = build_body(&r);
+        // messages[0] is the system head; [1] the user message.
+        let content = body["messages"][1]["content"].as_array().expect("parts");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "image_url");
+        assert_eq!(
+            content[0]["image_url"]["url"],
+            "data:image/png;base64,QUJD"
+        );
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "transcribe this");
+    }
+
+    #[test]
+    fn no_images_keeps_plain_string_content() {
+        let body = build_body(&req("hi"));
+        assert!(body["messages"][1]["content"].is_string());
     }
 }
