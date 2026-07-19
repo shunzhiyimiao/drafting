@@ -10,6 +10,8 @@ import { useSketchLiteStore } from "../store";
 import { generateUiSmart, type RunAi } from "../pipeline/ai-generate";
 import {
   encodePastedImage,
+  fragmentSubtree,
+  insertSubtree,
   transcribeImage,
   type RunAiVision,
 } from "../pipeline/ai-transcribe";
@@ -41,6 +43,7 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
     reason?: string;
     reattached?: number;
     attempts?: number;
+    scope?: "page" | "fragment";
   } | null>(null);
   // 蓝图闭环:sketch 绑了特性蓝图时,验收标准喂进 Generate 的 prompt ——
   // 生成的界面直接朝标准去。
@@ -111,12 +114,23 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
       const image = await encodePastedImage(file);
       const title = useSketchLiteStore.getState().doc.title;
       const result = await transcribeImage(image, { runAi, title });
-      await useSketchStore.getState().generateFromLite(
-        title,
-        (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
-        "replace-active",
-      );
-      setOutcome({ mode: "transcribe", attempts: result.attempts });
+      const store = useSketchStore.getState();
+      if (result.scope === "fragment" && store.active) {
+        // 模块拓印:插进当前树(锚=预览里的选中节点,无则根末尾),
+        // 走 applyTreeEdit 单 undo 通道;现有节点与绑定原封不动。
+        if (!store.parsed || store.parseError) {
+          throw new Error("当前文档不在方言内,无法插入模块 — 先修复文本再粘贴");
+        }
+        const node = fragmentSubtree(result.sketch);
+        store.applyTreeEdit((draft) => insertSubtree(draft, node, store.selectedNodeId), node.id);
+      } else {
+        await store.generateFromLite(
+          title,
+          (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
+          "replace-active",
+        );
+      }
+      setOutcome({ mode: "transcribe", attempts: result.attempts, scope: result.scope });
       setMode("preview");
     } catch (e) {
       setError(`拓印失败:${String(e instanceof Error ? e.message : e)}`);
@@ -249,6 +263,7 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
           {outcome && (
             <div
               data-lite-outcome={outcome.mode}
+              data-lite-scope={outcome.scope}
               className={`shrink-0 px-3 py-1.5 rounded-md text-[11px] ${
                 outcome.mode === "fallback"
                   ? "bg-warning/10 text-warning"
@@ -256,9 +271,11 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
               }`}
             >
               {outcome.mode === "transcribe"
-                ? `📷 已拓印 — 从粘贴的截图转写${
-                    (outcome.attempts ?? 1) > 1 ? `(经 ${outcome.attempts} 轮修复)` : ""
-                  }`
+                ? `${
+                    outcome.scope === "fragment"
+                      ? "📷 已拓印模块 — 插入当前界面(选中处或末尾)"
+                      : "📷 已拓印整页 — 替换当前文档"
+                  }${(outcome.attempts ?? 1) > 1 ? `(经 ${outcome.attempts} 轮修复)` : ""}`
                 : outcome.mode === "ai"
                   ? "✨ AI 生成 — 按草图注释与页面描述设计"
                   : `⚠ 已用离线骨架(AI 未生效):${outcome.reason ?? ""}`}
