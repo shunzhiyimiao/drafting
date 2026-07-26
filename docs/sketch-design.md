@@ -279,6 +279,12 @@ Sketch and WPF/XAML converged on the same model independently (declarative eleme
 
 **O3(2026-07-15 落地,`sketch-core/reconcile.ts`)**:再生成的**身份延续** reconcile——成功 parse/validate 之后,新旧树按 kind+文本签名匹配(叶子=自身可见文本;容器=variant+后代文本窗口;list=dataKey),**两侧唯一才回挂** sk:id,歧义永不猜测(绑定诚实悬垂,面板有信号);永不制造重复 id、temp id 不作源、纯函数幂等。消费者 = lite 再生成落点(reconcileSketch 在 Generate 落库前运行,横幅报延续数)。与修复重试环(失败回炉)不同阶段、不同职责,严禁混同;paste 转写(P3)不需要它(初次粘贴全是新节点)。
 
+**P3 拓印裁决(2026-07-21,用户拍板):零开关 —— 模式是画布状态的纯函数。** block/all 不是用户可见模式,也不归模型判定,而是由**落点文档状态**推导的两种落地语义:**空文档粘贴 → 整页**(转写产物=一份合法的现有 Spec 文档,replace-active、一步撤销,与 Generate UI 同落点);**非空文档粘贴 → fragment 进放置流程**;**整页重来 → 新 tab**(多文档+每文档独立 undo 栈就是「构筑新界面」的一等手势,同一意图不开第二条路径)。教义谱系:语义由手势与可观测状态携带,不靠隐藏模式(8860dbe "the drop expresses mainAxis"、§7.3 圈入规则同宗)。裁决依据=损失不对称:自动规则的失败态=轻度烦扰(想整页却得到待放置 fragment,staged 态上唯一升级动作「整页→新 tab」一步解决);开关的失败态=毁掉非空画布。**永不存在覆盖非空文档的粘贴路径。**
+
+**Fragment = 来自外部世界的 palette 件(P3.3)。** VLM 输出限定为 fragment 子树而非整文档;非空落点下粘贴先落为**悬浮 staged fragment**(前馈预览——UI 临时态,未入文档、未入 undo,与 SketchDocument 严格分离的既有纪律;Esc 丢弃=无事发生);放置骑在 S1 会话机上——继 palette、层内拖、marquee 之后的**第四种 DragSource**(同阈值、同定律)。融合语义零新机器:flank spread(§7.1)决定主轴,§7.3 圈入规则决定容器归属,text-as-truth 下落点即文本插入位置,一次放置=一次 Monaco undo。
+
+**拓印是像素空间到有限字母表的投影,不是复印。** out-of-alphabet 元素按最近字母降级并记入 `ambiguities`(interpretSketch 纪律沿用:说不清的绝不静默瞎猜);P3.1 harness 的裁判指标=**字母表覆盖率+降级行为**,不是像素保真度。v1 有意不做:(一)宿主风格调和——fragment 入宿主即吃宿主 fold/token 的视觉决议,绝不从像素反推 style token;(二)重复拓印的身份连续——**任何**粘贴都铸新 sk:id,同区域重复拓印=全新节点、绑定不迁移,O3 的 bijectivity 只属于 regeneration;(三)批量粘贴队列与拓印历史。排程:**P3.2=空文档整页路径**(已落地并按本裁决收敛;2026-07-19 曾短暂存在的「AI 判 scope + 非空替换/选中锚插入」实现被本裁决推翻,见 4eb80b9→收敛 commit);**P3.3=fragment 放置**(第四种 DragSource+fragment 级 fixtures 入 P3.1 harness)。Effect Vocabulary 正交,不入本裁决。
+
 ## Appendix — reference implementation status
 
 The TS reference (`emit.ts` = class core + `toIR` + `toJsxString`; `to-element.ts` = the injected-`createElement` serializer; `spec.ts`; `theme.ts`) is, per the K3 corollary, the implementation that ships — extracted into a shared TS package consumed by both the frontend canvas and the codegen-server. Tests: **27 codegen** (141 finite-alphabet points enumerated for totality + goldens) + **3 parity** (both serializers, one IR) = **30 green**. Next build step when resumed: extract the reference into the shared package (**no Rust port of the class core**), then `apps/desktop` Rust gets Spec serde + storage (heal-on-load, write-back) + index rebuild only, with serde round-trip tests; the exhaustive + parity suites stay in TS, where the fold lives.

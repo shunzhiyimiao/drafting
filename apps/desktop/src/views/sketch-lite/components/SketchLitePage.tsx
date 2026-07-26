@@ -10,8 +10,7 @@ import { useSketchLiteStore } from "../store";
 import { generateUiSmart, type RunAi } from "../pipeline/ai-generate";
 import {
   encodePastedImage,
-  fragmentSubtree,
-  insertSubtree,
+  isEmptyDocument,
   transcribeImage,
   type RunAiVision,
 } from "../pipeline/ai-transcribe";
@@ -43,7 +42,6 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
     reason?: string;
     reattached?: number;
     attempts?: number;
-    scope?: "page" | "fragment";
   } | null>(null);
   // 蓝图闭环:sketch 绑了特性蓝图时,验收标准喂进 Generate 的 prompt ——
   // 生成的界面直接朝标准去。
@@ -58,7 +56,11 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   // 2026-07-17 真机阳性 —— webview paste 事件完整送达 image/png,⌘V 与
   // Edit→Paste 双路径通过,故不引入 Rust 剪贴板插件。裁决与隐私契约见
   // pipeline/ai-transcribe.ts 头注:显式手势 only、永不轮询剪贴板、像素
-  // 不落盘不进日志、初次粘贴不走 reconcile、AI 伪造的 sk:id 一律剥除)。
+  // 不落盘不进日志、每次粘贴全新节点、AI 伪造的 sk:id 一律剥除。
+  //
+  // 零开关(2026-07-21 裁决):模式=画布状态的纯函数。空文档→整页
+  // replace-active;非空→P3.3 staged fragment 放置(未落地前响亮拒绝,
+  // 指路一等手势「整页重来=新 tab」)。永不覆盖非空文档。
   const transcribingRef = useRef(false);
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -102,6 +104,17 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   };
 
   const runTranscribe = async (file: Blob) => {
+    // 零开关推导在一切之先(裁决:损失不对称)—— 非空落点连一个 token
+    // 都不花,拒绝并指路;只有空文档才是整页落点。
+    const store = useSketchStore.getState();
+    const emptyTarget =
+      !!store.active && !store.parseError && !!store.parsed && isEmptyDocument(store.parsed.sketch);
+    if (!emptyTarget) {
+      setError(
+        "画布非空 — 拓印永不覆盖已有内容。整页拓印请新建 sketch 再粘贴;模块放置(P3.3)在路上",
+      );
+      return;
+    }
     const runAi = resolveRunAiVision();
     if (!runAi) {
       setError("拓印需要 AI:请先配置 provider(任务「截图拓印草图」)");
@@ -114,23 +127,12 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
       const image = await encodePastedImage(file);
       const title = useSketchLiteStore.getState().doc.title;
       const result = await transcribeImage(image, { runAi, title });
-      const store = useSketchStore.getState();
-      if (result.scope === "fragment" && store.active) {
-        // 模块拓印:插进当前树(锚=预览里的选中节点,无则根末尾),
-        // 走 applyTreeEdit 单 undo 通道;现有节点与绑定原封不动。
-        if (!store.parsed || store.parseError) {
-          throw new Error("当前文档不在方言内,无法插入模块 — 先修复文本再粘贴");
-        }
-        const node = fragmentSubtree(result.sketch);
-        store.applyTreeEdit((draft) => insertSubtree(draft, node, store.selectedNodeId), node.id);
-      } else {
-        await store.generateFromLite(
-          title,
-          (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
-          "replace-active",
-        );
-      }
-      setOutcome({ mode: "transcribe", attempts: result.attempts, scope: result.scope });
+      await useSketchStore.getState().generateFromLite(
+        title,
+        (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
+        "replace-active",
+      );
+      setOutcome({ mode: "transcribe", attempts: result.attempts });
       setMode("preview");
     } catch (e) {
       setError(`拓印失败:${String(e instanceof Error ? e.message : e)}`);
@@ -263,7 +265,6 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
           {outcome && (
             <div
               data-lite-outcome={outcome.mode}
-              data-lite-scope={outcome.scope}
               className={`shrink-0 px-3 py-1.5 rounded-md text-[11px] ${
                 outcome.mode === "fallback"
                   ? "bg-warning/10 text-warning"
@@ -271,11 +272,9 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
               }`}
             >
               {outcome.mode === "transcribe"
-                ? `${
-                    outcome.scope === "fragment"
-                      ? "📷 已拓印模块 — 插入当前界面(选中处或末尾)"
-                      : "📷 已拓印整页 — 替换当前文档"
-                  }${(outcome.attempts ?? 1) > 1 ? `(经 ${outcome.attempts} 轮修复)` : ""}`
+                ? `📷 已拓印整页 — 落入空文档${
+                    (outcome.attempts ?? 1) > 1 ? `(经 ${outcome.attempts} 轮修复)` : ""
+                  }`
                 : outcome.mode === "ai"
                   ? "✨ AI 生成 — 按草图注释与页面描述设计"
                   : `⚠ 已用离线骨架(AI 未生效):${outcome.reason ?? ""}`}
