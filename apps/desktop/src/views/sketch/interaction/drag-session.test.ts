@@ -164,3 +164,36 @@ test("marquee source rides the same laws: threshold, single commit, cancel", () 
   const second = commit(first.session, 8);
   assert.equal(second.plan, null, "law 7/10: never twice");
 });
+
+test("staged-fragment source (P3.3) rides the chip-drag laws: first-move activation, single commit", () => {
+  const node = {
+    kind: "button",
+    id: "~x1",
+    label: "模块",
+    variant: "primary",
+    sizing: { width: { mode: "hug" }, height: { mode: "hug" } },
+  } as const;
+  const source: DragSource = { type: "staged-fragment", node, label: "模块" };
+
+  // Like palette: the FIRST move activates (a chip drag has no click to protect).
+  let s = beginSession(21, source, 100, 100);
+  assert.equal(s.phase, "pending");
+  s = move(s, 21, 101, 100); // 1px — below the node threshold
+  assert.equal(s.phase, "dragging");
+
+  // Foreign pointers never mutate (law 8); commit yields the plan exactly once.
+  s = setPlan(s, PLAN);
+  assert.equal(move(s, 99, 500, 500), s);
+  const first = commit(s, 21);
+  assert.deepEqual(first.plan, PLAN);
+  const second = commit(first.session, 21);
+  assert.equal(second.plan, null);
+
+  // Escape cancels without a plan; cancelled never commits (law 6).
+  let c = beginSession(22, source, 0, 0);
+  c = move(c, 22, 5, 5);
+  c = setPlan(c, PLAN);
+  c = cancel(c);
+  assert.equal(c.phase, "cancelled");
+  assert.equal(commit(c, 22).plan, null);
+});

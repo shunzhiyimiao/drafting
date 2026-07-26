@@ -26,6 +26,15 @@ export type DragSource =
        *  Its only possible outcome is ONE wrap mutation or nothing — it
        *  NEVER produces persistent multi-selection. */
       type: "marquee";
+    }
+  | {
+      /** P3.3 拓印: a transcribed module staged for placement — the palette
+       *  item from the outside world. Carries the full subtree; commit
+       *  inserts it through the SAME plans as palette drops (one placement
+       *  = one undo), then the staged state is consumed. */
+      type: "staged-fragment";
+      node: SketchNode;
+      label: string;
     };
 
 export type DragPhase = "pending" | "dragging" | "committed" | "cancelled";

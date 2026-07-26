@@ -93,6 +93,15 @@ interface SketchState {
    *  session) lives in the interaction controller, not here. */
   paletteDrag: { kind: NodeKind; pointerId: number } | null;
   setPaletteDrag: (arm: { kind: NodeKind; pointerId: number } | null) => void;
+  /** P3.3 拓印: a transcribed module awaiting placement — UI-temporary
+   *  (not in the document, not in undo; discard = nothing happened). One
+   *  staged item at a time (批量队列 = v1 有意不做). */
+  stagedFragment: { node: SketchNode; label: string } | null;
+  setStagedFragment: (f: { node: SketchNode; label: string } | null) => void;
+  /** One-shot arm mirroring paletteDrag: a press on the staged card that
+   *  may become a placement drag (the fourth DragSource). */
+  stagedDrag: { pointerId: number } | null;
+  setStagedDrag: (arm: { pointerId: number } | null) => void;
 
   initialize: (projectRoot: string) => Promise<void>;
   refresh: () => Promise<void>;
@@ -140,6 +149,9 @@ interface SketchState {
   /** `pos` (Rev 5): the drop point in the target FRAME's local coords —
    *  ignored for stack targets. Frame inserts append (z-top). */
   insertNodeAt: (containerId: string, index: number, kind: NodeKind, pos?: Pos) => void;
+  /** Subtree variants (P3.3 staged-fragment drops): same plans, same undo
+   *  unit — the node is provided instead of built from a palette kind. */
+  insertSubtreeAt: (containerId: string, index: number, node: SketchNode, pos?: Pos) => void;
   moveNodeTo: (nodeId: string, containerId: string, index: number, pos?: Pos) => void;
   /** Wrap ops return the new wrapper's id (the post-wrap hint anchors to
    *  it), or null when the op was refused. `spread` = §7.1 amendment:
@@ -149,6 +161,13 @@ interface SketchState {
     side: "before" | "after",
     direction: "row" | "col",
     kind: NodeKind,
+    spread?: boolean,
+  ) => string | null;
+  insertSubtreeBeside: (
+    targetId: string,
+    side: "before" | "after",
+    direction: "row" | "col",
+    node: SketchNode,
     spread?: boolean,
   ) => string | null;
   moveNodeBeside: (
@@ -510,6 +529,10 @@ export const useSketchStore = create<SketchState>((set, get) => {
     lastError: null,
     paletteDrag: null,
     setPaletteDrag: (arm) => set({ paletteDrag: arm }),
+    stagedFragment: null,
+    setStagedFragment: (f) => set({ stagedFragment: f }),
+    stagedDrag: null,
+    setStagedDrag: (arm) => set({ stagedDrag: arm }),
 
     initialize: async (projectRoot) => {
       set({ projectRoot });
@@ -791,8 +814,10 @@ export const useSketchStore = create<SketchState>((set, get) => {
       });
     },
 
-    insertNodeAt: (containerId, index, kind, pos) => {
-      const child = defaultNode(kind);
+    insertNodeAt: (containerId, index, kind, pos) =>
+      get().insertSubtreeAt(containerId, index, defaultNode(kind), pos),
+
+    insertSubtreeAt: (containerId, index, child, pos) => {
       get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, containerId);
         if (hit?.node.kind === "frame") {
@@ -843,8 +868,10 @@ export const useSketchStore = create<SketchState>((set, get) => {
       }, nodeId);
     },
 
-    insertNodeBeside: (targetId, side, direction, kind, spread = false) => {
-      const child = defaultNode(kind);
+    insertNodeBeside: (targetId, side, direction, kind, spread = false) =>
+      get().insertSubtreeBeside(targetId, side, direction, defaultNode(kind), spread),
+
+    insertSubtreeBeside: (targetId, side, direction, child, spread = false) => {
       const wrapper = makeWrapper(direction, { width: { mode: "hug" }, height: { mode: "hug" } }, spread);
       get().applyTreeEdit((draft) => {
         const hit = findNode(draft.root, targetId);

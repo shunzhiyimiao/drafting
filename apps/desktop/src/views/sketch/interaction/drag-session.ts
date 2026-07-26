@@ -50,8 +50,13 @@ function ended(phase: DragPhase): boolean {
 }
 
 function qualifies(session: DragSession, clientX: number, clientY: number): boolean {
-  if (session.source.type === "palette") return true;
-  // Marquee shares the node threshold: below it the press stays a click.
+  // Chip drags from outside the sheet (palette buttons, the staged
+  // fragment card) activate on their first move — there is no click
+  // semantics to protect. Marquee shares the node threshold: below it the
+  // press stays a click.
+  if (session.source.type === "palette" || session.source.type === "staged-fragment") {
+    return true;
+  }
   return (
     Math.hypot(clientX - session.start.clientX, clientY - session.start.clientY) >=
     NODE_DRAG_THRESHOLD

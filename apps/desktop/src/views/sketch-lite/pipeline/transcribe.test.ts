@@ -102,3 +102,63 @@ test("isEmptyDocument: empty root = whole-page landing target, anything else is 
   const occupied = parseSketchMarkup(VALID_CLEAN).sketch;
   assert.equal(isEmptyDocument(occupied), false);
 });
+
+// ---- P3.3:fragment 转写(模块 prompt/解包/label)与整页升级包装 ----
+
+import {
+  transcribeFragment,
+  fragmentLabel,
+  fragmentToPageSketch,
+} from "./ai-transcribe";
+
+const MODULE_DOC = `<Sketch name="Card" schemaVersion={3}>
+  <Stack gap={2} pad={4} bg="raised" radius="md">
+    <Text sk:id="01FAKEFAKEFAKEFAKEFAKEFAKE" role="subhead">卡片标题戊</Text>
+    <Button variant="secondary">操作己</Button>
+  </Stack>
+</Sketch>`;
+
+test("transcribeFragment: module system prompt, multi-child keeps container, ids stripped", async () => {
+  const systems: string[] = [];
+  const runAi: RunAiVision = async (system) => {
+    systems.push(system);
+    return MODULE_DOC;
+  };
+  const r = await transcribeFragment(IMAGE, { runAi, title: "X" });
+  assert.ok(systems[0].includes("模块"), "fragment path uses the module prompt");
+  assert.equal(r.node.kind, "stack");
+  assert.equal(r.label, "卡片标题戊");
+  assert.ok(r.node.kind === "stack" && r.node.children.every((c) => isTempId(c.id)));
+  assert.equal(r.strippedIds, 1);
+});
+
+test("transcribeFragment unwraps a single-child root", async () => {
+  const runAi: RunAiVision = async () => VALID_CLEAN;
+  const r = await transcribeFragment(IMAGE, { runAi, title: "X" });
+  assert.equal(r.node.kind, "text");
+});
+
+test("fragmentLabel falls back to kind when no visible text", () => {
+  const bare = parseSketchMarkup(`<Sketch name="I" schemaVersion={3}>
+  <Stack pad={2}>
+    <Image src="/x.png" alt="pic" w={40} h={40} />
+  </Stack>
+</Sketch>`).sketch;
+  assert.equal(fragmentLabel(bare.root), "stack");
+});
+
+test("fragmentToPageSketch: stack roots directly, primitive gets a page shell", () => {
+  const stackFrag = parseSketchMarkup(MODULE_DOC).sketch.root;
+  const p1 = fragmentToPageSketch(stackFrag, "T");
+  assert.equal(p1.root.kind, "stack");
+  assert.equal(p1.root.children.length, 2); // the module IS the page root
+  assert.equal(p1.name, "T");
+
+  const single = parseSketchMarkup(VALID_CLEAN).sketch;
+  const leaf = single.root.children[0];
+  const p2 = fragmentToPageSketch(leaf, "T2");
+  assert.equal(p2.root.kind, "stack");
+  assert.equal(p2.root.children.length, 1);
+  assert.equal(p2.root.children[0].kind, "text");
+  assert.equal(p2.root.sizing.height.mode, "fill");
+});

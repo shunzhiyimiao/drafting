@@ -17,8 +17,11 @@ npx tsx evals/transcribe/run.ts --score-only                        # 只重算�
 ## 夹具与 golden
 
 - `fixtures/<name>.png` — 合成截图(`npx tsx evals/transcribe/make-fixtures.ts` 再生成)。
-  七类:dashboard / login / list / settings / mobile-detail /
+  页面级七类:dashboard / login / list / settings / mobile-detail /
   inexpressible(故意含图表、视频等不可表达元素)/ text-dense。
+  fragment 级两类(P3.3,模块尺寸、零页面 chrome):fragment-card /
+  fragment-list-item —— `fragment-` 前缀自动换用模块附则 prompt,
+  golden 也按模块写(根 Stack 即模块容器,不要页面外壳)。
 - `goldens/<name>.sketch` — **人工手写**的期望结构(字母表表达力压力测试;
   每个"写不出来"的瞬间记入摩擦日志)。缺 golden 的夹具报告为 `no-golden`,
   转写照跑,只是不打分。

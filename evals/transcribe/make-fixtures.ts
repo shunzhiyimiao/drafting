@@ -176,6 +176,30 @@ const FIXTURES: Record<string, { html: string; width: number; height: number }> 
       </div>`,
     ),
   },
+  // P3.3 fragment 级夹具(裁决:非空落点粘贴=模块)。模块尺寸视口、零页面
+  // chrome —— 裁判除字母表覆盖率外还看:根即模块容器,无页面级外壳。
+  "fragment-card": {
+    width: 360,
+    height: 220,
+    html: page(
+      "Stat Card",
+      `<div class="card col" style="width:320px;gap:8px;margin:16px">
+        <h3>本月成交</h3><h1>¥86,400</h1><div class="muted">较上月 +12%</div>
+        <button class="ghost" style="align-self:flex-start">查看明细</button>
+      </div>`,
+    ),
+  },
+  "fragment-list-item": {
+    width: 560,
+    height: 120,
+    html: page(
+      "List Row",
+      `<div class="card row" style="width:520px;margin:12px;justify-content:space-between;align-items:center">
+        <div class="col" style="gap:4px"><h3>王芳</h3><div class="muted">wangfang@acme.com · 企业版</div></div>
+        <div class="row" style="gap:8px"><button class="ghost">编辑</button><button class="primary">联系</button></div>
+      </div>`,
+    ),
+  },
 };
 
 async function main() {

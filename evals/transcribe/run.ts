@@ -55,11 +55,24 @@ const SYSTEM = `你是界面结构转写员。给你一张界面截图,你输出
 - 图片/图表/视频/地图等不可表达元素:就近映射(图表→Image 占位)或整体丢弃,**绝不发明新元素**。
 - 宁可粗略,不可越界:拿不准的间距用默认,拿不准的元素宁可略过。`;
 
-const PROMPT_HASH = crypto.createHash("sha256").update(SYSTEM).digest("hex").slice(0, 12);
+/** fragment-* 夹具的附则(P3.3 裁决:非空落点粘贴=模块):根 Stack 即
+ *  模块容器,不要页面级外壳 —— 裁判指标随之多一条「无外壳」。 */
+const FRAGMENT_ADDENDUM = `
+
+模块约定(本图是一个局部模块,不是整页):根 <Stack> 就是这个模块自身的容器(它的布局属性=模块布局);不要页面级外壳:不要 h="fill",不要居中壳,不要页面背景;模块之外的环境一概不转写。`;
+
+const systemFor = (name: string): string =>
+  name.startsWith("fragment-") ? SYSTEM + FRAGMENT_ADDENDUM : SYSTEM;
+
+const PROMPT_HASH = crypto
+  .createHash("sha256")
+  .update(SYSTEM + FRAGMENT_ADDENDUM)
+  .digest("hex")
+  .slice(0, 12);
 
 // --------------------------------------------------------------- VLM call --
 
-async function transcribe(pngPath: string): Promise<string> {
+async function transcribe(pngPath: string, system: string = SYSTEM): Promise<string> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY 未设置(harness 直调 API,不走产品链)");
   const data = fs.readFileSync(pngPath).toString("base64");
@@ -74,7 +87,7 @@ async function transcribe(pngPath: string): Promise<string> {
       model: MODEL,
       max_tokens: 4096,
       temperature: 0.2,
-      system: SYSTEM,
+      system,
       messages: [
         {
           role: "user",
@@ -198,7 +211,7 @@ async function main() {
         markup = fs.readFileSync(outFile, "utf8");
       } else {
         console.log(`⏳ ${name}: 转写中…`);
-        const raw = await transcribe(path.join(FIXTURES, `${name}.png`));
+        const raw = await transcribe(path.join(FIXTURES, `${name}.png`), systemFor(name));
         markup = extractDocument(raw);
         fs.writeFileSync(outFile, markup); // markup text only — never pixels
       }

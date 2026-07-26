@@ -52,6 +52,10 @@ export function DragPreview({
     if (session.source.type === "palette") {
       return { node: defaultNode(session.source.kind), width: 200 };
     }
+    if (session.source.type === "staged-fragment") {
+      // The transcribed module itself — the preview IS the real render.
+      return { node: session.source.node, width: 260 };
+    }
     if (session.source.type !== "existing-node") {
       return { node: null, width: 200 }; // marquee draws its own visuals
     }

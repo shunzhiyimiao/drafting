@@ -11,9 +11,11 @@ import { generateUiSmart, type RunAi } from "../pipeline/ai-generate";
 import {
   encodePastedImage,
   isEmptyDocument,
+  transcribeFragment,
   transcribeImage,
   type RunAiVision,
 } from "../pipeline/ai-transcribe";
+import { LiteStagedFragment } from "./LiteStagedFragment";
 import { LiteBindingPanel } from "./LiteBindingPanel";
 import { LiteToolbar } from "./LiteToolbar";
 import { LiteCanvas } from "./LiteCanvas";
@@ -59,8 +61,8 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   // 不落盘不进日志、每次粘贴全新节点、AI 伪造的 sk:id 一律剥除。
   //
   // 零开关(2026-07-21 裁决):模式=画布状态的纯函数。空文档→整页
-  // replace-active;非空→P3.3 staged fragment 放置(未落地前响亮拒绝,
-  // 指路一等手势「整页重来=新 tab」)。永不覆盖非空文档。
+  // replace-active;非空→fragment 转写落为 staged 悬浮态(P3.3),由
+  // 第四种 DragSource 拖放入树。永不覆盖非空文档。
   const transcribingRef = useRef(false);
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -104,17 +106,13 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
   };
 
   const runTranscribe = async (file: Blob) => {
-    // 零开关推导在一切之先(裁决:损失不对称)—— 非空落点连一个 token
-    // 都不花,拒绝并指路;只有空文档才是整页落点。
+    // 零开关推导在一切之先:模式由落点文档状态决定,不问模型不问用户。
     const store = useSketchStore.getState();
-    const emptyTarget =
-      !!store.active && !store.parseError && !!store.parsed && isEmptyDocument(store.parsed.sketch);
-    if (!emptyTarget) {
-      setError(
-        "画布非空 — 拓印永不覆盖已有内容。整页拓印请新建 sketch 再粘贴;模块放置(P3.3)在路上",
-      );
+    if (!store.active || !store.parsed || store.parseError) {
+      setError("当前文档不在方言内 — 修复文本后再粘贴");
       return;
     }
+    const empty = isEmptyDocument(store.parsed.sketch);
     const runAi = resolveRunAiVision();
     if (!runAi) {
       setError("拓印需要 AI:请先配置 provider(任务「截图拓印草图」)");
@@ -126,13 +124,22 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
     try {
       const image = await encodePastedImage(file);
       const title = useSketchLiteStore.getState().doc.title;
-      const result = await transcribeImage(image, { runAi, title });
-      await useSketchStore.getState().generateFromLite(
-        title,
-        (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
-        "replace-active",
-      );
-      setOutcome({ mode: "transcribe", attempts: result.attempts });
+      if (empty) {
+        // 整页:与 Generate UI 同落点(replace-active 只对空文档发生)。
+        const result = await transcribeImage(image, { runAi, title });
+        await useSketchStore.getState().generateFromLite(
+          title,
+          (sketchId) => printSketchMarkup({ ...result.sketch, id: sketchId }),
+          "replace-active",
+        );
+        setOutcome({ mode: "transcribe", attempts: result.attempts });
+      } else {
+        // 非空:模块转写落为 staged 悬浮态 —— 未入文档、未入 undo,
+        // 拖放才是唯一入树动作(staged 卡在预览页签)。
+        const r = await transcribeFragment(image, { runAi, title });
+        useSketchStore.getState().setStagedFragment({ node: r.node, label: r.label });
+        setOutcome(null);
+      }
       setMode("preview");
     } catch (e) {
       setError(`拓印失败:${String(e instanceof Error ? e.message : e)}`);
@@ -281,6 +288,7 @@ export function SketchLitePage({ onExit }: { onExit: () => void }) {
               {outcome.reattached ? ` · ${outcome.reattached} 个节点身份已延续` : ""}
             </div>
           )}
+          <LiteStagedFragment />
           <div className="flex-1 flex gap-2 min-h-0">
             <SketchCanvas />
             <LiteBindingPanel />

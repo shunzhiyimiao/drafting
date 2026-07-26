@@ -35,6 +35,8 @@
 import {
   isTempId,
   printSketchMarkup,
+  SCHEMA_VERSION,
+  type Container,
   type Sketch,
   type SketchNode,
 } from "@drafting/sketch-core";
@@ -118,25 +120,132 @@ export function stripFabricatedIds(sketch: Sketch): {
  * No offline fallback — transcription without vision is meaningless, so
  * failure surfaces loudly instead of degrading silently.
  */
+async function transcribeAttempt(
+  image: PastedImage,
+  system: string,
+  user: string,
+  opts: { runAi: RunAiVision; title: string },
+): Promise<{ sketch: Sketch; attempts: number; strippedIds: number }> {
+  const counter = { attempts: 0 };
+  const runAi = (sys: string, message: string) => opts.runAi(sys, message, image);
+  const parsed = await aiAttempt(runAi, system, user, counter);
+  const { sketch, stripped } = stripFabricatedIds(parsed);
+  const named: Sketch = { ...sketch, name: opts.title, blueprintRef: null };
+  return { sketch: named, attempts: counter.attempts, strippedIds: stripped };
+}
+
 export async function transcribeImage(
   image: PastedImage,
   opts: { runAi: RunAiVision; title: string },
 ): Promise<TranscribeResult> {
-  const counter = { attempts: 0 };
   const user = [
     `页面「${opts.title}」`,
     `这是要拓印的界面截图。请把它转写成完整的 .sketch 文档。`,
   ].join("\n");
-  const runAi = (system: string, message: string) =>
-    opts.runAi(system, message, image);
-  const parsed = await aiAttempt(runAi, TRANSCRIBE_SYSTEM, user, counter);
-  const { sketch, stripped } = stripFabricatedIds(parsed);
-  const named: Sketch = { ...sketch, name: opts.title, blueprintRef: null };
+  const { sketch, attempts, strippedIds } = await transcribeAttempt(
+    image,
+    TRANSCRIBE_SYSTEM,
+    user,
+    opts,
+  );
+  return { sketch, markup: printSketchMarkup(sketch), attempts, strippedIds };
+}
+
+// ---------------------------------------------------------------- fragment --
+
+const TRANSCRIBE_FRAGMENT_SYSTEM = `你是界面拓印师。用户粘贴一张**局部模块**的截图(一张卡片、一条列表项、一个表单块、一组按钮等),你把它转写成一个可放置的模块 —— 忠实转写你看到的结构与文字,不做再设计。
+
+${DIALECT_RULES}
+
+模块约定:根 <Stack> 就是这个模块自身的容器(它的布局属性=模块布局)。不要页面级外壳:不要 h="fill",不要居中壳,不要页面背景;截图里模块之外的环境一概不转写。
+
+拓印要求:
+- 忠实优先:布局层级和可见文字照实转写;文字逐字保留,不翻译、不改写、不发明。
+- 视觉分组转写为嵌套 Stack;并排元素用 dir="row";间距和尺寸选最接近的档位。
+- 方言表达不了的元素(图表、视频、地图、复杂控件):用 <Image> 占位,alt 如实描述;不要硬造方言里不存在的元素。
+- 配色用最接近的 token 近似:主色实心块→primary,浅色卡片→raised,警示→danger。`;
+
+export interface FragmentResult {
+  /** The placeable subtree: the transcription's root Stack, unwrapped to
+   *  its single child when it holds exactly one (no wrapper noise around a
+   *  lone Button). */
+  node: SketchNode;
+  /** Human-readable handle for the staged card and the drag ghost. */
+  label: string;
+  attempts: number;
+  strippedIds: number;
+}
+
+export function fragmentSubtree(sketch: Sketch): SketchNode {
+  return sketch.root.children.length === 1 ? sketch.root.children[0] : sketch.root;
+}
+
+/** First visible text in document order (heading before body by position),
+ *  falling back to the node's kind. */
+export function fragmentLabel(node: SketchNode): string {
+  const firstText = (n: SketchNode): string | null => {
+    if (n.kind === "text" && typeof n.content === "string" && n.content.trim()) {
+      return n.content.trim();
+    }
+    if (n.kind === "button" && n.label.trim()) return n.label.trim();
+    if (n.kind === "input" && n.label.trim()) return n.label.trim();
+    if (n.kind === "stack" || n.kind === "frame") {
+      for (const c of n.children) {
+        const hit = firstText(c);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  };
+  const text = firstText(node);
+  const name = text ? (text.length > 18 ? `${text.slice(0, 18)}…` : text) : node.kind;
+  return name;
+}
+
+/** Non-empty-canvas paste (裁决: fragment 进放置流程): transcribe the
+ *  screenshot as a MODULE — the staged palette item from the outside world. */
+export async function transcribeFragment(
+  image: PastedImage,
+  opts: { runAi: RunAiVision; title: string },
+): Promise<FragmentResult> {
+  const user = `这是要拓印的模块截图。请把它转写成一个模块(.sketch 文档,根 Stack 即模块容器)。`;
+  const { sketch, attempts, strippedIds } = await transcribeAttempt(
+    image,
+    TRANSCRIBE_FRAGMENT_SYSTEM,
+    user,
+    opts,
+  );
+  const node = fragmentSubtree(sketch);
+  return { node, label: fragmentLabel(node), attempts, strippedIds };
+}
+
+/** The staged card's SOLE upgrade action (裁决:「整页 → 新 tab」一步解决):
+ *  the same transcription product becomes a page document — zero extra AI
+ *  calls. A stack fragment roots the page directly; a lone primitive gets
+ *  a default page shell. */
+export function fragmentToPageSketch(node: SketchNode, title: string): Sketch {
+  const root: Container =
+    node.kind === "stack"
+      ? { ...node, pos: undefined }
+      : {
+          kind: "stack",
+          id: "~xpage",
+          layout: {
+            direction: "col",
+            gap: 4,
+            padding: { top: 4, right: 4, bottom: 4, left: 4 },
+            mainAxis: "start",
+            crossAxis: "stretch",
+          },
+          sizing: { width: { mode: "fill" }, height: { mode: "fill" } },
+          children: [node],
+        };
   return {
-    sketch: named,
-    markup: printSketchMarkup(named),
-    attempts: counter.attempts,
-    strippedIds: stripped,
+    id: "sk_pending",
+    name: title,
+    blueprintRef: null,
+    schemaVersion: SCHEMA_VERSION,
+    root,
   };
 }
 

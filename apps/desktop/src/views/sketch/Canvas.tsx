@@ -25,9 +25,13 @@ export function SketchCanvas() {
   const active = useSketchStore((s) => s.active);
   const selectNode = useSketchStore((s) => s.selectNode);
   const insertNodeAt = useSketchStore((s) => s.insertNodeAt);
+  const insertSubtreeAt = useSketchStore((s) => s.insertSubtreeAt);
   const moveNodeTo = useSketchStore((s) => s.moveNodeTo);
   const insertNodeBeside = useSketchStore((s) => s.insertNodeBeside);
+  const insertSubtreeBeside = useSketchStore((s) => s.insertSubtreeBeside);
   const moveNodeBeside = useSketchStore((s) => s.moveNodeBeside);
+  const setStagedFragment = useSketchStore((s) => s.setStagedFragment);
+  const setStagedDrag = useSketchStore((s) => s.setStagedDrag);
   const updateNode = useSketchStore((s) => s.updateNode);
   const wrapNodesInPanel = useSketchStore((s) => s.wrapNodesInPanel);
   const deleteNode = useSketchStore((s) => s.deleteNode);
@@ -195,20 +199,43 @@ export function SketchCanvas() {
 
       let s = sessionRef.current;
       if (!s) {
-        // A palette arm converts to a session on its OWN pointer's first
-        // move — consumed one-shot, so it can never go stale into a later
-        // gesture. Read the arm FRESH from the store: pointer events race
-        // React's effect re-registration, so a closure value here can lag
-        // reality by a frame. A move without buttons means the press ended
+        // An arm converts to a session on its OWN pointer's first move —
+        // consumed one-shot, so it can never go stale into a later gesture.
+        // Read arms FRESH from the store: pointer events race React's
+        // effect re-registration, so a closure value here can lag reality
+        // by a frame. A move without buttons means the press ended
         // somewhere we couldn't see (released off-window): discard the arm.
-        const arm = useSketchStore.getState().paletteDrag;
-        if (!arm || e.pointerId !== arm.pointerId) return;
-        if (e.buttons === 0) {
+        // Two chip-drag arms share this contract: palette (a kind) and the
+        // staged fragment card (a transcribed subtree — the fourth source).
+        const st = useSketchStore.getState();
+        const arm = st.paletteDrag;
+        const staged = st.stagedDrag;
+        if (arm && e.pointerId === arm.pointerId) {
+          if (e.buttons === 0) {
+            setPaletteDrag(null);
+            return;
+          }
+          s = beginSession(e.pointerId, { type: "palette", kind: arm.kind }, e.clientX, e.clientY);
           setPaletteDrag(null);
+        } else if (staged && e.pointerId === staged.pointerId && st.stagedFragment) {
+          if (e.buttons === 0) {
+            setStagedDrag(null);
+            return;
+          }
+          s = beginSession(
+            e.pointerId,
+            {
+              type: "staged-fragment",
+              node: st.stagedFragment.node,
+              label: st.stagedFragment.label,
+            },
+            e.clientX,
+            e.clientY,
+          );
+          setStagedDrag(null);
+        } else {
           return;
         }
-        s = beginSession(e.pointerId, { type: "palette", kind: arm.kind }, e.clientX, e.clientY);
-        setPaletteDrag(null);
       }
 
       let next = move(s, e.pointerId, e.clientX, e.clientY);
@@ -247,9 +274,10 @@ export function SketchCanvas() {
     };
 
     const onUp = (e: PointerEvent) => {
-      // Hygiene: any pointer release invalidates an unconsumed palette arm
+      // Hygiene: any pointer release invalidates an unconsumed arm
       // (fresh read — same race note as onMove).
       if (useSketchStore.getState().paletteDrag) setPaletteDrag(null);
+      if (useSketchStore.getState().stagedDrag) setStagedDrag(null);
 
       // Frame-move release: exactly-once commit (ref nulled first), ONE
       // updateNode = one undo unit. A sub-threshold release is the click
@@ -295,6 +323,10 @@ export function SketchCanvas() {
             : undefined;
         if (s.source.type === "palette") {
           insertNodeAt(plan.containerId, plan.index, s.source.kind, framePos);
+        } else if (s.source.type === "staged-fragment") {
+          // One placement = one undo; the staged item is consumed by it.
+          insertSubtreeAt(plan.containerId, plan.index, structuredClone(s.source.node), framePos);
+          setStagedFragment(null);
         } else if (s.source.type === "existing-node") {
           moveNodeTo(s.source.nodeId, plan.containerId, plan.index, framePos);
         }
@@ -303,9 +335,18 @@ export function SketchCanvas() {
         const wrapperId =
           s.source.type === "palette"
             ? insertNodeBeside(plan.targetNodeId, plan.side, plan.direction, s.source.kind, plan.spread)
-            : s.source.type === "existing-node"
-              ? moveNodeBeside(s.source.nodeId, plan.targetNodeId, plan.side, plan.direction, plan.spread)
-              : null; // marquee never reaches here (its plan kind returned above)
+            : s.source.type === "staged-fragment"
+              ? insertSubtreeBeside(
+                  plan.targetNodeId,
+                  plan.side,
+                  plan.direction,
+                  structuredClone(s.source.node),
+                  plan.spread,
+                )
+              : s.source.type === "existing-node"
+                ? moveNodeBeside(s.source.nodeId, plan.targetNodeId, plan.side, plan.direction, plan.spread)
+                : null; // marquee never reaches here (its plan kind returned above)
+        if (s.source.type === "staged-fragment") setStagedFragment(null);
         // Snuggle wraps get the one-click "spread apart" affordance (§7.1
         // amendment, option B): the alignment vocabulary is already in the
         // alphabet — this makes it discoverable at the moment it applies.
@@ -343,7 +384,7 @@ export function SketchCanvas() {
       // session state lives in refs. (The arm is deliberately NOT a dep:
       // handlers read it fresh, so arming never re-registers listeners.)
     };
-  }, [active, insertNodeAt, moveNodeTo, insertNodeBeside, moveNodeBeside, setPaletteDrag, updateNode]);
+  }, [active, insertNodeAt, insertSubtreeAt, moveNodeTo, insertNodeBeside, insertSubtreeBeside, moveNodeBeside, setPaletteDrag, setStagedDrag, setStagedFragment, updateNode]);
 
   if (!active) return null;
 
